@@ -1,0 +1,19 @@
+{
+  "name": "@ctem/events",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "tsc -b --clean"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.0.0",
+    "nats": "^2.29.0",
+    "zod": "^3.24.1",
+    "@ctem/contracts": "workspace:*",
+    "@ctem/config": "workspace:*",
+    "@ctem/observability": "workspace:*"
+  }
+}

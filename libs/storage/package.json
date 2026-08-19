@@ -1,0 +1,16 @@
+{
+  "name": "@ctem/storage",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "tsc -b --clean"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.0.0",
+    "@aws-sdk/client-s3": "^3.720.0",
+    "@ctem/config": "workspace:*"
+  }
+}

@@ -1,0 +1,68 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "libs/contracts"
+    },
+    {
+      "path": "libs/config"
+    },
+    {
+      "path": "libs/observability"
+    },
+    {
+      "path": "libs/events"
+    },
+    {
+      "path": "libs/db"
+    },
+    {
+      "path": "libs/auth"
+    },
+    {
+      "path": "libs/storage"
+    },
+    {
+      "path": "libs/service-kit"
+    },
+    {
+      "path": "libs/scanner-sdk"
+    },
+    {
+      "path": "apps/api-gateway"
+    },
+    {
+      "path": "apps/identity-service"
+    },
+    {
+      "path": "apps/asset-service"
+    },
+    {
+      "path": "apps/orchestrator-service"
+    },
+    {
+      "path": "apps/findings-service"
+    },
+    {
+      "path": "apps/risk-service"
+    },
+    {
+      "path": "apps/reporting-service"
+    },
+    {
+      "path": "apps/notification-service"
+    },
+    {
+      "path": "apps/scanner-sca"
+    },
+    {
+      "path": "apps/scanner-sast"
+    },
+    {
+      "path": "apps/scanner-container-iac"
+    },
+    {
+      "path": "apps/scanner-asm"
+    }
+  ]
+}

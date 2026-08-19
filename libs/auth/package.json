@@ -1,0 +1,20 @@
+{
+  "name": "@ctem/auth",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "tsc -b --clean"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/core": "^11.0.0",
+    "jose": "^5.9.6",
+    "zod": "^3.24.1",
+    "@ctem/config": "workspace:*",
+    "@ctem/contracts": "workspace:*",
+    "@ctem/observability": "workspace:*"
+  }
+}

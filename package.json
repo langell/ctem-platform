@@ -1,0 +1,50 @@
+{
+  "name": "ctem-platform",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -b tsconfig.build.json",
+    "build:clean": "tsc -b tsconfig.build.json --clean",
+    "typecheck": "tsc -b tsconfig.build.json --pretty",
+    "lint": "eslint .",
+    "format": "prettier --write \"**/*.{ts,json,md,yml,yaml}\"",
+    "test": "vitest run",
+    "dev:infra": "docker compose up -d",
+    "dev:infra:down": "docker compose down -v",
+    "db:generate": "prisma generate --schema libs/db/prisma/schema.prisma",
+    "db:migrate": "prisma migrate dev --schema libs/db/prisma/schema.prisma",
+    "db:deploy": "prisma migrate deploy --schema libs/db/prisma/schema.prisma",
+    "db:studio": "prisma studio --schema libs/db/prisma/schema.prisma",
+    "db:seed": "tsx libs/db/prisma/seed.ts",
+    "start:gateway": "node apps/api-gateway/dist/main.js",
+    "graph": "nx graph"
+  },
+  "devDependencies": {
+    "@nx/eslint": "^21.0.0",
+    "@nx/js": "^21.0.0",
+    "@types/node": "^22.10.0",
+    "@typescript-eslint/eslint-plugin": "^8.20.0",
+    "@typescript-eslint/parser": "^8.20.0",
+    "eslint": "^9.18.0",
+    "nx": "^21.0.0",
+    "prettier": "^3.4.0",
+    "prisma": "^6.3.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0",
+    "@eslint/js": "^9.18.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/client",
+      "@prisma/engines",
+      "prisma",
+      "esbuild",
+      "nx"
+    ]
+  }
+}

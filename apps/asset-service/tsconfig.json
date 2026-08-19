@@ -1,0 +1,38 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/.tsbuildinfo"
+  },
+  "include": [
+    "src/**/*.ts"
+  ],
+  "exclude": [
+    "src/**/*.spec.ts",
+    "src/**/*.test.ts"
+  ],
+  "references": [
+    {
+      "path": "../../libs/contracts"
+    },
+    {
+      "path": "../../libs/config"
+    },
+    {
+      "path": "../../libs/observability"
+    },
+    {
+      "path": "../../libs/auth"
+    },
+    {
+      "path": "../../libs/db"
+    },
+    {
+      "path": "../../libs/events"
+    },
+    {
+      "path": "../../libs/service-kit"
+    }
+  ]
+}

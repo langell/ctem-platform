@@ -1,0 +1,385 @@
+// CTEM platform data model.
+//
+// Tenancy rule: every table below (except Organization, User and the shared
+// vulnerability intelligence tables) carries orgId and is protected by Postgres
+// row-level security. See migrations/000_rls.sql — the app connects as a
+// non-superuser role, so a query that forgets its org filter returns nothing
+// rather than another tenant's data.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------- identity
+
+model Organization {
+  id            String   @id @default(uuid()) @db.Uuid
+  name          String
+  slug          String   @unique
+  plan          String   @default("trial")
+  dataResidency String   @default("us")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  memberships  Membership[]
+  assets       Asset[]
+  scans        Scan[]
+  findings     Finding[]
+  policies     Policy[]
+  exceptions   RiskException[]
+  integrations Integration[]
+  apiTokens    ApiToken[]
+  auditLogs    AuditLog[]
+
+  @@map("organizations")
+}
+
+model User {
+  id         String    @id @default(uuid()) @db.Uuid
+  email      String    @unique
+  name       String
+  idpSubject String    @unique
+  disabledAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  memberships Membership[]
+
+  @@map("users")
+}
+
+model Membership {
+  orgId     String   @db.Uuid
+  userId    String   @db.Uuid
+  role      String
+  createdAt DateTime @default(now())
+
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([orgId, userId])
+  @@index([userId])
+  @@map("memberships")
+}
+
+/// Machine credentials for CI pipelines and connectors. Only the hash is stored.
+model ApiToken {
+  id         String    @id @default(uuid()) @db.Uuid
+  orgId      String    @db.Uuid
+  name       String
+  tokenHash  String    @unique
+  scopes     String[]
+  lastUsedAt DateTime?
+  expiresAt  DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@map("api_tokens")
+}
+
+// ------------------------------------------------------------------ assets
+
+model Asset {
+  id          String    @id @default(uuid()) @db.Uuid
+  orgId       String    @db.Uuid
+  kind        String
+  externalKey String
+  name        String
+  source      String
+  exposure    String    @default("unknown")
+  criticality String    @default("unknown")
+  dataClasses String[]  @default([])
+  ownerTeam   String?
+  ownerEmail  String?
+  tags        Json      @default("{}")
+  attributes  Json      @default("{}")
+  firstSeenAt DateTime  @default(now())
+  lastSeenAt  DateTime  @default(now())
+  archivedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  org           Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  findings      Finding[]
+  scanJobs      ScanJob[]
+  outgoingEdges AssetEdge[]  @relation("edge_from")
+  incomingEdges AssetEdge[]  @relation("edge_to")
+  components    SbomComponent[]
+
+  @@unique([orgId, externalKey])
+  @@index([orgId, kind])
+  @@index([orgId, exposure, criticality])
+  @@map("assets")
+}
+
+/// Typed relationships between assets — the graph that makes reachability answerable.
+model AssetEdge {
+  id          String @id @default(uuid()) @db.Uuid
+  orgId       String @db.Uuid
+  fromAssetId String @db.Uuid
+  toAssetId   String @db.Uuid
+  kind        String
+  confidence  Float  @default(1)
+
+  from Asset @relation("edge_from", fields: [fromAssetId], references: [id], onDelete: Cascade)
+  to   Asset @relation("edge_to", fields: [toAssetId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, fromAssetId, toAssetId, kind])
+  @@index([orgId, toAssetId])
+  @@map("asset_edges")
+}
+
+/// Source connectors: SCM, cloud accounts, registries, ticketing.
+model Integration {
+  id            String    @id @default(uuid()) @db.Uuid
+  orgId         String    @db.Uuid
+  provider      String
+  displayName   String
+  config        Json      @default("{}")
+  /// Reference into the secret store — never the credential itself.
+  credentialRef String?
+  enabled       Boolean   @default(true)
+  lastSyncAt    DateTime?
+  lastSyncError String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, provider, displayName])
+  @@map("integrations")
+}
+
+// ------------------------------------------------------------------- scans
+
+model Scan {
+  id             String    @id @default(uuid()) @db.Uuid
+  orgId          String    @db.Uuid
+  scannerType    String
+  trigger        String
+  status         String    @default("queued")
+  requestedBy    String?   @db.Uuid
+  assetSelector  Json      @default("{}")
+  options        Json      @default("{}")
+  jobsTotal      Int       @default(0)
+  jobsCompleted  Int       @default(0)
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  jobs ScanJob[]
+
+  @@index([orgId, scannerType, createdAt])
+  @@map("scans")
+}
+
+model ScanJob {
+  id           String    @id @default(uuid()) @db.Uuid
+  orgId        String    @db.Uuid
+  scanId       String    @db.Uuid
+  assetId      String    @db.Uuid
+  scannerType  String
+  status       String    @default("queued")
+  attempt      Int       @default(1)
+  artifactKey  String?
+  findingCount Int       @default(0)
+  error        String?
+  stats        Json      @default("{}")
+  startedAt    DateTime?
+  finishedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  scan  Scan  @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, status])
+  @@index([scanId])
+  @@map("scan_jobs")
+}
+
+// ---------------------------------------------------------------- findings
+
+model Finding {
+  id           String    @id @default(uuid()) @db.Uuid
+  orgId        String    @db.Uuid
+  assetId      String    @db.Uuid
+  /// Dedup key across scans: hash(asset, scannerType, externalId, location).
+  fingerprint  String
+  scannerType  String
+  scannerName  String
+  title        String
+  description  String    @default("")
+  severity     String
+  riskScore    Float     @default(0)
+  state        String    @default("open")
+  validation   String    @default("not_validated")
+  identifiers  Json      @default("[]")
+  cvssScore    Float?
+  cvssVector   String?
+  epssScore    Float?
+  kev          Boolean   @default(false)
+  location     Json      @default("{}")
+  evidence     Json      @default("{}")
+  fixAvailable Boolean   @default(false)
+  fixedVersion String?
+  artifactKey  String?
+  slaDueAt     DateTime?
+  ticketRef    String?
+  firstSeenAt  DateTime  @default(now())
+  lastSeenAt   DateTime  @default(now())
+  resolvedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  org    Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  asset  Asset          @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  events FindingEvent[]
+
+  @@unique([orgId, fingerprint])
+  @@index([orgId, state, severity])
+  @@index([orgId, riskScore(sort: Desc)])
+  @@index([orgId, slaDueAt])
+  @@index([assetId])
+  @@map("findings")
+}
+
+/// Append-only triage history. Auditors ask "who accepted this risk and when".
+model FindingEvent {
+  id        String   @id @default(uuid()) @db.Uuid
+  orgId     String   @db.Uuid
+  findingId String   @db.Uuid
+  type      String
+  fromState String?
+  toState   String?
+  actor     String
+  reason    String?
+  metadata  Json     @default("{}")
+  createdAt DateTime @default(now())
+
+  finding Finding @relation(fields: [findingId], references: [id], onDelete: Cascade)
+
+  @@index([findingId, createdAt])
+  @@map("finding_events")
+}
+
+/// Resolved SBOM components per asset. Powers "who uses log4j" in one query.
+model SbomComponent {
+  id          String   @id @default(uuid()) @db.Uuid
+  orgId       String   @db.Uuid
+  assetId     String   @db.Uuid
+  purl        String
+  name        String
+  version     String
+  ecosystem   String
+  direct      Boolean  @default(false)
+  /// Path from the root manifest to this component, for transitive deps.
+  dependencyPath String[] @default([])
+  licenses    String[] @default([])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, assetId, purl])
+  @@index([orgId, name, version])
+  @@map("sbom_components")
+}
+
+// ------------------------------------------- shared vulnerability intelligence
+// Not tenant-scoped: one copy of the world's CVE data, read by every org.
+
+model Vulnerability {
+  id            String   @id
+  source        String
+  aliases       String[] @default([])
+  summary       String   @default("")
+  details       String   @default("")
+  severity      String   @default("unknown")
+  cvssVector    String?
+  cvssScore     Float?
+  epssScore     Float?
+  epssPercentile Float?
+  kev           Boolean  @default(false)
+  kevDueDate    DateTime?
+  publishedAt   DateTime?
+  modifiedAt    DateTime?
+  references    Json     @default("[]")
+  affected      Json     @default("[]")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([kev])
+  @@index([epssScore(sort: Desc)])
+  @@map("vulnerabilities")
+}
+
+// ------------------------------------------------------------------ policy
+
+model Policy {
+  id          String   @id @default(uuid()) @db.Uuid
+  orgId       String   @db.Uuid
+  name        String
+  description String   @default("")
+  enabled     Boolean  @default(true)
+  priority    Int      @default(100)
+  condition   Json
+  actions     String[]
+  slaHours    Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, name])
+  @@index([orgId, enabled, priority])
+  @@map("policies")
+}
+
+model RiskException {
+  id          String    @id @default(uuid()) @db.Uuid
+  orgId       String    @db.Uuid
+  scope       String
+  targetRef   String
+  reason      String
+  requestedBy String    @db.Uuid
+  approvedBy  String?   @db.Uuid
+  approvedAt  DateTime?
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, scope, targetRef])
+  @@index([orgId, expiresAt])
+  @@map("risk_exceptions")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  orgId      String   @db.Uuid
+  actor      String
+  action     String
+  resource   String
+  resourceId String?
+  metadata   Json     @default("{}")
+  ip         String?
+  createdAt  DateTime @default(now())
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, createdAt])
+  @@map("audit_logs")
+}

@@ -1,0 +1,17 @@
+{
+  "name": "@ctem/db",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "tsc -b --clean"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.0.0",
+    "@prisma/client": "^6.3.0",
+    "@ctem/config": "workspace:*",
+    "@ctem/observability": "workspace:*"
+  }
+}

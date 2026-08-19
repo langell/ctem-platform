@@ -1,0 +1,18 @@
+{
+  "name": "@ctem/observability",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "tsc -b --clean"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.0.0",
+    "pino": "^9.6.0",
+    "pino-http": "^10.4.0",
+    "@types/express": "^5.0.0",
+    "@ctem/config": "workspace:*"
+  }
+}

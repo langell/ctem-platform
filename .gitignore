@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.nx/
+*.tsbuildinfo
+.env
+.env.local
+coverage/
+.DS_Store
+libs/db/src/generated/
