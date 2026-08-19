@@ -33,8 +33,8 @@ test:
 db-migrate: ## Apply Prisma migrations, then the row-level security policies
 	pnpm db:generate
 	pnpm db:migrate
-	psql "$${DATABASE_URL:-postgresql://ctem:ctem@localhost:5432/ctem}" \
-	  -f libs/db/prisma/migrations/000_rls/migration.sql
+	docker compose exec -T postgres psql -U ctem -d ctem \
+	  -f /dev/stdin < libs/db/prisma/manual/000_rls.sql
 
 db-seed: ## Seed a demo org with assets, findings and policies
 	pnpm db:seed

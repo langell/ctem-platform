@@ -16,7 +16,7 @@
     "dev:infra": "docker compose up -d",
     "dev:infra:down": "docker compose down -v",
     "db:generate": "prisma generate --schema libs/db/prisma/schema.prisma",
-    "db:migrate": "prisma migrate dev --schema libs/db/prisma/schema.prisma",
+    "db:migrate": "prisma migrate dev --name init --schema libs/db/prisma/schema.prisma",
     "db:deploy": "prisma migrate deploy --schema libs/db/prisma/schema.prisma",
     "db:studio": "prisma studio --schema libs/db/prisma/schema.prisma",
     "db:seed": "tsx libs/db/prisma/seed.ts",

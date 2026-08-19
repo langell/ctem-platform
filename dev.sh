@@ -140,8 +140,9 @@ run_migrations() {
   pnpm db:migrate
 
   log "Applying row-level security policies..."
-  local db_url="${DATABASE_URL:-postgresql://ctem:ctem@localhost:5432/ctem}"
-  psql "$db_url" -f libs/db/prisma/migrations/000_rls/migration.sql
+  docker compose exec -T postgres psql \
+    -U ctem -d ctem \
+    -f /dev/stdin < libs/db/prisma/manual/000_rls.sql
 
   success "Database is ready"
 }

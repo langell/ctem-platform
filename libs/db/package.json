@@ -9,9 +9,9 @@
     "clean": "tsc -b --clean"
   },
   "dependencies": {
-    "@nestjs/common": "^11.0.0",
-    "@prisma/client": "^6.3.0",
     "@ctem/config": "workspace:*",
-    "@ctem/observability": "workspace:*"
+    "@ctem/observability": "workspace:*",
+    "@nestjs/common": "^11.0.0",
+    "@prisma/client": "6.19.3"
   }
 }
