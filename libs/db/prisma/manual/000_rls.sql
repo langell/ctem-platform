@@ -56,3 +56,20 @@ CREATE POLICY tenant_isolation ON organizations
 -- Vulnerability intelligence is shared reference data: readable by all, written
 -- only by the feed ingester running under the owner role.
 REVOKE INSERT, UPDATE, DELETE ON vulnerabilities FROM ctem_app;
+
+-- PAT verification has to find a token by hash before any org context exists,
+-- but api_tokens is policy-protected and fails closed. The lookup therefore
+-- goes through a SECURITY DEFINER function owned by the migration role, which
+-- exposes exactly one query shape (hash equality) to ctem_app and nothing else.
+-- NOTE: in environments where the migration role is not a superuser, it must
+-- be granted BYPASSRLS for this function to see across tenants.
+CREATE OR REPLACE FUNCTION verify_api_token(p_hash text)
+RETURNS SETOF api_tokens
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT * FROM api_tokens WHERE "tokenHash" = p_hash;
+$$;
+
+REVOKE ALL ON FUNCTION verify_api_token(text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION verify_api_token(text) TO ctem_app;

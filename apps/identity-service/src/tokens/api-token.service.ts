@@ -25,9 +25,20 @@ export class ApiTokenService {
   async verify(presented: string) {
     if (!presented.startsWith(PREFIX)) throw new UnauthorizedException('Malformed token');
 
-    const token = await this.prisma.unsafeCrossTenant('token lookup precedes tenant context', (db) =>
-      db.apiToken.findUnique({ where: { tokenHash: this.hash(presented) } }),
-    );
+    // The lookup happens before any org context exists, and RLS fails closed —
+    // a plain findUnique returns nothing under the ctem_app role. It goes
+    // through the SECURITY DEFINER function from 000_rls.sql instead.
+    const rows = await this.prisma.$queryRaw<
+      {
+        id: string;
+        orgId: string;
+        name: string;
+        scopes: string[];
+        revokedAt: Date | null;
+        expiresAt: Date | null;
+      }[]
+    >`SELECT * FROM verify_api_token(${this.hash(presented)})`;
+    const token = rows[0];
 
     if (!token || token.revokedAt) throw new UnauthorizedException('Invalid token');
     if (token.expiresAt && token.expiresAt < new Date()) throw new UnauthorizedException('Token expired');

@@ -13,15 +13,24 @@ import {
   encodePrincipal,
   permissionsForRole,
 } from '@ctem/auth';
-import { Principal, Role, type Permission } from '@ctem/contracts';
-import { currentTraceId, getContext } from '@ctem/observability';
+import { loadEnv } from '@ctem/config';
+import { Principal, Role, Permission } from '@ctem/contracts';
+import { currentTraceId, getContext, rootLogger } from '@ctem/observability';
+
+const PAT_PREFIX = 'ctem_pat_';
 
 /**
  * The only place a user-facing token is verified. Everything downstream trusts
  * the signed principal this guard produces.
+ *
+ * Two paths:
+ *   1. **JWT** — verified against the IdP's JWKS (human users).
+ *   2. **PAT** — forwarded to identity-service for SHA-256 lookup (CI/connectors).
  */
 @Injectable()
 export class GatewayAuthGuard implements CanActivate {
+  private readonly log = rootLogger.child({ component: 'gateway-auth' });
+
   constructor(
     private readonly reflector: Reflector,
     private readonly jwt: JwtVerifier,
@@ -39,31 +48,14 @@ export class GatewayAuthGuard implements CanActivate {
     if (!header?.startsWith('Bearer ')) throw new UnauthorizedException('Missing bearer token');
 
     const token = header.slice('Bearer '.length);
-    let claims;
-    try {
-      claims = await this.jwt.verify(token);
-    } catch {
-      // TODO: fall through to API-token verification against identity-service
-      // for CI/machine callers, which present `ctem_pat_...` instead of a JWT.
-      throw new UnauthorizedException('Invalid token');
+
+    let principal: Principal;
+
+    if (token.startsWith(PAT_PREFIX)) {
+      principal = await this.verifyPat(token);
+    } else {
+      principal = await this.verifyJwt(token, req);
     }
-
-    // A user can belong to several orgs; the active one comes from the token or
-    // an explicit header, and is always re-checked against membership.
-    const orgId = (req.headers['x-ctem-org'] as string) || claims.org_id;
-    if (!orgId) throw new ForbiddenException('No organization selected');
-
-    const role = Role.safeParse(claims.roles?.[0] ?? 'developer');
-    if (!role.success) throw new ForbiddenException('Unknown role');
-
-    const principal: Principal = {
-      userId: claims.sub,
-      orgId,
-      role: role.data,
-      permissions: permissionsForRole(role.data) as Permission[],
-      serviceAccount: null,
-      traceId: currentTraceId(),
-    };
 
     const required =
       this.reflector.getAllAndOverride<Permission[]>(PERMISSIONS_KEY, [
@@ -82,5 +74,89 @@ export class GatewayAuthGuard implements CanActivate {
       ctx.userId = principal.userId;
     }
     return true;
+  }
+
+  // ---------------------------------------------------------------------------
+  // JWT path (human users via OIDC)
+  // ---------------------------------------------------------------------------
+
+  private async verifyJwt(token: string, req: { headers: Record<string, string> }): Promise<Principal> {
+    let claims;
+    try {
+      claims = await this.jwt.verify(token);
+    } catch {
+      throw new UnauthorizedException('Invalid token');
+    }
+
+    // A user can belong to several orgs; the active one comes from the token or
+    // an explicit header, and is always re-checked against membership.
+    const orgId = (req.headers['x-ctem-org'] as string) || claims.org_id;
+    if (!orgId) throw new ForbiddenException('No organization selected');
+
+    const role = Role.safeParse(claims.roles?.[0] ?? 'developer');
+    if (!role.success) throw new ForbiddenException('Unknown role');
+
+    return {
+      userId: claims.sub,
+      orgId,
+      role: role.data,
+      permissions: permissionsForRole(role.data) as Permission[],
+      serviceAccount: null,
+      traceId: currentTraceId(),
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // PAT path (CI / connectors / machine callers)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * PATs are verified by the identity-service, which stores only the SHA-256
+   * hash. The response gives us (orgId, scopes, name). We map scopes to the
+   * closest role's permission set, and mark the principal as a service account.
+   */
+  private async verifyPat(token: string): Promise<Principal> {
+    const env = loadEnv();
+    const url = `${env.IDENTITY_SERVICE_URL}/internal/tokens/verify`;
+
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ token }),
+        signal: AbortSignal.timeout(5_000),
+      });
+    } catch (err) {
+      this.log.error({ err }, 'identity-service unreachable for PAT verification');
+      throw new UnauthorizedException('Token verification failed');
+    }
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new UnauthorizedException((body as { message?: string }).message ?? 'Invalid token');
+    }
+
+    const verified = (await res.json()) as {
+      orgId: string;
+      tokenId: string;
+      scopes: string[];
+      name: string;
+    };
+
+    // Map token scopes directly to permissions. Scopes are issued using the
+    // same Permission enum values (e.g. "scan:run", "finding:read").
+    const permissions = verified.scopes.filter((s): s is Permission =>
+      Permission.options.includes(s as Permission),
+    );
+
+    return {
+      userId: verified.tokenId,
+      orgId: verified.orgId,
+      role: 'developer', // PATs have no concept of role; permissions are explicit.
+      permissions,
+      serviceAccount: verified.name,
+      traceId: currentTraceId(),
+    };
   }
 }
