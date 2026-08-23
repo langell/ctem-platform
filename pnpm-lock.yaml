@@ -12,6 +12,9 @@ importers:
         specifier: 6.19.3
         version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
     devDependencies:
+      '@ctem/testing':
+        specifier: workspace:*
+        version: link:libs/testing
       '@eslint/js':
         specifier: ^9.18.0
         version: 9.39.5
@@ -99,6 +102,13 @@ importers:
       zod:
         specifier: ^3.24.1
         version: 3.25.76
+    devDependencies:
+      '@ctem/testing':
+        specifier: workspace:*
+        version: link:../../libs/testing
+      '@nestjs/testing':
+        specifier: ^11.0.0
+        version: 11.2.1(@nestjs/common@11.2.1(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.2.1)(@nestjs/platform-express@11.2.1)
 
   apps/asset-service:
     dependencies:
@@ -261,6 +271,10 @@ importers:
       zod:
         specifier: ^3.24.1
         version: 3.25.76
+    devDependencies:
+      '@ctem/testing':
+        specifier: workspace:*
+        version: link:../../libs/testing
 
   apps/notification-service:
     dependencies:
@@ -852,6 +866,21 @@ importers:
       '@nestjs/common':
         specifier: ^11.0.0
         version: 11.2.1(reflect-metadata@0.2.2)(rxjs@7.8.2)
+
+  libs/testing:
+    dependencies:
+      '@ctem/config':
+        specifier: workspace:*
+        version: link:../config
+      '@ctem/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@ctem/db':
+        specifier: workspace:*
+        version: link:../db
+      jose:
+        specifier: ^5.9.6
+        version: 5.10.0
 
 packages:
 
@@ -1853,6 +1882,19 @@ packages:
       sequelize:
         optional: true
       typeorm:
+        optional: true
+
+  '@nestjs/testing@11.2.1':
+    resolution: {integrity: sha512-3mdABjqFafW+ix6fGJMPHvnj/9Or6kAPiszN8zt9bHGPuHYdkkp+9zsBDDUVuP59BcbzBqNBa5fXHBaeMzVvog==}
+    peerDependencies:
+      '@nestjs/common': ^11.0.0
+      '@nestjs/core': ^11.0.0
+      '@nestjs/microservices': ^11.0.0
+      '@nestjs/platform-express': ^11.0.0
+    peerDependenciesMeta:
+      '@nestjs/microservices':
+        optional: true
+      '@nestjs/platform-express':
         optional: true
 
   '@nx/devkit@21.6.11':
@@ -5082,6 +5124,14 @@ snapshots:
       rxjs: 7.8.2
     optionalDependencies:
       '@prisma/client': 7.9.1(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
+
+  '@nestjs/testing@11.2.1(@nestjs/common@11.2.1(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.2.1)(@nestjs/platform-express@11.2.1)':
+    dependencies:
+      '@nestjs/common': 11.2.1(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      '@nestjs/core': 11.2.1(@nestjs/common@11.2.1(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/platform-express@11.2.1)(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      tslib: 2.8.1
+    optionalDependencies:
+      '@nestjs/platform-express': 11.2.1(@nestjs/common@11.2.1(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.2.1)
 
   '@nx/devkit@21.6.11(nx@21.6.11)':
     dependencies:

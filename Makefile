@@ -1,4 +1,4 @@
-.PHONY: help setup infra infra-down build typecheck lint test db-migrate db-seed dev clean
+.PHONY: help setup infra infra-down build typecheck lint test test-int e2e db-migrate db-seed dev clean
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -27,8 +27,14 @@ typecheck: ## Type-check without emitting
 lint:
 	pnpm lint
 
-test:
+test: ## Unit tier: pure logic, no infra, seconds
 	pnpm test
+
+test-int: ## Integration tier: real Postgres/RLS, real crypto (needs `make infra` + db-migrate)
+	pnpm test:int
+
+e2e: ## Smoke the golden path against a running stack (needs `make dev` in another terminal)
+	pnpm e2e
 
 db-migrate: ## Apply Prisma migrations, then the row-level security policies
 	pnpm db:generate
@@ -39,8 +45,12 @@ db-migrate: ## Apply Prisma migrations, then the row-level security policies
 db-seed: ## Seed a demo org with assets, findings and policies
 	pnpm db:seed
 
-dev: ## Run every service with file watching (needs infra up)
-	pnpm nx run-many -t dev --parallel=12
+dev: ## Build once, then run every service from dist with rebuild-and-restart watch (needs infra up)
+	pnpm build
+	pnpm exec tsc -b tsconfig.build.json --watch --preserveWatchOutput & \
+	  TSC_PID=$$!; \
+	  pnpm nx run-many -t dev --parallel=12; \
+	  kill $$TSC_PID 2>/dev/null
 
 clean:
 	pnpm build:clean

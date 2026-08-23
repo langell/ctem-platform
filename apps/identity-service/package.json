@@ -7,7 +7,7 @@
     "build": "tsc -b",
     "clean": "tsc -b --clean",
     "start": "node dist/main.js",
-    "dev": "tsx watch src/main.ts"
+    "dev": "node --enable-source-maps --watch dist/main.js"
   },
   "ctem": {
     "port": 3001
@@ -30,5 +30,8 @@
     "@ctem/events": "workspace:*",
     "@ctem/service-kit": "workspace:*",
     "@prisma/client": "^6.3.0"
+  },
+  "devDependencies": {
+    "@ctem/testing": "workspace:*"
   }
 }

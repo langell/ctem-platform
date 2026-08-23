@@ -21,7 +21,9 @@
     "db:studio": "prisma studio --schema libs/db/prisma/schema.prisma",
     "db:seed": "tsx libs/db/prisma/seed.ts",
     "start:gateway": "node apps/api-gateway/dist/main.js",
-    "graph": "nx graph"
+    "graph": "nx graph",
+    "test:int": "vitest run --config vitest.int.config.ts",
+    "e2e": "tsx tools/e2e/smoke.ts"
   },
   "devDependencies": {
     "@eslint/js": "^9.18.0",
@@ -36,7 +38,8 @@
     "prisma": "^6.3.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
-    "vitest": "^3.0.0"
+    "vitest": "^3.0.0",
+    "@ctem/testing": "workspace:*"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

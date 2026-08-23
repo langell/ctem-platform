@@ -1,0 +1,17 @@
+{
+  "name": "@ctem/testing",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "tsc -b --clean"
+  },
+  "dependencies": {
+    "jose": "^5.9.6",
+    "@ctem/config": "workspace:*",
+    "@ctem/contracts": "workspace:*",
+    "@ctem/db": "workspace:*"
+  }
+}

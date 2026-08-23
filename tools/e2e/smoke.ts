@@ -1,0 +1,232 @@
+/**
+ * End-to-end smoke test for the golden path, run against a live stack:
+ *
+ *   make infra && make db-migrate && make dev     # in one terminal
+ *   make e2e                                      # in another
+ *
+ * It provisions two throwaway orgs with machine tokens, then walks the real
+ * surface: gateway auth (PAT), proxying, asset registration, tenant isolation
+ * across orgs, scan dispatch and the findings/negative paths. Cleans up after
+ * itself and exits non-zero if any step fails.
+ */
+/* eslint-disable no-console -- console output is this script's user interface */
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { ROLE_PERMISSIONS } from '../../libs/contracts/src/index';
+import { encodePrincipal } from '../../libs/auth/src/principal';
+import {
+  createOrg,
+  deleteOrgCascade,
+  ownerClient,
+  uniqueSlug,
+} from '../../libs/testing/src/index';
+
+// ---------------------------------------------------------------- bootstrap
+
+// Load .env the same way the services see it, without overriding the shell.
+try {
+  for (const line of readFileSync(resolve(__dirname, '../../.env'), 'utf8').split('\n')) {
+    const m = line.match(/^([A-Z0-9_]+)=(.*)$/);
+    if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2];
+  }
+} catch {
+  /* no .env — defaults below match .env.example */
+}
+
+const GATEWAY = process.env.SMOKE_GATEWAY_URL ?? 'http://localhost:3000';
+const IDENTITY = process.env.IDENTITY_SERVICE_URL ?? 'http://localhost:3001';
+
+let failures = 0;
+async function step(name: string, fn: () => Promise<string | void>): Promise<void> {
+  try {
+    const detail = await fn();
+    console.log(`  ✓ ${name}${detail ? ` — ${detail}` : ''}`);
+  } catch (err) {
+    failures += 1;
+    console.error(`  ✗ ${name}\n      ${(err as Error).message}`);
+  }
+}
+
+function expect(cond: boolean, message: string): void {
+  if (!cond) throw new Error(message);
+}
+
+/** The smoke runner acts as the service mesh when talking to internal APIs. */
+function principalHeaders(orgId: string): Record<string, string> {
+  const encoded = encodePrincipal({
+    userId: 'smoke-runner',
+    orgId,
+    role: 'owner',
+    permissions: ROLE_PERMISSIONS.owner,
+    serviceAccount: 'smoke-runner',
+    traceId: 'smoke',
+  });
+  return {
+    'x-ctem-principal': encoded.value,
+    'x-ctem-principal-signature': encoded.signature,
+    'content-type': 'application/json',
+  };
+}
+
+async function api(
+  base: string,
+  method: string,
+  path: string,
+  opts: { token?: string; headers?: Record<string, string>; body?: unknown } = {},
+): Promise<{ status: number; json: Record<string, unknown> | null }> {
+  const res = await fetch(`${base}${path}`, {
+    method,
+    headers: {
+      ...(opts.token ? { authorization: `Bearer ${opts.token}` } : {}),
+      ...(opts.body ? { 'content-type': 'application/json' } : {}),
+      ...opts.headers,
+    },
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+    signal: AbortSignal.timeout(10_000),
+  });
+  const json = await res.json().catch(() => null);
+  return { status: res.status, json };
+}
+
+// ------------------------------------------------------------------- steps
+
+async function main(): Promise<void> {
+  console.log(`smoke: gateway=${GATEWAY} identity=${IDENTITY}\n`);
+
+  const db = ownerClient();
+  const orgA = await createOrg(db, { slug: uniqueSlug('smoke-a') });
+  const orgB = await createOrg(db, { slug: uniqueSlug('smoke-b') });
+  let patA = '';
+  let patB = '';
+  const assetName = uniqueSlug('smoke-asset');
+
+  try {
+    const alive = async (base: string) => {
+      const res = await fetch(`${base}/health/live`, { signal: AbortSignal.timeout(3000) }).catch(
+        () => null,
+      );
+      expect(res !== null && res.ok, `${base} is not responding — is \`make dev\` running?`);
+    };
+    await step('gateway is up', () => alive(GATEWAY));
+    await step('identity-service is up', () => alive(IDENTITY));
+
+    if (failures) return; // nothing else can work
+
+    await step('issue machine tokens (identity API, signed principal)', async () => {
+      const a = await api(IDENTITY, 'POST', '/internal/tokens', {
+        headers: principalHeaders(orgA.id),
+        body: {
+          name: 'smoke-a',
+          scopes: ['asset:read', 'asset:write', 'scan:read', 'scan:run', 'finding:read'],
+        },
+      });
+      expect(a.status < 300 && a.json?.token, `org A token: HTTP ${a.status}`);
+      patA = a.json.token;
+
+      const b = await api(IDENTITY, 'POST', '/internal/tokens', {
+        headers: principalHeaders(orgB.id),
+        body: { name: 'smoke-b', scopes: ['asset:read'] },
+      });
+      expect(b.status < 300 && b.json?.token, `org B token: HTTP ${b.status}`);
+      patB = b.json.token;
+    });
+
+    await step('gateway rejects a missing token', async () => {
+      const res = await api(GATEWAY, 'GET', '/v1/assets');
+      expect(res.status === 401, `expected 401, got ${res.status}`);
+    });
+
+    await step('gateway rejects a bogus PAT', async () => {
+      const res = await api(GATEWAY, 'GET', '/v1/assets', { token: 'ctem_pat_bogus' });
+      expect(res.status === 401, `expected 401, got ${res.status}`);
+    });
+
+    await step('register an asset through the gateway (PAT auth, proxy, RLS write)', async () => {
+      const res = await api(GATEWAY, 'POST', '/v1/assets', {
+        token: patA,
+        body: {
+          kind: 'repository',
+          externalKey: `github:smoke/${assetName}`,
+          name: assetName,
+          source: 'github',
+          exposure: 'internet_facing',
+          criticality: 'tier1',
+        },
+      });
+      expect(res.status < 300, `expected 2xx, got ${res.status}: ${JSON.stringify(res.json)}`);
+    });
+
+    await step('org A sees its asset', async () => {
+      const res = await api(GATEWAY, 'GET', '/v1/assets', { token: patA });
+      expect(res.status === 200, `expected 200, got ${res.status}`);
+      const items = res.json?.items ?? res.json ?? [];
+      expect(
+        items.some((a: { name: string }) => a.name === assetName),
+        'created asset missing from org A listing',
+      );
+    });
+
+    await step('org B cannot see org A data (tenant isolation, full stack)', async () => {
+      const res = await api(GATEWAY, 'GET', '/v1/assets', { token: patB });
+      expect(res.status === 200, `expected 200, got ${res.status}`);
+      const items = res.json?.items ?? res.json ?? [];
+      expect(
+        !items.some((a: { name: string }) => a.name === assetName),
+        `org A's asset leaked into org B's listing`,
+      );
+    });
+
+    await step('a PAT without the permission is denied (403)', async () => {
+      const res = await api(GATEWAY, 'POST', '/v1/assets', {
+        token: patB,
+        body: {
+          kind: 'repository',
+          externalKey: 'github:smoke/denied',
+          name: 'denied',
+          source: 'github',
+        },
+      });
+      expect(res.status === 403, `expected 403, got ${res.status}`);
+    });
+
+    await step('dispatch a scan and read it back', async () => {
+      const created = await api(GATEWAY, 'POST', '/v1/scans', {
+        token: patA,
+        body: { scannerType: 'sca', assetSelector: {}, options: {} },
+      });
+      expect(
+        created.status < 300 && created.json?.id,
+        `expected 2xx with id, got ${created.status}: ${JSON.stringify(created.json)}`,
+      );
+
+      const id = created.json.id;
+      let status = created.json.status ?? 'unknown';
+      for (let i = 0; i < 15 && ['queued', 'pending', 'unknown'].includes(status); i++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        const read = await api(GATEWAY, 'GET', `/v1/scans/${id}`, { token: patA });
+        expect(read.status === 200, `GET /v1/scans/${id} returned ${read.status}`);
+        status = read.json?.status ?? status;
+      }
+      return `scan ${id} status=${status} (scanner workers are stubs; any retrievable status passes)`;
+    });
+
+    await step('findings endpoint responds for the org', async () => {
+      const res = await api(GATEWAY, 'GET', '/v1/findings', { token: patA });
+      expect(res.status === 200, `expected 200, got ${res.status}`);
+    });
+  } finally {
+    await deleteOrgCascade(db, orgA.id).catch(() => undefined);
+    await deleteOrgCascade(db, orgB.id).catch(() => undefined);
+    await db.$disconnect();
+  }
+}
+
+main()
+  .then(() => {
+    console.log(failures ? `\nsmoke: ${failures} step(s) FAILED` : '\nsmoke: all steps passed');
+    process.exit(failures ? 1 : 0);
+  })
+  .catch((err) => {
+    console.error('\nsmoke: aborted —', err);
+    process.exit(1);
+  });

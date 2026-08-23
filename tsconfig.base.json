@@ -30,7 +30,8 @@
       "@ctem/auth": ["libs/auth/src/index.ts"],
       "@ctem/storage": ["libs/storage/src/index.ts"],
       "@ctem/scanner-sdk": ["libs/scanner-sdk/src/index.ts"],
-      "@ctem/service-kit": ["libs/service-kit/src/index.ts"]
+      "@ctem/service-kit": ["libs/service-kit/src/index.ts"],
+      "@ctem/testing": ["libs/testing/src/index.ts"]
     }
   },
   "exclude": ["node_modules", "**/dist"]

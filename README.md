@@ -25,6 +25,17 @@ make dev        # run every service with watch mode
 
 Gateway on `http://localhost:3000`, OpenAPI at `/docs`.
 
+## Testing
+
+```bash
+make test       # unit tier: pure logic, seconds, no infra
+make test-int   # integration tier: real Postgres + RLS (needs infra)
+make e2e        # smoke the golden path against a running `make dev` stack
+```
+
+The tiers, conventions and definition-of-done live in [docs/testing.md](docs/testing.md).
+Shared fixtures (factories, a test OIDC issuer, RLS-aware db clients) are in `@ctem/testing`.
+
 ## Services
 
 **Control plane**
