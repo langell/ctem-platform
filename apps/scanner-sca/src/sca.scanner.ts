@@ -46,9 +46,19 @@ export class ScaScanner extends BaseScanner {
     ctx.log(`resolved ${components.length} components`);
 
     const findings: RawFinding[] = [];
+    const observed = new Map<string, { ecosystem: string; name: string }>();
+    let mirroredCount = 0;
     for (const component of components) {
       if (!ctx.checkDeadline()) throw new Error('Job deadline exceeded');
-      const matches = await this.matcher.match(component);
+      const { matches, mirrored } = await this.matcher.match(component);
+      if (mirrored) {
+        mirroredCount += 1;
+      } else if (component.ecosystem !== 'unknown') {
+        observed.set(`${component.ecosystem}:${component.name}`, {
+          ecosystem: component.ecosystem,
+          name: component.name,
+        });
+      }
       for (const vuln of matches) {
         findings.push({
           externalId: vuln.id,
@@ -94,7 +104,9 @@ export class ScaScanner extends BaseScanner {
         components: components.length,
         direct: components.filter((c) => c.direct).length,
         findings: findings.length,
+        mirroredComponents: mirroredCount,
       },
+      vulnPackagesObserved: [...observed.values()],
     };
   }
 

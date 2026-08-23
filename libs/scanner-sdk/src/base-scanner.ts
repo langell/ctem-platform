@@ -14,6 +14,12 @@ export interface ScanOutcome {
   /** Raw tool output persisted to object storage as evidence. */
   rawOutput?: unknown;
   stats?: Record<string, number>;
+  /**
+   * Packages this run had to match against a live feed because the local
+   * vulnerability mirror had nothing fresh. The worker reports them so the
+   * feed ingester can mirror them for next time.
+   */
+  vulnPackagesObserved?: Array<{ ecosystem: string; name: string }>;
 }
 
 /**

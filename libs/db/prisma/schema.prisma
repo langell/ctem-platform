@@ -320,9 +320,39 @@ model Vulnerability {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
+  affects VulnerabilityAffects[]
+
   @@index([kev])
   @@index([epssScore(sort: Desc)])
   @@map("vulnerabilities")
+}
+
+// Package → advisory index derived from Vulnerability.affected, so scanners can
+// answer "which advisories touch package X" with an indexed query instead of a
+// JSON scan. Shared reference data like vulnerabilities: ctem_app reads only.
+model VulnerabilityAffects {
+  id          String @id @default(uuid()) @db.Uuid
+  vulnId      String
+  ecosystem   String
+  packageName String
+
+  vulnerability Vulnerability @relation(fields: [vulnId], references: [id], onDelete: Cascade)
+
+  @@unique([vulnId, ecosystem, packageName])
+  @@index([ecosystem, packageName])
+  @@map("vulnerability_affects")
+}
+
+// Mirror freshness per package: a fresh row means the local mirror is
+// authoritative for that package and scanners skip the live OSV query.
+model VulnPackageSync {
+  ecosystem   String
+  packageName String
+  syncedAt    DateTime
+  advisories  Int      @default(0)
+
+  @@id([ecosystem, packageName])
+  @@map("vuln_package_sync")
 }
 
 // ------------------------------------------------------------------ policy

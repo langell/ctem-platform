@@ -650,6 +650,9 @@ importers:
       '@ctem/contracts':
         specifier: workspace:*
         version: link:../../libs/contracts
+      '@ctem/db':
+        specifier: workspace:*
+        version: link:../../libs/db
       '@ctem/events':
         specifier: workspace:*
         version: link:../../libs/events

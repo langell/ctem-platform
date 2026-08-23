@@ -30,6 +30,9 @@
     },
     {
       "path": "../../libs/scanner-sdk"
+    },
+    {
+      "path": "../../libs/db"
     }
   ]
 }

@@ -11,6 +11,9 @@ import { RiskScoringService } from './risk/risk-scoring.service';
 import { PolicyEngineService } from './policy/policy-engine.service';
 import { RiskConsumer } from './risk/risk.consumer';
 import { SlaMonitorService } from './policy/sla-monitor.service';
+import { FeedStore } from './feed/feed.store';
+import { VulnFeedService } from './feed/vuln-feed.service';
+import { FeedConsumer } from './feed/feed.consumer';
 
 @Module({
   imports: [CtemConfigModule, ObservabilityModule, AuthModule, EventsModule, DbModule],
@@ -20,6 +23,9 @@ import { SlaMonitorService } from './policy/sla-monitor.service';
     PolicyEngineService,
     RiskConsumer,
     SlaMonitorService,
+    FeedStore,
+    VulnFeedService,
+    FeedConsumer,
     { provide: APP_GUARD, useClass: InternalAuthGuard },
   ],
 })
