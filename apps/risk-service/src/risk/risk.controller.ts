@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { CurrentOrg, RequirePermissions } from '@ctem/auth';
+import { CreatePolicyRequest } from '@ctem/contracts';
 import { PrismaService } from '@ctem/db';
 import { RiskScoringService } from './risk-scoring.service';
 import { PolicyEngineService } from '../policy/policy-engine.service';
@@ -35,8 +36,8 @@ export class RiskController {
 
   @Post('policies')
   @RequirePermissions('policy:write')
-  createPolicy(@CurrentOrg() orgId: string, @Body() body: Record<string, unknown>) {
-    // TODO: validate with the Policy contract once the create DTO settles.
-    return this.prisma.withOrg(orgId, (tx) => tx.policy.create({ data: { ...body, orgId } }));
+  createPolicy(@CurrentOrg() orgId: string, @Body() body: unknown) {
+    const policy = CreatePolicyRequest.parse(body);
+    return this.prisma.withOrg(orgId, (tx) => tx.policy.create({ data: { ...policy, orgId } }));
   }
 }

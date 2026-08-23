@@ -7,7 +7,7 @@
     "build": "tsc -b",
     "clean": "tsc -b --clean",
     "start": "node dist/main.js",
-    "dev": "tsx watch src/main.ts"
+    "dev": "node --enable-source-maps --watch dist/main.js"
   },
   "ctem": {
     "port": 3100

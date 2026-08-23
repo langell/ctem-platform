@@ -35,7 +35,9 @@ export async function bootstrapService(
     SwaggerModule.setup('docs', app, SwaggerModule.createDocument(app, config));
   }
 
-  const port = env.PORT || options.port;
+  // env.PORT has a schema default of 3000, so it can only win when the
+  // variable is actually set — otherwise every service would bind the same port.
+  const port = process.env.PORT ? env.PORT : options.port;
   await app.listen(port, '0.0.0.0');
   log.info({ port }, `${options.serviceName} listening`);
   return app;

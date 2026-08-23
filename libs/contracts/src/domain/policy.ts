@@ -38,6 +38,14 @@ export const Policy = z
   .merge(AuditMeta);
 export type Policy = z.infer<typeof Policy>;
 
+export const CreatePolicyRequest = Policy.omit({
+  id: true,
+  orgId: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type CreatePolicyRequest = z.infer<typeof CreatePolicyRequest>;
+
 export const ExceptionScope = z.enum(['finding', 'asset', 'vulnerability', 'global']);
 
 export const RiskException = z

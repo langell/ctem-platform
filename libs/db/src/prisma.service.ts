@@ -1,5 +1,5 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from './generated/client';
 import { loadEnv } from '@ctem/config';
 import { getContext, rootLogger } from '@ctem/observability';
 

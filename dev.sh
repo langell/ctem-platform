@@ -213,13 +213,20 @@ main() {
   run_seed
   print_services
 
-  log "Starting all services with file watching..."
+  log "Building workspace (services run from dist)..."
+  pnpm build
+
+  log "Starting all services with rebuild-and-restart watching..."
   dim "  (Ctrl+C to stop)"
   echo ""
+
+  pnpm exec tsc -b tsconfig.build.json --watch --preserveWatchOutput &
+  TSC_PID=$!
 
   pnpm nx run-many -t dev --parallel=12 &
   NX_PID=$!
 
+  trap 'kill "$TSC_PID" "$NX_PID" 2>/dev/null' EXIT
   wait "$NX_PID"
 }
 

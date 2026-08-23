@@ -55,8 +55,9 @@ export const Asset = z
     exposure: ExposureClass.default('unknown'),
     criticality: BusinessCriticality.default('unknown'),
     dataClasses: z.array(DataClassification).default([]),
-    ownerTeam: z.string().optional(),
-    ownerEmail: z.string().email().optional(),
+    // Nullable, not optional: the columns are `String?` and Prisma returns null.
+    ownerTeam: z.string().nullable().default(null),
+    ownerEmail: z.string().email().nullable().default(null),
     tags: z.record(z.string()).default({}),
     /** Raw connector payload, kept verbatim for re-normalization without a re-scan. */
     attributes: z.record(z.unknown()).default({}),
