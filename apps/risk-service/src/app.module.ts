@@ -14,6 +14,7 @@ import { SlaMonitorService } from './policy/sla-monitor.service';
 import { FeedStore } from './feed/feed.store';
 import { VulnFeedService } from './feed/vuln-feed.service';
 import { FeedConsumer } from './feed/feed.consumer';
+import { EnrichmentService } from './feed/enrichment.service';
 
 @Module({
   imports: [CtemConfigModule, ObservabilityModule, AuthModule, EventsModule, DbModule],
@@ -26,6 +27,7 @@ import { FeedConsumer } from './feed/feed.consumer';
     FeedStore,
     VulnFeedService,
     FeedConsumer,
+    EnrichmentService,
     { provide: APP_GUARD, useClass: InternalAuthGuard },
   ],
 })

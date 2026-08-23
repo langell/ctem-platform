@@ -5,6 +5,7 @@ import { CreatePolicyRequest } from '@ctem/contracts';
 import { PrismaService } from '@ctem/db';
 import { RiskScoringService } from './risk-scoring.service';
 import { PolicyEngineService } from '../policy/policy-engine.service';
+import { EnrichmentService } from '../feed/enrichment.service';
 
 @ApiTags('risk')
 @Controller('internal/risk')
@@ -13,6 +14,7 @@ export class RiskController {
     private readonly scoring: RiskScoringService,
     private readonly policy: PolicyEngineService,
     private readonly prisma: PrismaService,
+    private readonly enrichment: EnrichmentService,
   ) {}
 
   /** The "show your work" endpoint behind every risk score in the UI. */
@@ -32,6 +34,16 @@ export class RiskController {
   @RequirePermissions('policy:read')
   listPolicies(@CurrentOrg() orgId: string) {
     return this.prisma.withOrg(orgId, (tx) => tx.policy.findMany({ orderBy: { priority: 'asc' } }));
+  }
+
+  /**
+   * Ops trigger for the threat-intel refresh that otherwise runs on a timer.
+   * Platform-wide by nature; gated on the most admin-ish permission we have.
+   */
+  @Post('feed/refresh')
+  @RequirePermissions('integration:manage')
+  refreshFeed() {
+    return this.enrichment.refresh();
   }
 
   @Post('policies')
