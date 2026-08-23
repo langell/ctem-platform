@@ -11,10 +11,15 @@ import { loadEnv } from '@ctem/config';
 export class ArtifactStore {
   private readonly client: S3Client;
   private readonly bucket: string;
+  private readonly sse: 'AES256' | 'aws:kms' | undefined;
 
   constructor() {
     const env = loadEnv();
     this.bucket = env.S3_BUCKET;
+    // Scanner output routinely contains source snippets — production must never
+    // leave it unencrypted. Dev MinIO has no KMS, so SSE stays off unless asked.
+    const sse = env.S3_SSE ?? (env.NODE_ENV === 'production' ? 'AES256' : 'none');
+    this.sse = sse === 'none' ? undefined : sse;
     this.client = new S3Client({
       region: env.S3_REGION,
       endpoint: env.S3_ENDPOINT,
@@ -37,8 +42,7 @@ export class ArtifactStore {
         Key: key,
         Body: body,
         ContentType: contentType,
-        // Scanner output routinely contains source snippets — never leave it unencrypted.
-        ServerSideEncryption: 'AES256',
+        ServerSideEncryption: this.sse,
       }),
     );
     return key;

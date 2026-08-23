@@ -25,6 +25,11 @@ export const EnvSchema = z.object({
   S3_ACCESS_KEY_ID: z.string().default('ctem'),
   S3_SECRET_ACCESS_KEY: z.string().default('ctem-secret'),
   S3_FORCE_PATH_STYLE: z.coerce.boolean().default(true),
+  /**
+   * Server-side encryption for artifacts. Defaults to AES256 in production and
+   * none elsewhere — local MinIO rejects SSE unless a KMS is configured.
+   */
+  S3_SSE: z.enum(['none', 'AES256', 'aws:kms']).optional(),
 
   /** OIDC issuer for human logins; JWKS is fetched and cached from here. */
   OIDC_ISSUER: z.string().default('http://localhost:8080/realms/ctem'),

@@ -113,6 +113,6 @@ Every tenant table carries `orgId` and has RLS enabled with `FORCE`. The app con
 
 ## Not yet built
 
-Scanner internals (repo cloning, image layer walking, IaC parsing, port scanning), discovery connectors, the vulnerability feed mirror, reachability analysis, the web UI, distributed scheduling (the schedulers use naive intervals and need leader election before running multiple replicas), and Redis-backed rate limiting.
+Scanner internals beyond the SCA SBOM path (repo cloning and lockfile resolution, image layer walking, IaC parsing, port scanning), discovery connectors, the vulnerability feed mirror (SCA queries OSV live per scan today), reachability analysis, the web UI, distributed scheduling (the schedulers use naive intervals and need leader election before running multiple replicas), and Redis-backed rate limiting.
 
 See `docs/architecture.md` for the full design and the build order.

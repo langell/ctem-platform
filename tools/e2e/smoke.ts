@@ -189,30 +189,81 @@ async function main(): Promise<void> {
       expect(res.status === 403, `expected 403, got ${res.status}`);
     });
 
-    await step('dispatch a scan and read it back', async () => {
+    const awaitScan = async (id: string): Promise<Record<string, unknown>> => {
+      let scan: Record<string, unknown> = {};
+      for (let i = 0; i < 30; i++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        const read = await api(GATEWAY, 'GET', `/v1/scans/${id}`, { token: patA });
+        expect(read.status === 200, `GET /v1/scans/${id} returned ${read.status}`);
+        scan = read.json ?? {};
+        if (['succeeded', 'failed', 'partial'].includes(String(scan.status))) break;
+      }
+      return scan;
+    };
+
+    await step('dispatch a scan and watch it complete', async () => {
       const created = await api(GATEWAY, 'POST', '/v1/scans', {
         token: patA,
         body: { scannerType: 'sca', assetSelector: {}, options: {} },
       });
       expect(
-        created.status < 300 && created.json?.id,
+        created.status < 300 && Boolean(created.json?.id),
+        `expected 2xx with id, got ${created.status}: ${JSON.stringify(created.json)}`,
+      );
+      const scan = await awaitScan(String(created.json!.id));
+      expect(
+        scan.status === 'succeeded',
+        `scan ended as '${scan.status}' — expected succeeded (no SBOM, so zero findings is fine)`,
+      );
+      return `scan ${created.json!.id} succeeded`;
+    });
+
+    await step('SBOM ingest produces real findings (queries OSV — needs internet)', async () => {
+      const created = await api(GATEWAY, 'POST', '/v1/scans/sbom', {
+        token: patA,
+        body: {
+          assetExternalKey: `github:smoke/${assetName}`,
+          format: 'cyclonedx-json',
+          document: {
+            bomFormat: 'CycloneDX',
+            specVersion: '1.5',
+            metadata: { component: { 'bom-ref': 'root', name: assetName, version: '1.0.0' } },
+            components: [
+              {
+                'bom-ref': 'pkg:npm/express@4.17.1',
+                purl: 'pkg:npm/express@4.17.1',
+                name: 'express',
+                version: '4.17.1',
+              },
+            ],
+            dependencies: [{ ref: 'root', dependsOn: ['pkg:npm/express@4.17.1'] }],
+          },
+        },
+      });
+      expect(
+        created.status < 300 && Boolean(created.json?.id),
         `expected 2xx with id, got ${created.status}: ${JSON.stringify(created.json)}`,
       );
 
-      const id = created.json.id;
-      let status = created.json.status ?? 'unknown';
-      for (let i = 0; i < 15 && ['queued', 'pending', 'unknown'].includes(status); i++) {
-        await new Promise((r) => setTimeout(r, 2000));
-        const read = await api(GATEWAY, 'GET', `/v1/scans/${id}`, { token: patA });
-        expect(read.status === 200, `GET /v1/scans/${id} returned ${read.status}`);
-        status = read.json?.status ?? status;
-      }
-      return `scan ${id} status=${status} (scanner workers are stubs; any retrievable status passes)`;
+      const scan = await awaitScan(String(created.json!.id));
+      expect(scan.status === 'succeeded', `SBOM scan ended as '${scan.status}'`);
+      const jobs = (scan.jobs ?? []) as Array<{ findingCount: number }>;
+      const found = jobs.reduce((n, j) => n + (j.findingCount ?? 0), 0);
+      expect(
+        found > 0,
+        'SBOM scan succeeded but found nothing for express@4.17.1 — OSV unreachable?',
+      );
+      return `${found} findings for express@4.17.1`;
     });
 
-    await step('findings endpoint responds for the org', async () => {
+    await step('findings are queryable through the gateway', async () => {
       const res = await api(GATEWAY, 'GET', '/v1/findings', { token: patA });
       expect(res.status === 200, `expected 200, got ${res.status}`);
+      const items = (res.json?.items ?? res.json ?? []) as Array<{ scannerType: string }>;
+      expect(
+        items.some((f) => f.scannerType === 'sca'),
+        'no SCA findings in the org listing after the SBOM scan',
+      );
     });
   } finally {
     await deleteOrgCascade(db, orgA.id).catch(() => undefined);
