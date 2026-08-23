@@ -235,8 +235,17 @@ async function main(): Promise<void> {
                 name: 'express',
                 version: '4.17.1',
               },
+              {
+                'bom-ref': 'pkg:npm/qs@6.7.0',
+                purl: 'pkg:npm/qs@6.7.0',
+                name: 'qs',
+                version: '6.7.0',
+              },
             ],
-            dependencies: [{ ref: 'root', dependsOn: ['pkg:npm/express@4.17.1'] }],
+            dependencies: [
+              { ref: 'root', dependsOn: ['pkg:npm/express@4.17.1'] },
+              { ref: 'pkg:npm/express@4.17.1', dependsOn: ['pkg:npm/qs@6.7.0'] },
+            ],
           },
         },
       });
@@ -290,14 +299,26 @@ async function main(): Promise<void> {
       return `advisories=${res.json!.advisories} epssChanged=${res.json!.epssChanged} findingsUpdated=${res.json!.findingsUpdated}`;
     });
 
-    await step('findings are queryable through the gateway', async () => {
+    await step('findings are queryable and explain their dependency path', async () => {
       const res = await api(GATEWAY, 'GET', '/v1/findings', { token: patA });
       expect(res.status === 200, `expected 200, got ${res.status}`);
-      const items = (res.json?.items ?? res.json ?? []) as Array<{ scannerType: string }>;
+      const items = (res.json?.items ?? res.json ?? []) as Array<{
+        scannerType: string;
+        location: { packageName?: string };
+        evidence: { dependencyPath?: string[] };
+      }>;
       expect(
         items.some((f) => f.scannerType === 'sca'),
         'no SCA findings in the org listing after the SBOM scan',
       );
+
+      const transitive = items.find((f) => f.location?.packageName === 'qs');
+      expect(transitive !== undefined, 'expected a finding for the transitive qs@6.7.0');
+      expect(
+        JSON.stringify(transitive!.evidence?.dependencyPath) === JSON.stringify(['express', 'qs']),
+        `qs finding should explain its path as express → qs, got ${JSON.stringify(transitive!.evidence?.dependencyPath)}`,
+      );
+      return 'transitive qs finding carries path express → qs';
     });
   } finally {
     await deleteOrgCascade(db, orgA.id).catch(() => undefined);
