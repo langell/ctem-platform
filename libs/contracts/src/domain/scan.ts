@@ -85,12 +85,18 @@ export type CreateScanRequest = z.infer<typeof CreateScanRequest>;
 
 /** SBOM ingest is a first-class path: CI uploads a CycloneDX doc instead of us cloning the repo. */
 export const SbomFormat = z.enum(['cyclonedx-json', 'spdx-json', 'syft-json']);
-export const IngestSbomRequest = z.object({
-  assetExternalKey: z.string(),
-  format: SbomFormat,
-  /** Object-store key of the uploaded document. */
-  artifactKey: z.string(),
-  ref: z.string().optional(),
-  commitSha: z.string().optional(),
-});
+export const IngestSbomRequest = z
+  .object({
+    assetExternalKey: z.string(),
+    format: SbomFormat,
+    /** Object-store key of an already-uploaded document. */
+    artifactKey: z.string().optional(),
+    /** Or the document itself, inline — the ingest endpoint stores it. */
+    document: z.record(z.unknown()).optional(),
+    ref: z.string().optional(),
+    commitSha: z.string().optional(),
+  })
+  .refine((r) => Boolean(r.artifactKey) !== Boolean(r.document), {
+    message: 'Provide exactly one of artifactKey or document',
+  });
 export type IngestSbomRequest = z.infer<typeof IngestSbomRequest>;

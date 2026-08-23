@@ -34,9 +34,10 @@ via `@ctem/testing` factories and deleting them in `afterAll`
 
 **E2E smoke** — one scripted golden path against the live stack: health →
 machine-token issuance → gateway PAT auth → asset registration → cross-org
-isolation → permission denial → scan dispatch → findings listing. Scanner
-workers are stubs, so the scan step accepts any retrievable status; tighten it
-when the scanners become real.
+isolation → permission denial → scan dispatch to completion → SBOM ingest
+producing real findings for `express@4.17.1` → findings listing. The SBOM step
+queries OSV, so it needs internet access; without it the step fails with a
+message saying so.
 
 ## Shared helpers: `@ctem/testing`
 

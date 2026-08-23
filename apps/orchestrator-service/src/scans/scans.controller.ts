@@ -4,6 +4,7 @@ import { CurrentOrg, CurrentUser, RequirePermissions } from '@ctem/auth';
 import { CreateScanRequest, IngestSbomRequest, type Principal } from '@ctem/contracts';
 import { ZodBody } from '@ctem/service-kit';
 import { PrismaService } from '@ctem/db';
+import { ArtifactStore } from '@ctem/storage';
 import { ScanDispatcherService } from './scan-dispatcher.service';
 
 @ApiTags('scans')
@@ -12,6 +13,7 @@ export class ScansController {
   constructor(
     private readonly dispatcher: ScanDispatcherService,
     private readonly prisma: PrismaService,
+    private readonly artifacts: ArtifactStore,
   ) {}
 
   @Get()
@@ -57,13 +59,21 @@ export class ScansController {
       }),
     );
 
+    // CI can hand us the document inline instead of pre-uploading it.
+    const artifactKey =
+      body.artifactKey ??
+      (await this.artifacts.putJson(
+        this.artifacts.key(orgId, 'sbom', asset.id, `${Date.now()}.json`),
+        body.document,
+      ));
+
     return this.dispatcher.createScan(
       orgId,
       user.userId,
       {
         scannerType: 'sca',
         assetSelector: { assetIds: [asset.id] },
-        options: { sbomArtifactKey: body.artifactKey, format: body.format, ref: body.ref },
+        options: { sbomArtifactKey: artifactKey, format: body.format, ref: body.ref },
       },
       'ci',
     );
