@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="Electron" version="21.0.0">
+  <diagram id="ctem-architecture" name="CTEM Platform Architecture">
+    <mxGraphModel dx="1422" dy="762" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1654" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- TITLE -->
+        <mxCell id="title" value="CTEM Platform – Microservice Architecture" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=20;fontStyle=1;fontColor=#1a1a2e;" vertex="1" parent="1">
+          <mxGeometry x="327" y="20" width="1000" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- EXTERNAL CALLERS -->
+        <mxCell id="users" value="👤 Users / Web UI" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="60" y="140" width="140" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="ci" value="⚙️ CI / Connectors (PAT)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="60" y="200" width="140" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="idp" value="🔑 IdP (OIDC)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="60" y="270" width="140" height="44" as="geometry" />
+        </mxCell>
+
+        <!-- API GATEWAY -->
+        <mxCell id="gateway" value="&lt;b&gt;api-gateway&lt;/b&gt;&lt;br&gt;JWT / PAT → signed Principal&lt;br&gt;JWKS verify · org resolve · RBAC&lt;br&gt;x-ctem-principal + HMAC sig" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1a1a2e;strokeColor=#0077b6;fontColor=#ffffff;fontSize=11;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="270" y="155" width="240" height="74" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="users" target="gateway" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="ci" target="gateway" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e-idp" value="JWKS" style="edgeStyle=orthogonalEdgeStyle;dashed=1;endArrow=open;endFill=0;fontSize=10;" edge="1" source="idp" target="gateway" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- CONTROL-PLANE SWIMLANE -->
+        <mxCell id="cp-bg" value="Control-Plane Services" style="swimlane;startSize=28;fillColor=#f0f4ff;strokeColor=#4361ee;fontSize=12;fontStyle=1;fontColor=#1a1a2e;arcSize=4;" vertex="1" parent="1">
+          <mxGeometry x="130" y="290" width="1390" height="160" as="geometry" />
+        </mxCell>
+
+        <mxCell id="svc-identity" value="&lt;b&gt;identity&lt;/b&gt;&lt;br&gt;Orgs / Users&lt;br&gt;RBAC / Tokens" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#4361ee;strokeColor=#3a0ca3;fontColor=#ffffff;fontSize=11;" vertex="1" parent="cp-bg">
+          <mxGeometry x="20" y="50" width="160" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="svc-asset" value="&lt;b&gt;asset&lt;/b&gt;&lt;br&gt;Inventory&lt;br&gt;Asset Graph" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#4361ee;strokeColor=#3a0ca3;fontColor=#ffffff;fontSize=11;" vertex="1" parent="cp-bg">
+          <mxGeometry x="220" y="50" width="160" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="svc-orchestrator" value="&lt;b&gt;orchestrator&lt;/b&gt;&lt;br&gt;Scan Plan&lt;br&gt;Job Dispatch" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#4361ee;strokeColor=#3a0ca3;fontColor=#ffffff;fontSize=11;" vertex="1" parent="cp-bg">
+          <mxGeometry x="420" y="50" width="160" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="svc-findings" value="&lt;b&gt;findings&lt;/b&gt;&lt;br&gt;Normalize / Dedup&lt;br&gt;Triage" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#4361ee;strokeColor=#3a0ca3;fontColor=#ffffff;fontSize=11;" vertex="1" parent="cp-bg">
+          <mxGeometry x="620" y="50" width="160" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="svc-risk" value="&lt;b&gt;risk&lt;/b&gt;&lt;br&gt;Score + Policy&lt;br&gt;SLA / Exceptions" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#4361ee;strokeColor=#3a0ca3;fontColor=#ffffff;fontSize=11;" vertex="1" parent="cp-bg">
+          <mxGeometry x="820" y="50" width="160" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="svc-reporting" value="&lt;b&gt;reporting&lt;/b&gt;&lt;br&gt;Dashboards&lt;br&gt;Trends" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#4361ee;strokeColor=#3a0ca3;fontColor=#ffffff;fontSize=11;" vertex="1" parent="cp-bg">
+          <mxGeometry x="1020" y="50" width="160" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="svc-notification" value="&lt;b&gt;notification-service&lt;/b&gt;&lt;br&gt;Slack / Jira / Webhook" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#7209b7;strokeColor=#560bad;fontColor=#ffffff;fontSize=11;" vertex="1" parent="cp-bg">
+          <mxGeometry x="1220" y="50" width="160" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- Gateway fan-out to services -->
+        <mxCell id="gw-id" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="gateway" target="svc-identity" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="gw-as" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="gateway" target="svc-asset" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="gw-or" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="gateway" target="svc-orchestrator" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="gw-fi" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="gateway" target="svc-findings" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="gw-ri" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="gateway" target="svc-risk" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="gw-re" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="gateway" target="svc-reporting" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- NATS JETSTREAM -->
+        <mxCell id="nats" value="⚡ NATS JetStream — Async Event Bus&lt;br&gt;ctem.asset.discovered/updated · ctem.scan.job.dispatched · ctem.finding.reported/created/updated · ctem.policy.violated" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f77f00;strokeColor=#d62828;fontColor=#ffffff;fontSize=11;fontStyle=1;arcSize=6;" vertex="1" parent="1">
+          <mxGeometry x="130" y="490" width="1390" height="56" as="geometry" />
+        </mxCell>
+
+        <mxCell id="cp-nats" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="cp-bg" target="nats" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- SCANNER WORKERS SWIMLANE -->
+        <mxCell id="sc-bg" value="Scanner Workers  (CPU/IO-heavy · independent scale · sandboxed)" style="swimlane;startSize=28;fillColor=#fff0e6;strokeColor=#f77f00;fontSize=12;fontStyle=1;fontColor=#1a1a2e;arcSize=4;" vertex="1" parent="1">
+          <mxGeometry x="130" y="590" width="1100" height="160" as="geometry" />
+        </mxCell>
+        <mxCell id="sc-sca" value="&lt;b&gt;scanner-sca&lt;/b&gt;&lt;br&gt;Lockfile resolvers&lt;br&gt;Dependency paths&lt;br&gt;Reachability" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e07d10;strokeColor=#c56000;fontColor=#ffffff;fontSize=11;" vertex="1" parent="sc-bg">
+          <mxGeometry x="20" y="50" width="200" height="84" as="geometry" />
+        </mxCell>
+        <mxCell id="sc-sast" value="&lt;b&gt;scanner-sast&lt;/b&gt;&lt;br&gt;Static Analysis&lt;br&gt;Code Patterns" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e07d10;strokeColor=#c56000;fontColor=#ffffff;fontSize=11;" vertex="1" parent="sc-bg">
+          <mxGeometry x="260" y="50" width="200" height="84" as="geometry" />
+        </mxCell>
+        <mxCell id="sc-ci" value="&lt;b&gt;scanner-container-iac&lt;/b&gt;&lt;br&gt;Image Layer Walk&lt;br&gt;IaC Parsing" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e07d10;strokeColor=#c56000;fontColor=#ffffff;fontSize=11;" vertex="1" parent="sc-bg">
+          <mxGeometry x="500" y="50" width="200" height="84" as="geometry" />
+        </mxCell>
+        <mxCell id="sc-asm" value="&lt;b&gt;scanner-asm&lt;/b&gt;&lt;br&gt;Port Scanning&lt;br&gt;Attack Surface" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e07d10;strokeColor=#c56000;fontColor=#ffffff;fontSize=11;" vertex="1" parent="sc-bg">
+          <mxGeometry x="740" y="50" width="200" height="84" as="geometry" />
+        </mxCell>
+
+        <mxCell id="nats-sc" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="nats" target="sc-bg" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- NOTIFICATION TARGETS -->
+        <mxCell id="notif-bg" value="Notification Targets" style="swimlane;startSize=28;fillColor=#f5f0ff;strokeColor=#7209b7;fontSize=12;fontStyle=1;fontColor=#1a1a2e;arcSize=4;" vertex="1" parent="1">
+          <mxGeometry x="1280" y="590" width="240" height="160" as="geometry" />
+        </mxCell>
+        <mxCell id="slack"   value="💬 Slack"    style="rounded=1;whiteSpace=wrap;html=1;fillColor=#7209b7;strokeColor=#560bad;fontColor=#ffffff;fontSize=11;" vertex="1" parent="notif-bg"><mxGeometry x="10"  y="50" width="60" height="34" as="geometry" /></mxCell>
+        <mxCell id="jira"    value="🎫 Jira"     style="rounded=1;whiteSpace=wrap;html=1;fillColor=#7209b7;strokeColor=#560bad;fontColor=#ffffff;fontSize=11;" vertex="1" parent="notif-bg"><mxGeometry x="90"  y="50" width="60" height="34" as="geometry" /></mxCell>
+        <mxCell id="webhook" value="🔗 Webhook"  style="rounded=1;whiteSpace=wrap;html=1;fillColor=#7209b7;strokeColor=#560bad;fontColor=#ffffff;fontSize=11;" vertex="1" parent="notif-bg"><mxGeometry x="165" y="50" width="60" height="34" as="geometry" /></mxCell>
+
+        <mxCell id="notif-arr"  style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="svc-notification" target="notif-bg"  parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="nats-notif" style="edgeStyle=orthogonalEdgeStyle;dashed=1;" edge="1" source="nats" target="svc-notification" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- DATA STORES -->
+        <mxCell id="postgres" value="🐘 Postgres 17 + Prisma&lt;br&gt;Shared DB · org_id RLS&lt;br&gt;JSONB scanner payloads&lt;br&gt;ctem_app (no BYPASSRLS)" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=14;fillColor=#006400;strokeColor=#004d00;fontColor=#ffffff;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="130" y="810" width="220" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="redis" value="⚡ Redis&lt;br&gt;Session · Rate-limit&lt;br&gt;Scanner coordination" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=14;fillColor=#cc0000;strokeColor=#990000;fontColor=#ffffff;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="380" y="810" width="180" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="s3" value="☁️ S3-compatible&lt;br&gt;Raw scanner output&lt;br&gt;SBOMs / Blobs" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=14;fillColor=#0077b6;strokeColor=#005f8a;fontColor=#ffffff;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="590" y="810" width="180" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="vuln-feed" value="📡 Vuln Intelligence&lt;br&gt;OSV · NVD · GHSA&lt;br&gt;EPSS · CISA KEV&lt;br&gt;(not tenant-scoped)" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=14;fillColor=#3a0ca3;strokeColor=#280880;fontColor=#ffffff;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="800" y="810" width="200" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="cp-pg"    style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="cp-bg"   target="postgres"  parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="gw-redis" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="gateway" target="redis"     parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="sc-s3"    style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="sc-bg"   target="s3"        parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="fi-vuln"  style="edgeStyle=orthogonalEdgeStyle;dashed=1;" edge="1" source="svc-findings" target="vuln-feed" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ri-vuln"  style="edgeStyle=orthogonalEdgeStyle;dashed=1;" edge="1" source="svc-risk"     target="vuln-feed" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- RISK MODEL LEGEND -->
+        <mxCell id="risk-legend" value="&lt;b&gt;Risk Score Formula&lt;/b&gt;&lt;br&gt;base = 0.30·severity + 0.25·exploitability + 0.25·exposure + 0.20·criticality&lt;br&gt;score = min(100, base × validationMultiplier × 100)&lt;br&gt;&lt;br&gt;validation: exploitable ×1.25 · reachable ×1.1 · not-reachable ×0.4 · not-exploitable ×0.3" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fffde7;strokeColor=#f9a825;fontSize=10;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="1040" y="810" width="480" height="100" as="geometry" />
+        </mxCell>
+
+        <!-- DATA FLOW ANNOTATION -->
+        <mxCell id="df-label" value="&lt;b&gt;Assessment Data Flow&lt;/b&gt;&lt;br&gt;scan requested → planner selects assets → jobs persisted → dispatched → worker executes → uploads raw → finding reported → normalized + deduped → risk scored → policy evaluated → notification" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3e5f5;strokeColor=#7b1fa2;fontSize=10;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="1040" y="930" width="480" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- LEGEND -->
+        <mxCell id="leg-bg" value="Legend" style="swimlane;startSize=22;fillColor=#f5f5f5;strokeColor=#aaaaaa;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="130" y="930" width="880" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="leg1" value="─── Synchronous REST" style="text;html=1;strokeColor=none;fillColor=none;fontSize=10;" vertex="1" parent="leg-bg"><mxGeometry x="10"  y="34" width="180" height="24" as="geometry" /></mxCell>
+        <mxCell id="leg2" value="- - Async read / NATS event" style="text;html=1;strokeColor=none;fillColor=none;fontSize=10;" vertex="1" parent="leg-bg"><mxGeometry x="200" y="34" width="200" height="24" as="geometry" /></mxCell>
+        <mxCell id="leg3" value="■ Blue – Control-plane service" style="text;html=1;strokeColor=none;fillColor=none;fontSize=10;fontColor=#4361ee;" vertex="1" parent="leg-bg"><mxGeometry x="410" y="34" width="220" height="24" as="geometry" /></mxCell>
+        <mxCell id="leg4" value="■ Orange – Scanner worker" style="text;html=1;strokeColor=none;fillColor=none;fontSize=10;fontColor=#e07d10;" vertex="1" parent="leg-bg"><mxGeometry x="640" y="34" width="200" height="24" as="geometry" /></mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

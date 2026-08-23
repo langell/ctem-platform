@@ -7,3 +7,7 @@ dist/
 coverage/
 .DS_Store
 libs/db/src/generated/
+
+# draw.io temp/lock files
+.$*.dtmp
+.$*.bkp
