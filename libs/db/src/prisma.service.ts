@@ -1,5 +1,8 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { PrismaClient } from './generated/client';
+// Deliberately '../src/…': the emitted dist/*.js keeps this literal, so the
+// compiled output always loads the freshly generated client from src instead
+// of a copy that goes stale whenever `prisma generate` runs without a rebuild.
+import { PrismaClient } from '../src/generated/client';
 import { loadEnv } from '@ctem/config';
 import { getContext, rootLogger } from '@ctem/observability';
 

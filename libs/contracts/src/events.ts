@@ -25,6 +25,7 @@ export const SUBJECTS = {
   findingStateChanged: 'ctem.finding.state_changed',
 
   riskRescoreRequested: 'ctem.risk.rescore_requested',
+  vulnPackagesObserved: 'ctem.risk.vuln_packages_observed',
   policyViolated: 'ctem.policy.violated',
   slaBreached: 'ctem.policy.sla_breached',
 
@@ -76,6 +77,19 @@ export const FindingsReportedPayload = z.object({
 });
 export type FindingsReportedPayload = z.infer<typeof FindingsReportedPayload>;
 
+/**
+ * A scanner matched these packages against a live feed because the local
+ * mirror had nothing fresh. The feed ingester mirrors them so the next scan
+ * is served locally.
+ */
+export const VulnPackagesObservedPayload = z.object({
+  packages: z
+    .array(z.object({ ecosystem: z.string().min(1), name: z.string().min(1) }))
+    .min(1)
+    .max(500),
+});
+export type VulnPackagesObservedPayload = z.infer<typeof VulnPackagesObservedPayload>;
+
 export const PolicyViolatedPayload = z.object({
   findingId: z.string().uuid(),
   policyId: z.string().uuid(),
@@ -109,6 +123,7 @@ export const EVENT_SCHEMAS = {
     actor: z.string(),
   }),
   [SUBJECTS.riskRescoreRequested]: z.object({ findingIds: z.array(z.string().uuid()) }),
+  [SUBJECTS.vulnPackagesObserved]: VulnPackagesObservedPayload,
   [SUBJECTS.policyViolated]: PolicyViolatedPayload,
   [SUBJECTS.slaBreached]: z.object({ findingId: z.string().uuid(), dueAt: z.coerce.date() }),
   [SUBJECTS.notificationRequested]: NotificationRequestedPayload,

@@ -56,6 +56,8 @@ CREATE POLICY tenant_isolation ON organizations
 -- Vulnerability intelligence is shared reference data: readable by all, written
 -- only by the feed ingester running under the owner role.
 REVOKE INSERT, UPDATE, DELETE ON vulnerabilities FROM ctem_app;
+REVOKE INSERT, UPDATE, DELETE ON vulnerability_affects FROM ctem_app;
+REVOKE INSERT, UPDATE, DELETE ON vuln_package_sync FROM ctem_app;
 
 -- PAT verification has to find a token by hash before any org context exists,
 -- but api_tokens is policy-protected and fails closed. The lookup therefore

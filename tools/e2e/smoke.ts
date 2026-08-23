@@ -256,6 +256,21 @@ async function main(): Promise<void> {
       return `${found} findings for express@4.17.1`;
     });
 
+    await step('scanner misses are mirrored by the feed ingester', async () => {
+      let sync: { advisories: number } | null = null;
+      for (let i = 0; i < 15 && !sync; i++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        sync = await db.vulnPackageSync.findUnique({
+          where: { ecosystem_packageName: { ecosystem: 'npm', packageName: 'express' } },
+        });
+      }
+      expect(
+        sync !== null,
+        'no vuln_package_sync row for npm/express — observed event never reached the feed ingester',
+      );
+      return `mirror holds ${sync!.advisories} advisories for npm/express`;
+    });
+
     await step('findings are queryable through the gateway', async () => {
       const res = await api(GATEWAY, 'GET', '/v1/findings', { token: patA });
       expect(res.status === 200, `expected 200, got ${res.status}`);

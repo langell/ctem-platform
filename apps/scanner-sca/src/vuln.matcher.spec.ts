@@ -40,7 +40,8 @@ describe('VulnMatcher.match', () => {
       ],
     });
 
-    const matches = await new VulnMatcher().match(component);
+    const { matches, mirrored } = await new VulnMatcher().match(component);
+    expect(mirrored).toBe(false); // no database wired in this test
     expect(matches).toHaveLength(1);
     expect(matches[0]).toMatchObject({
       id: 'GHSA-hrpp-h998-j3pp',
@@ -67,7 +68,7 @@ describe('VulnMatcher.match', () => {
       ],
     });
 
-    const [match] = await new VulnMatcher().match(component);
+    const [match] = (await new VulnMatcher().match(component)).matches;
     expect(match.source).toBe('CVE');
     expect(match.fixedVersion).toBeUndefined();
     // No CVSS reported → conservative middle severity rather than silence.
@@ -76,7 +77,7 @@ describe('VulnMatcher.match', () => {
 
   it('returns no matches when OSV errors, rather than failing the scan', async () => {
     stubOsv({ message: 'rate limited' }, 429);
-    expect(await new VulnMatcher().match(component)).toEqual([]);
+    expect((await new VulnMatcher().match(component)).matches).toEqual([]);
 
     vi.stubGlobal(
       'fetch',
@@ -84,6 +85,6 @@ describe('VulnMatcher.match', () => {
         throw new Error('network down');
       }),
     );
-    expect(await new VulnMatcher().match(component)).toEqual([]);
+    expect((await new VulnMatcher().match(component)).matches).toEqual([]);
   });
 });

@@ -76,6 +76,15 @@ export class ScannerWorker implements OnApplicationBootstrap {
         );
       }
 
+      if (outcome.vulnPackagesObserved?.length) {
+        // Best-effort: a failed publish must not fail a finished scan.
+        await this.bus
+          .publish(SUBJECTS.vulnPackagesObserved, job.orgId, {
+            packages: outcome.vulnPackagesObserved.slice(0, 500),
+          })
+          .catch((err) => this.log.warn({ err }, 'failed to report observed packages'));
+      }
+
       // Findings go out before the completion event so the findings service has
       // them persisted by the time the orchestrator marks the scan done.
       await this.bus.publish(SUBJECTS.findingsReported, job.orgId, {
