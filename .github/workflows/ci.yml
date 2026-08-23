@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4 # version comes from packageManager in package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # Nx auto-loads .env into task environments; services need DATABASE_APP_URL
+      # from it so RLS actually applies to them.
+      - name: Environment
+        run: cp .env.example .env
+
+      # The generated Prisma client lives in gitignored src/generated — nothing
+      # compiles until this runs. Needs no database.
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Build (typecheck + dist for the e2e stack)
+        run: pnpm build
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Start infra
+        run: |
+          docker compose up -d postgres redis nats minio minio-init
+          until docker compose exec -T postgres pg_isready -U ctem >/dev/null 2>&1; do sleep 1; done
+
+      - name: Migrate + row-level security
+        run: |
+          pnpm db:deploy
+          docker compose exec -T postgres psql -U ctem -d ctem \
+            -f /dev/stdin < libs/db/prisma/manual/000_rls.sql
+
+      - name: Integration tests
+        run: pnpm test:int
+
+      - name: Start services
+        run: |
+          pnpm nx run-many -t dev --parallel=12 > /tmp/stack.log 2>&1 &
+          for i in $(seq 1 60); do
+            ok=1
+            for port in 3000 3001 3002 3003 3004 3005 3006 3007; do
+              curl -sf -m 2 "http://localhost:$port/health/live" >/dev/null 2>&1 || { ok=0; break; }
+            done
+            if [ "$ok" = "1" ]; then echo "all services healthy"; exit 0; fi
+            sleep 2
+          done
+          echo "::error::services failed to become healthy"
+          tail -150 /tmp/stack.log
+          exit 1
+
+      # Queries OSV, CISA KEV and FIRST EPSS live — runners have internet.
+      - name: E2E smoke
+        run: pnpm e2e
+
+      - name: Service logs on failure
+        if: failure()
+        run: tail -300 /tmp/stack.log 2>/dev/null || true

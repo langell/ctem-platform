@@ -68,6 +68,10 @@ without it those steps fail with a message saying so.
 - `make test` — on every change, it's seconds.
 - `make test-int` — before every commit.
 - `make e2e` — before merging anything that crosses a service boundary.
+- **CI runs all of it on every PR** (`.github/workflows/ci.yml`): lint →
+  build → unit → integration (ephemeral docker-compose Postgres with
+  migrations + RLS) → the full stack booted from dist → e2e smoke. The
+  pipeline *is* the TEST environment — there is no standing test deployment.
 
 ## Conventions
 
