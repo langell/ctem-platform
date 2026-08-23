@@ -271,6 +271,25 @@ async function main(): Promise<void> {
       return `mirror holds ${sync!.advisories} advisories for npm/express`;
     });
 
+    await step('threat-intel refresh enriches findings (KEV/EPSS — needs internet)', async () => {
+      const RISK = process.env.RISK_SERVICE_URL ?? 'http://localhost:3005';
+      const res = await api(RISK, 'POST', '/internal/risk/feed/refresh', {
+        headers: principalHeaders(orgA.id),
+      });
+      expect(res.status < 300, `refresh returned ${res.status}: ${JSON.stringify(res.json)}`);
+
+      const findings = await api(GATEWAY, 'GET', '/v1/findings', { token: patA });
+      const items = (findings.json?.items ?? findings.json ?? []) as Array<{
+        scannerType: string;
+        epssScore: number | null;
+      }>;
+      expect(
+        items.some((f) => f.scannerType === 'sca' && f.epssScore !== null),
+        'no SCA finding carries an EPSS score after the refresh',
+      );
+      return `advisories=${res.json!.advisories} epssChanged=${res.json!.epssChanged} findingsUpdated=${res.json!.findingsUpdated}`;
+    });
+
     await step('findings are queryable through the gateway', async () => {
       const res = await api(GATEWAY, 'GET', '/v1/findings', { token: patA });
       expect(res.status === 200, `expected 200, got ${res.status}`);
