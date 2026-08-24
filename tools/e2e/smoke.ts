@@ -280,6 +280,43 @@ async function main(): Promise<void> {
       return `mirror holds ${sync!.advisories} advisories for npm/express`;
     });
 
+    await step('GitHub discovery inventories the fixture repo (needs GITHUB_TOKEN)', async () => {
+      // The asset-service resolves env:GITHUB_TOKEN from ITS environment; this
+      // check assumes the stack was started with the same env as the smoke.
+      if (!process.env.GITHUB_TOKEN) {
+        return 'skipped — set GITHUB_TOKEN (e.g. `export GITHUB_TOKEN=$(gh auth token)`) before starting the stack';
+      }
+      const ASSET = process.env.ASSET_SERVICE_URL ?? 'http://localhost:3002';
+
+      await db.integration.create({
+        data: {
+          orgId: orgA.id,
+          provider: 'github',
+          displayName: 'smoke-github',
+          config: { owner: 'langell', ownerType: 'user', repos: ['ctem-scan-target'] },
+          credentialRef: 'env:GITHUB_TOKEN',
+        },
+      });
+
+      const res = await api(ASSET, 'POST', '/internal/assets/discover', {
+        headers: principalHeaders(orgA.id),
+      });
+      expect(res.status < 300, `discover returned ${res.status}: ${JSON.stringify(res.json)}`);
+      const results = res.json as unknown as Array<{ upserted: number; error: string | null }>;
+      expect(
+        results.some((r) => r.upserted >= 1 && r.error === null),
+        `discovery found nothing: ${JSON.stringify(results)}`,
+      );
+
+      const assets = await api(GATEWAY, 'GET', '/v1/assets', { token: patA });
+      const items = (assets.json?.items ?? []) as Array<{ externalKey: string; source: string }>;
+      expect(
+        items.some((a) => a.externalKey === 'github:langell/ctem-scan-target'),
+        'ctem-scan-target missing from the inventory after discovery',
+      );
+      return 'github:langell/ctem-scan-target inventoried from live GitHub';
+    });
+
     await step('threat-intel refresh enriches findings (KEV/EPSS — needs internet)', async () => {
       const RISK = process.env.RISK_SERVICE_URL ?? 'http://localhost:3005';
       const res = await api(RISK, 'POST', '/internal/risk/feed/refresh', {

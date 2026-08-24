@@ -5,6 +5,7 @@ import { ListAssetsQuery, UpsertAssetRequest } from '@ctem/contracts';
 import { ZodBody, ZodQuery } from '@ctem/service-kit';
 import { AssetsService } from './assets.service';
 import { AssetGraphService } from './asset-graph.service';
+import { DiscoverySchedulerService } from '../connectors/discovery-scheduler.service';
 
 /** Internal API — only reachable from the gateway, which supplies the principal. */
 @ApiTags('assets')
@@ -13,7 +14,15 @@ export class AssetsController {
   constructor(
     private readonly assets: AssetsService,
     private readonly graph: AssetGraphService,
+    private readonly discovery: DiscoverySchedulerService,
   ) {}
+
+  /** Run discovery for the caller's org now instead of waiting for the sweep. */
+  @Post('discover')
+  @RequirePermissions('integration:manage')
+  discover(@CurrentOrg() orgId: string) {
+    return this.discovery.syncOrg(orgId);
+  }
 
   @Get()
   @RequirePermissions('asset:read')
