@@ -1,5 +1,7 @@
 # CTEM Platform
 
+[![CI](https://github.com/langell/ctem-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/langell/ctem-platform/actions/workflows/ci.yml)
+
 Continuous Threat Exposure Management. Discovers what you own, scans it continuously across four surfaces, and prioritizes findings by real exposure rather than raw CVSS.
 
 This repository is a **scaffold**: the architecture, contracts, data model, event flows and service boundaries are in place and compile. Scanner internals and connectors are stubbed with explicit `TODO`s marking the extension points.
