@@ -46,6 +46,10 @@ export class SbomParser {
     const directRefs = new Set(
       doc.dependencies?.find((d) => d.ref === rootRef)?.dependsOn ?? [],
     );
+    const paths = shortestPaths(rootRef, doc.dependencies ?? []);
+    const nameByRef = new Map(
+      (doc.components ?? []).map((c) => [c['bom-ref'] ?? c.purl ?? `${c.name}@${c.version}`, c.name]),
+    );
 
     return (doc.components ?? []).map((c) => {
       const ref = c['bom-ref'] ?? c.purl ?? `${c.name}@${c.version}`;
@@ -55,9 +59,9 @@ export class SbomParser {
         version: c.version,
         ecosystem: this.ecosystemFromPurl(c.purl),
         direct: directRefs.has(ref),
-        // TODO: walk `dependencies` to build the full path to the root — the
-        // "why is this even here" answer developers ask first.
-        dependencyPath: [],
+        // The "why is this even here" answer: names from a direct dependency
+        // down to this component, e.g. ['express', 'body-parser', 'qs'].
+        dependencyPath: (paths.get(ref) ?? []).map((r) => nameByRef.get(r) ?? r),
         licenses:
           c.licenses?.map((l) => l.license?.id ?? l.license?.name ?? 'unknown').filter(Boolean) ?? [],
       };
@@ -84,4 +88,35 @@ export class SbomParser {
     };
     return map[type] ?? type;
   }
+}
+
+/**
+ * BFS from the root over the CycloneDX dependency graph. Returns, per ref, the
+ * shortest chain of refs from a direct dependency down to that ref inclusive
+ * (the root itself is omitted — it is the application being scanned). BFS
+ * guarantees the shortest explanation, and the visited set makes cycles safe.
+ */
+function shortestPaths(
+  rootRef: string | undefined,
+  dependencies: Array<{ ref: string; dependsOn?: string[] }>,
+): Map<string, string[]> {
+  const paths = new Map<string, string[]>();
+  if (!rootRef) return paths;
+
+  const edges = new Map(dependencies.map((d) => [d.ref, d.dependsOn ?? []]));
+  const queue: string[] = [rootRef];
+  paths.set(rootRef, []);
+
+  while (queue.length) {
+    const current = queue.shift()!;
+    const basePath = paths.get(current)!;
+    for (const next of edges.get(current) ?? []) {
+      if (paths.has(next)) continue;
+      paths.set(next, [...basePath, next]);
+      queue.push(next);
+    }
+  }
+
+  paths.delete(rootRef);
+  return paths;
 }
