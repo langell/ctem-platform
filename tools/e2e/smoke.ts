@@ -280,12 +280,11 @@ async function main(): Promise<void> {
       return `mirror holds ${sync!.advisories} advisories for npm/express`;
     });
 
-    await step('GitHub discovery inventories the fixture repo (needs GITHUB_TOKEN)', async () => {
-      // The asset-service resolves env:GITHUB_TOKEN from ITS environment; this
-      // check assumes the stack was started with the same env as the smoke.
-      if (!process.env.GITHUB_TOKEN) {
-        return 'skipped — set GITHUB_TOKEN (e.g. `export GITHUB_TOKEN=$(gh auth token)`) before starting the stack';
-      }
+    await step('GitHub discovery inventories the fixture repo (live GitHub)', async () => {
+      // ctem-scan-target is public, so this works tokenless via the public
+      // listing. With GITHUB_TOKEN set (asset-service reads it from ITS env,
+      // e.g. `export GITHUB_TOKEN=$(gh auth token)` before `make dev`), the
+      // authenticated private-repo path is exercised instead.
       const ASSET = process.env.ASSET_SERVICE_URL ?? 'http://localhost:3002';
 
       await db.integration.create({
@@ -314,7 +313,7 @@ async function main(): Promise<void> {
         items.some((a) => a.externalKey === 'github:langell/ctem-scan-target'),
         'ctem-scan-target missing from the inventory after discovery',
       );
-      return 'github:langell/ctem-scan-target inventoried from live GitHub';
+      return `github:langell/ctem-scan-target inventoried from live GitHub (${process.env.GITHUB_TOKEN ? 'authenticated' : 'public listing'})`;
     });
 
     await step('threat-intel refresh enriches findings (KEV/EPSS — needs internet)', async () => {
