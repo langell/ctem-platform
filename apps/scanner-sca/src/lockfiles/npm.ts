@@ -56,7 +56,8 @@ function parseNpmV2(doc: NpmLockV2, manifestPath: string) {
   const idByKey = new Map<string, string>();
 
   for (const key of keys) {
-    if (key === '') continue;
+    // Workspace / first-party packages live at keys like `packages/foo`, not under node_modules/.
+    if (!key.includes('node_modules/')) continue;
     const pkg = packages[key];
     if (!pkg?.version || pkg.link) continue;
     if (isLocalResolved(pkg.resolved)) continue;

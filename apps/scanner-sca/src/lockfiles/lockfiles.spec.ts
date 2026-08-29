@@ -46,6 +46,7 @@ describe('npm package-lock.json', () => {
       direct: false,
       dependencyPath: ['express', 'qs'],
     });
+    expect(map['local-lib']).toBeUndefined();
   });
 
   it('parses v1 nested lockfiles', () => {
