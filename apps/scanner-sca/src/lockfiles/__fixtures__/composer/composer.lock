@@ -1,0 +1,19 @@
+{
+  "packages": [
+    {
+      "name": "psr/log",
+      "version": "3.0.0",
+      "license": ["MIT"]
+    },
+    {
+      "name": "monolog/monolog",
+      "version": "v3.5.0",
+      "license": ["MIT"],
+      "require": {
+        "php": ">=8.1",
+        "psr/log": "^3.0"
+      }
+    }
+  ],
+  "packages-dev": []
+}

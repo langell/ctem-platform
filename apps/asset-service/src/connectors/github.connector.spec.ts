@@ -66,7 +66,7 @@ describe('repoToAsset', () => {
       name: 'ctem-scan-target',
       source: 'github',
       exposure: 'internal',
-      attributes: { defaultBranch: 'main', language: 'JavaScript', archived: false },
+      attributes: { defaultBranch: 'main', language: 'JavaScript', archived: false, private: true },
     });
     expect(repoToAsset(repo({ private: false })).exposure).toBe('internet_facing');
   });

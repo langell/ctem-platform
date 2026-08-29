@@ -1,0 +1,2 @@
+# Should be ignored when poetry.lock is present
+flask==2.3.0

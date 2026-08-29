@@ -1,0 +1,7 @@
+# pinned lock-style requirements
+requests==2.31.0
+certifi==2023.7.22
+# a range is a guess — ignored
+flask>=2.0
+# editable / VCS — ignored
+-e ../local-pkg
