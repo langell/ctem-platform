@@ -30,6 +30,12 @@ export class AssetsProxyController {
     });
   }
 
+  @Post('discover')
+  @RequirePermissions('integration:manage')
+  discover(@Req() req: never) {
+    return this.proxy.forward('asset', 'POST', '/internal/assets/discover', req);
+  }
+
   @Post()
   @RequirePermissions('asset:write')
   upsert(@Req() req: never, @Body() body: UpsertAssetRequest) {

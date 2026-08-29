@@ -46,6 +46,9 @@ export const EnvSchema = z.object({
   REPORTING_SERVICE_URL: z.string().default('http://localhost:3006'),
   NOTIFICATION_SERVICE_URL: z.string().default('http://localhost:3007'),
 
+  /** GitHub REST API base for the discovery connector; tests point it at a stub. */
+  GITHUB_API_URL: z.string().default('https://api.github.com'),
+
   /** Vulnerability intelligence feeds consumed by the SCA scanner and risk service. */
   OSV_API_URL: z.string().default('https://api.osv.dev/v1'),
   NVD_API_URL: z.string().default('https://services.nvd.nist.gov/rest/json'),

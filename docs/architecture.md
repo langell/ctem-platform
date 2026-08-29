@@ -97,7 +97,7 @@ The mitigation is that `@ctem/contracts` is the single source of truth for every
 
 1. **Vulnerability feed mirror.** Ingest OSV + NVD + GHSA + EPSS + KEV into `vulnerabilities` and match locally. Per-scan calls to a third-party API are both slow and someone else's uptime problem.
 2. **SCA depth.** Lockfile resolvers per ecosystem, real dependency paths, then reachability. Reachability is the single largest reduction in noise available.
-3. **GitHub/GitLab + cloud connectors.** Without automatic discovery the inventory is a spreadsheet and the "continuous" claim is false.
+3. **GitLab + cloud connectors.** GitHub repository discovery is live; remaining connectors are what keep the inventory from being a spreadsheet.
 4. **Web UI.** The API is only half a product.
 5. **Distributed scheduling.** The discovery and scan schedulers use naive intervals; they need leader election or a JetStream-backed work queue before a second replica of either runs.
 6. **Container layer scanning**, then IaC parsing, then ASM probing depth.
@@ -105,7 +105,7 @@ The mitigation is that `@ctem/contracts` is the single source of truth for every
 
 ## Known gaps in this scaffold
 
-- Scanner internals are stubbed: repo cloning, image layer walking, IaC parsing, port scanning.
+- Scanner internals beyond SCA SBOM ingest are stubbed: repo cloning, image layer walking, IaC parsing, port scanning. Remaining discovery connectors (GitLab, cloud) are not built yet.
 - Gateway PAT verification path is a `TODO`; JWT works.
 - Rate limiting is in-memory — correct for one replica only.
 - SLA breach de-duplication is in-memory and resets on restart.

@@ -12,7 +12,7 @@ export interface DiscoveryContext {
 /**
  * Asset discovery connectors. Each one turns an external system into a stream of
  * upsert requests; the service handles persistence, archival and events.
- * Implementations are intentionally missing — this is the extension point.
+ * GitHub is registered; this remains the extension point for further providers.
  */
 export interface AssetConnector {
   readonly provider: string;

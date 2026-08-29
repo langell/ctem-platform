@@ -107,8 +107,12 @@ model Asset {
   archivedAt  DateTime?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
+  /// Integration that last discovered this row. Scopes stale archival so a
+  /// second GitHub integration in the same org cannot archive the first's inventory.
+  integrationId String? @db.Uuid
 
   org           Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  integration   Integration? @relation(fields: [integrationId], references: [id], onDelete: SetNull)
   findings      Finding[]
   scanJobs      ScanJob[]
   outgoingEdges AssetEdge[]  @relation("edge_from")
@@ -118,6 +122,7 @@ model Asset {
   @@unique([orgId, externalKey])
   @@index([orgId, kind])
   @@index([orgId, exposure, criticality])
+  @@index([orgId, integrationId])
   @@map("assets")
 }
 
@@ -153,7 +158,8 @@ model Integration {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  org    Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  assets Asset[]
 
   @@unique([orgId, provider, displayName])
   @@map("integrations")

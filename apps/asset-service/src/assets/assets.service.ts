@@ -17,7 +17,7 @@ export class AssetsService {
     private readonly bus: EventBus,
   ) {}
 
-  async upsert(orgId: string, input: UpsertAssetRequest) {
+  async upsert(orgId: string, input: UpsertAssetRequest, integrationId?: string) {
     const { asset, created } = await this.prisma.withOrg(orgId, async (tx) => {
       const existing = await tx.asset.findUnique({
         where: { orgId_externalKey: { orgId, externalKey: input.externalKey } },
@@ -38,6 +38,7 @@ export class AssetsService {
         attributes: (input.attributes ?? existing?.attributes ?? {}) as object,
         lastSeenAt: new Date(),
         archivedAt: null,
+        integrationId: integrationId ?? existing?.integrationId ?? null,
       };
 
       const row = await tx.asset.upsert({
@@ -90,11 +91,13 @@ export class AssetsService {
   /**
    * Connectors mark what they saw; anything not seen in this sync is archived
    * rather than deleted, so historical findings keep their asset context.
+   * Scoped to the discovering integration — two GitHub integrations in one
+   * org must not archive each other's inventory.
    */
-  async archiveStale(orgId: string, source: string, seenBefore: Date) {
+  async archiveStale(orgId: string, source: string, seenBefore: Date, integrationId: string) {
     return this.prisma.withOrg(orgId, (tx) =>
       tx.asset.updateMany({
-        where: { source, lastSeenAt: { lt: seenBefore }, archivedAt: null },
+        where: { source, integrationId, lastSeenAt: { lt: seenBefore }, archivedAt: null },
         data: { archivedAt: new Date() },
       }),
     );
