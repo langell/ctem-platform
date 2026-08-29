@@ -34,6 +34,9 @@ describe('VulnFeedService (integration)', () => {
     ],
   };
 
+  const nvdId = 'CVE-2099-0001';
+  const ghsaId = `GHSA-test-${pkg}`.slice(0, 25);
+
   beforeAll(() => {
     owner = ownerClient();
     app = appClient();
@@ -41,13 +44,25 @@ describe('VulnFeedService (integration)', () => {
     feed = new VulnFeedService(store);
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => new Response(JSON.stringify(osvResponse), { status: 200 })),
+      vi.fn(async (url: string | URL, init?: RequestInit) => {
+        const href = String(url);
+        if (href.includes('/advisories')) {
+          return new Response(JSON.stringify([]), { status: 200 });
+        }
+        if (href.includes('/cves/2.0')) {
+          return new Response(JSON.stringify({ vulnerabilities: [] }), { status: 200 });
+        }
+        if (init?.method === 'POST' || href.includes('/query')) {
+          return new Response(JSON.stringify(osvResponse), { status: 200 });
+        }
+        return new Response(JSON.stringify(osvResponse), { status: 200 });
+      }),
     );
   });
 
   afterAll(async () => {
     vi.unstubAllGlobals();
-    await owner.vulnerability.deleteMany({ where: { id: vulnId } });
+    await owner.vulnerability.deleteMany({ where: { id: { in: [vulnId, nvdId, ghsaId] } } });
     await owner.vulnPackageSync.deleteMany({ where: { packageName: pkg } });
     await Promise.all([owner.$disconnect(), app.$disconnect(), store.$disconnect()]);
   });
@@ -82,6 +97,281 @@ describe('VulnFeedService (integration)', () => {
     });
     expect(await feed.mirrorPackages([{ ecosystem: 'npm', name: pkg }])).toBe(1);
     expect(await owner.vulnerabilityAffects.count({ where: { vulnId } })).toBe(1);
+  });
+
+  it('ingests GHSA + NVD onto the same mirror tables', async () => {
+    const other = uniqueSlug('feed-nvd-pkg');
+    const osvId = `TEST-${other}`;
+    const cve = 'CVE-2099-4242';
+    const ghsa = 'GHSA-aaaa-bbbb-cccc';
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL) => {
+        const href = String(url);
+        if (href.includes('/advisories')) {
+          return new Response(
+            JSON.stringify([
+              {
+                ghsa_id: ghsa,
+                cve_id: cve,
+                summary: 'ghsa advisory',
+                description: 'from github',
+                cvss: { score: 8.1, vector_string: 'CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H' },
+                vulnerabilities: [
+                  {
+                    package: { ecosystem: 'npm', name: other },
+                    vulnerable_version_range: '< 2.0.0',
+                    first_patched_version: { identifier: '2.0.0' },
+                  },
+                ],
+              },
+            ]),
+            { status: 200 },
+          );
+        }
+        if (href.includes('/cves/2.0')) {
+          return new Response(
+            JSON.stringify({
+              vulnerabilities: [
+                {
+                  cve: {
+                    id: cve,
+                    descriptions: [{ lang: 'en', value: 'official nvd text' }],
+                    metrics: {
+                      cvssMetricV31: [
+                        {
+                          type: 'Primary',
+                          cvssData: {
+                            baseScore: 9.8,
+                            vectorString: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+                            baseSeverity: 'CRITICAL',
+                          },
+                        },
+                      ],
+                    },
+                  },
+                },
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response(
+          JSON.stringify({
+            vulns: [
+              {
+                id: osvId,
+                aliases: [cve],
+                summary: 'osv advisory',
+                severity: [{ type: 'CVSS_V3', score: '5.0' }],
+                affected: [{ package: { name: other, ecosystem: 'npm' }, ranges: [] }],
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }),
+    );
+
+    try {
+      expect(await feed.mirrorPackages([{ ecosystem: 'npm', name: other }])).toBe(1);
+
+      const ghsaRow = await owner.vulnerability.findUnique({
+        where: { id: ghsa },
+        include: { affects: true },
+      });
+      expect(ghsaRow).toMatchObject({ source: 'GHSA', aliases: [cve] });
+      expect(ghsaRow!.affects).toEqual([
+        expect.objectContaining({ ecosystem: 'npm', packageName: other }),
+      ]);
+      // NVD overlays official CVSS onto the alias that had no better score...
+      // GHSA already had 8.1, so overlay skips; the CVE row itself is NVD.
+      const nvdRow = await owner.vulnerability.findUnique({ where: { id: cve } });
+      expect(nvdRow).toMatchObject({ source: 'NVD', cvssScore: 9.8, severity: 'critical' });
+
+      const osvRow = await owner.vulnerability.findUnique({ where: { id: osvId } });
+      expect(osvRow).toMatchObject({ source: 'OSV', aliases: [cve] });
+    } finally {
+      await owner.vulnPackageSync.deleteMany({ where: { packageName: other } });
+      await owner.vulnerability.deleteMany({ where: { id: { in: [osvId, ghsa, cve] } } });
+    }
+  });
+
+  it('keeps OSV ranges when GHSA writes the same GHSA- id', async () => {
+    const pkgName = uniqueSlug('shared-ghsa');
+    const ghsaId = `GHSA-keep-${pkgName}`.slice(0, 25);
+    const osvRanges = [
+      { type: 'SEMVER', events: [{ introduced: '1.0.0' }, { fixed: '1.4.2' }] },
+    ];
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL) => {
+        const href = String(url);
+        if (href.includes('/advisories')) {
+          return new Response(
+            JSON.stringify([
+              {
+                ghsa_id: ghsaId,
+                cve_id: 'CVE-2099-5555',
+                summary: 'lossy ghsa conversion',
+                vulnerabilities: [
+                  {
+                    package: { ecosystem: 'npm', name: pkgName },
+                    vulnerable_version_range: '< 9.9.9',
+                    first_patched_version: { identifier: '9.9.9' },
+                  },
+                ],
+              },
+            ]),
+            { status: 200 },
+          );
+        }
+        if (href.includes('/cves/2.0')) {
+          return new Response(JSON.stringify({ vulnerabilities: [] }), { status: 200 });
+        }
+        return new Response(
+          JSON.stringify({
+            vulns: [
+              {
+                id: ghsaId,
+                aliases: ['CVE-2099-5555'],
+                summary: 'osv ranges',
+                affected: [{ package: { name: pkgName, ecosystem: 'npm' }, ranges: osvRanges }],
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }),
+    );
+
+    try {
+      expect(await feed.mirrorPackages([{ ecosystem: 'npm', name: pkgName }])).toBe(1);
+      const row = await owner.vulnerability.findUnique({
+        where: { id: ghsaId },
+        include: { affects: true },
+      });
+      expect(row?.affected).toEqual([
+        expect.objectContaining({
+          package: { name: pkgName, ecosystem: 'npm' },
+          ranges: osvRanges,
+        }),
+      ]);
+      expect(row?.affects).toEqual([
+        expect.objectContaining({ ecosystem: 'npm', packageName: pkgName }),
+      ]);
+
+      // 6h sweep also uses fill — must not wipe the OSV events.
+      expect((await feed.ingestRecentFeeds()).ghsa).toBeGreaterThanOrEqual(1);
+      const afterSweep = await owner.vulnerability.findUnique({ where: { id: ghsaId } });
+      expect(afterSweep?.affected).toEqual(row?.affected);
+    } finally {
+      await owner.vulnPackageSync.deleteMany({ where: { packageName: pkgName } });
+      await owner.vulnerability.deleteMany({ where: { id: ghsaId } });
+    }
+  });
+
+  it('does not write a sync row when OSV paging is truncated', async () => {
+    const pkgName = uniqueSlug('trunc-pkg');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL) => {
+        const href = String(url);
+        if (href.includes('/advisories') || href.includes('/cves/2.0')) {
+          return new Response(JSON.stringify([]), { status: 200 });
+        }
+        return new Response(
+          JSON.stringify({ vulns: [], next_page_token: 'still-more' }),
+          { status: 200 },
+        );
+      }),
+    );
+
+    try {
+      expect(await feed.mirrorPackages([{ ecosystem: 'npm', name: pkgName }])).toBe(0);
+      expect(
+        await owner.vulnPackageSync.findUnique({
+          where: { ecosystem_packageName: { ecosystem: 'npm', packageName: pkgName } },
+        }),
+      ).toBeNull();
+    } finally {
+      await owner.vulnPackageSync.deleteMany({ where: { packageName: pkgName } });
+    }
+  });
+
+  it('pages recent GHSA + NVD feeds into the shared tables without a sync row', async () => {
+    const cve = 'CVE-2099-7777';
+    const ghsa = 'GHSA-feed-bulk-xxxx';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL) => {
+        const href = String(url);
+        if (href.includes('/advisories')) {
+          expect(href).toContain('updated');
+          return new Response(
+            JSON.stringify([
+              {
+                ghsa_id: ghsa,
+                cve_id: cve,
+                summary: 'bulk ghsa',
+                updated_at: new Date().toISOString(),
+                vulnerabilities: [
+                  {
+                    package: { ecosystem: 'npm', name: 'left-pad' },
+                    vulnerable_version_range: '< 1.0.1',
+                    first_patched_version: { identifier: '1.0.1' },
+                  },
+                ],
+              },
+            ]),
+            { status: 200 },
+          );
+        }
+        if (href.includes('/cves/2.0')) {
+          return new Response(
+            JSON.stringify({
+              startIndex: 0,
+              resultsPerPage: 1,
+              totalResults: 1,
+              vulnerabilities: [
+                {
+                  cve: {
+                    id: cve,
+                    descriptions: [{ lang: 'en', value: 'bulk nvd' }],
+                    metrics: {
+                      cvssMetricV31: [
+                        { type: 'Primary', cvssData: { baseScore: 4.3, baseSeverity: 'MEDIUM' } },
+                      ],
+                    },
+                  },
+                },
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response('unexpected', { status: 500 });
+      }),
+    );
+
+    try {
+      const summary = await feed.ingestRecentFeeds();
+      expect(summary.ghsa).toBeGreaterThanOrEqual(1);
+      expect(summary.nvd).toBeGreaterThanOrEqual(1);
+      expect(await owner.vulnerability.findUnique({ where: { id: ghsa } })).toMatchObject({
+        source: 'GHSA',
+        cvssScore: 4.3,
+      });
+      expect(await owner.vulnerability.findUnique({ where: { id: cve } })).toMatchObject({
+        source: 'NVD',
+        cvssScore: 4.3,
+      });
+      expect(await owner.vulnPackageSync.count({ where: { packageName: 'left-pad' } })).toBe(0);
+    } finally {
+      await owner.vulnerability.deleteMany({ where: { id: { in: [ghsa, cve] } } });
+    }
   });
 
   it('app role can read the mirror but not write it', async () => {

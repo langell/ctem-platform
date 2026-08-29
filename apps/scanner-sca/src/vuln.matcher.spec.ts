@@ -75,6 +75,65 @@ describe('VulnMatcher.match', () => {
     expect(match.severity).toBe('medium');
   });
 
+  it('pages EPSS into the overlay cache and refreshes KEV on warmCache', async () => {
+    const fetchFn = vi.fn(async (url: string | URL) => {
+      const href = String(url);
+      if (href.includes('known_exploited')) {
+        return new Response(JSON.stringify({ vulnerabilities: [{ cveID: 'CVE-2022-24999' }] }), {
+          status: 200,
+        });
+      }
+      if (href.includes('epss')) {
+        const offset = Number(new URL(href).searchParams.get('offset') ?? '0');
+        if (offset === 0) {
+          return new Response(
+            JSON.stringify({
+              total: 2,
+              offset: 0,
+              limit: 1,
+              data: [{ cve: 'CVE-2022-24999', epss: '0.77', percentile: '0.99' }],
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response(
+          JSON.stringify({
+            total: 2,
+            offset: 1,
+            limit: 1,
+            data: [{ cve: 'CVE-2020-0001', epss: '0.01' }],
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          vulns: [
+            {
+              id: 'GHSA-hrpp-h998-j3pp',
+              aliases: ['CVE-2022-24999'],
+              summary: 'qs',
+              severity: [{ type: 'CVSS_V3', score: '7.5' }],
+            },
+          ],
+        }),
+        { status: 200 },
+      );
+    });
+    vi.stubGlobal('fetch', fetchFn);
+
+    const matcher = new VulnMatcher();
+    try {
+      await matcher.warmCache();
+      const { matches } = await matcher.match(component);
+      expect(matches[0]).toMatchObject({ epssScore: 0.77, kev: true });
+      const epssCalls = fetchFn.mock.calls.filter((c) => String(c[0]).includes('epss'));
+      expect(epssCalls.length).toBeGreaterThanOrEqual(2);
+    } finally {
+      matcher.onModuleDestroy();
+    }
+  });
+
   it('returns no matches when OSV errors, rather than failing the scan', async () => {
     stubOsv({ message: 'rate limited' }, 429);
     expect((await new VulnMatcher().match(component)).matches).toEqual([]);

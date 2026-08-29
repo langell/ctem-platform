@@ -77,14 +77,14 @@ export function advisoryAffects(advisory: OsvAdvisory): AffectsRow[] {
 }
 
 /** OSV reports CVSS as a vector string or a bare number; derive what we can. */
-function parseCvssBaseScore(vector: string): number | null {
+export function parseCvssBaseScore(vector: string): number | null {
   const numeric = Number(vector);
   if (!Number.isNaN(numeric)) return numeric;
   // TODO: full CVSS v3.1/v4.0 base-score computation from the vector.
   return null;
 }
 
-function severityFromScore(score: number | null): string {
+export function severityFromScore(score: number | null): string {
   if (score === null) return 'medium';
   if (score >= 9) return 'critical';
   if (score >= 7) return 'high';

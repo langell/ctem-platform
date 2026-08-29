@@ -86,6 +86,17 @@ describe('VulnMatcher local mirror (integration)', () => {
     expect(matches).toEqual([]);
   });
 
+  it('keeps a stale sync row on the local mirror — no live OSV', async () => {
+    await owner.vulnPackageSync.update({
+      where: { ecosystem_packageName: { ecosystem: 'npm', packageName: pkg } },
+      data: { syncedAt: new Date(0) },
+    });
+    const { matches, mirrored } = await matcher.match(component('1.2.0'));
+    expect(mirrored).toBe(true);
+    expect(matches).toEqual([expect.objectContaining({ id: vulnId })]);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it('falls back to live matching for packages the mirror has never seen', async () => {
     const { matches, mirrored } = await matcher.match({
       ...component('1.0.0'),
