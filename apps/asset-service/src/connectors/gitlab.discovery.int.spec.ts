@@ -256,6 +256,46 @@ describe('GitLab discovery (integration)', () => {
     process.env.GITLAB_INT_TOKEN = token;
   });
 
+  it('does not archive when a private user profile would 200 empty on /users/:id/projects', async () => {
+    const first = await owner.integration.findFirst({
+      where: { orgId, displayName: 'discovery-int-test' },
+    });
+    const keep = await owner.asset.create({
+      data: {
+        orgId,
+        kind: 'repository',
+        externalKey: 'gitlab:langell/private-keep',
+        name: 'private-keep',
+        source: 'gitlab',
+        integrationId: first!.id,
+      },
+    });
+
+    const fetchFn = vi.fn(async (url: string | URL) => {
+      const href = String(url);
+      if (href.includes('/users/')) {
+        return new Response(JSON.stringify([]), { status: 200 });
+      }
+      return new Response(JSON.stringify([glProject('private-keep')]), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchFn);
+
+    const result = await scheduler.syncIntegration(first!);
+    const called = String(fetchFn.mock.calls[0][0]);
+    expect(called).toContain('/projects?owned=true');
+    expect(called).not.toContain('/users/');
+    expect(result.error).toBeNull();
+    expect(result.upserted).toBeGreaterThanOrEqual(1);
+
+    const kept = await owner.asset.findUnique({ where: { id: keep.id } });
+    expect(kept?.archivedAt).toBeNull();
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify(projects), { status: fetchStatus })),
+    );
+  });
+
   it('records connector failures on the integration row and does not wipe inventory', async () => {
     fetchStatus = 500;
     projects = [];

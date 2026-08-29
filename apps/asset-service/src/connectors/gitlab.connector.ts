@@ -132,7 +132,12 @@ export class GitLabConnector implements AssetConnector {
     const path =
       config.ownerType === 'group'
         ? `/groups/${owner}/projects?include_subgroups=true`
-        : `/users/${owner}/projects`;
+        : token
+          ? // Authenticated owned listing includes private projects. GET
+            // /users/:id/projects can 200 with [] for a private profile and
+            // would archive live inventory. Filtered to the owner below.
+            `/projects?owned=true`
+          : `/users/${owner}/projects`;
 
     for (let page = 1; page <= GITLAB_MAX_PAGES; page++) {
       const sep = path.includes('?') ? '&' : '?';

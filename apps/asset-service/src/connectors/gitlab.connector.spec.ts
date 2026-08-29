@@ -123,12 +123,21 @@ describe('GitLabConnector.discover', () => {
       new GitLabConnector().discover(ctx(userCfg(), 'env:GITLAB_TEST_TOKEN')),
     );
     expect(assets).toHaveLength(1);
-    expect(String(fetchFn.mock.calls[0][0])).toBe(
-      `${GITLAB_API_URL}/users/langell/projects?per_page=${GITLAB_PER_PAGE}&page=1`,
-    );
+    const url = String(fetchFn.mock.calls[0][0]);
+    expect(url).toBe(`${GITLAB_API_URL}/projects?owned=true&per_page=${GITLAB_PER_PAGE}&page=1`);
+    expect(url).not.toContain('/users/');
     expect((fetchFn.mock.calls[0][1] as RequestInit).headers).toMatchObject({
       authorization: 'Bearer glpat-token',
     });
+  });
+
+  it('does not hit /users/:id/projects when a credential is present (private profiles 200 empty)', async () => {
+    process.env.GITLAB_TEST_TOKEN = 'glpat-token';
+    const fetchFn = stubPages([[]]);
+    await collect(new GitLabConnector().discover(ctx(userCfg(), 'env:GITLAB_TEST_TOKEN')));
+    const url = String(fetchFn.mock.calls[0][0]);
+    expect(url).toContain('/projects?owned=true');
+    expect(url).not.toContain('/users/langell/projects');
   });
 
   it('falls back to the public listing without a credential', async () => {
