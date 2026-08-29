@@ -12,6 +12,7 @@ import { AssetGraphService } from './assets/asset-graph.service';
 import { ConnectorRegistry } from './connectors/connector.registry';
 import { DiscoverySchedulerService } from './connectors/discovery-scheduler.service';
 import { GitHubConnector } from './connectors/github.connector';
+import { GitLabConnector } from './connectors/gitlab.connector';
 
 @Module({
   imports: [CtemConfigModule, ObservabilityModule, AuthModule, EventsModule, DbModule],
@@ -22,6 +23,7 @@ import { GitHubConnector } from './connectors/github.connector';
     ConnectorRegistry,
     DiscoverySchedulerService,
     GitHubConnector,
+    GitLabConnector,
     { provide: APP_GUARD, useClass: InternalAuthGuard },
   ],
 })
@@ -29,11 +31,13 @@ export class AppModule implements OnModuleInit {
   constructor(
     private readonly registry: ConnectorRegistry,
     private readonly github: GitHubConnector,
+    private readonly gitlab: GitLabConnector,
   ) {}
 
   /** Connector registration is explicit and lives in one greppable place. */
   onModuleInit(): void {
     this.registry.register(this.github);
+    this.registry.register(this.gitlab);
   }
 
   configure(consumer: MiddlewareConsumer): void {

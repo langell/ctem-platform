@@ -4,6 +4,7 @@ import { resolveCredential } from './credentials';
 afterEach(() => {
   delete process.env.GITHUB_TOKEN;
   delete process.env.GITHUB_TEST_TOKEN;
+  delete process.env.GITLAB_TOKEN;
 });
 
 describe('resolveCredential', () => {
@@ -14,6 +15,11 @@ describe('resolveCredential', () => {
   it('reads an allowlisted GITHUB_* env var', () => {
     process.env.GITHUB_TOKEN = 'ghp_test';
     expect(resolveCredential('env:GITHUB_TOKEN')).toBe('ghp_test');
+  });
+
+  it('reads an allowlisted GITLAB_* env var', () => {
+    process.env.GITLAB_TOKEN = 'glpat_test';
+    expect(resolveCredential('env:GITLAB_TOKEN')).toBe('glpat_test');
   });
 
   it('returns undefined when an allowlisted name is unset (public-listing path)', () => {

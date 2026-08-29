@@ -19,7 +19,8 @@ export const golangParser: EcosystemParser = {
 /**
  * go.mod carries exact versions plus `// indirect`. go.sum is a checksum list —
  * it has no graph. Combined:
- *   - versions come from both (union)
+ *   - versions come from both (union of every name@version; go.sum can
+ *     checksum more than one version of a module)
  *   - direct vs transitive comes from go.mod
  *   - dependencyPath is `[module]` for direct modules and empty otherwise
  *
@@ -30,17 +31,22 @@ export function parseGoModules(goMod: string, goSum: string, manifestPath: strin
   const fromMod = parseGoMod(goMod);
   const fromSum = parseGoSum(goSum);
 
-  const byName = new Map<string, { version: string; direct: boolean }>();
-  for (const [name, version] of fromSum) {
-    byName.set(name, { version, direct: false });
+  // go.sum lists every checksummed version (two lines per version). Keep each
+  // name@version — first-version-wins would drop a second locked copy.
+  const byId = new Map<string, { name: string; version: string; direct: boolean }>();
+  for (const { name, version } of fromSum) {
+    byId.set(`${name}@${version}`, { name, version, direct: false });
   }
   for (const req of fromMod.requires) {
-    byName.set(req.name, { version: req.version, direct: req.direct });
+    byId.set(`${req.name}@${req.version}`, { name: req.name, version: req.version, direct: req.direct });
   }
   for (const rep of fromMod.replaces) {
     if (rep.newName && rep.newVersion) {
-      byName.delete(rep.oldName);
-      byName.set(rep.newName, {
+      for (const [id, info] of byId) {
+        if (info.name === rep.oldName) byId.delete(id);
+      }
+      byId.set(`${rep.newName}@${rep.newVersion}`, {
+        name: rep.newName,
         version: rep.newVersion,
         direct: fromMod.requires.find((r) => r.name === rep.oldName)?.direct ?? false,
       });
@@ -48,14 +54,14 @@ export function parseGoModules(goMod: string, goSum: string, manifestPath: strin
   }
 
   const path = manifestPath.endsWith('go.mod') ? manifestPath.replace(/go\.mod$/, 'go.sum') || 'go.sum' : manifestPath;
-  return [...byName.entries()].map(([name, info]) =>
+  return [...byId.values()].map((info) =>
     makeComponent({
-      name,
+      name: info.name,
       version: info.version,
       ecosystem: ECOSYSTEM.go,
-      purl: purlFor(ECOSYSTEM.go, name, info.version),
+      purl: purlFor(ECOSYSTEM.go, info.name, info.version),
       direct: info.direct,
-      dependencyPath: info.direct ? [name] : [],
+      dependencyPath: info.direct ? [info.name] : [],
       manifestPath: path,
     }),
   );
@@ -108,8 +114,9 @@ export function parseGoMod(content: string): {
   return { requires, replaces };
 }
 
-export function parseGoSum(content: string): Map<string, string> {
-  const out = new Map<string, string>();
+export function parseGoSum(content: string): Array<{ name: string; version: string }> {
+  const out: Array<{ name: string; version: string }> = [];
+  const seen = new Set<string>();
   if (!content) return out;
   for (const raw of content.split('\n')) {
     const line = raw.trim();
@@ -119,7 +126,10 @@ export function parseGoSum(content: string): Map<string, string> {
     const name = parts[0];
     let version = parts[1];
     if (version.endsWith('/go.mod')) version = version.slice(0, -'/go.mod'.length);
-    if (!out.has(name)) out.set(name, version);
+    const id = `${name}@${version}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push({ name, version });
   }
   return out;
 }

@@ -64,7 +64,9 @@ export function parsePomXml(content: string, manifestPath: string) {
   const properties = parsePomProperties(xml);
   const managed = parseDependencies(extractTagInner(xml, 'dependencyManagement') ?? '', properties);
   const managedVersion = new Map(managed.map((d) => [d.name, d.version]));
-  const deps = parseDependencies(xml.replace(/<dependencyManagement>[\s\S]*?<\/dependencyManagement>/gi, ''), properties);
+  // Plugin classpath deps live under <build>/<reporting>/<pluginManagement>
+  // and are not product coordinates.
+  const deps = parseDependencies(productDependencyXml(xml), properties);
 
   const seen = new Map<string, string>();
   for (const dep of deps) {
@@ -109,6 +111,15 @@ function parsePomProperties(xml: string): Record<string, string> {
     props[m[1]] = m[2].trim();
   }
   return props;
+}
+
+/** Project (and profile) product deps — strip plugin-bearing sections first. */
+function productDependencyXml(xml: string): string {
+  let product = xml;
+  for (const tag of ['dependencyManagement', 'build', 'reporting', 'pluginManagement']) {
+    product = product.replace(new RegExp(`<${tag}\\b[^>]*>[\\s\\S]*?</${tag}>`, 'gi'), '');
+  }
+  return product;
 }
 
 function parseDependencies(

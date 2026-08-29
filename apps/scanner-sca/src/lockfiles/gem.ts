@@ -87,7 +87,8 @@ function parseDirectDependencies(content: string): Set<string> {
   if (idx === -1) return names;
   const rest = content.slice(idx).split(/\n(?=[A-Z])/).at(0) ?? '';
   for (const line of rest.split('\n').slice(1)) {
-    const m = /^\s{2}(\S+)/.exec(line);
+    // `rails!` is a git/path pin; `foo (~> 1.0)` is a constraint. Specs use the bare name.
+    const m = /^\s{2}(\S+?)(?:!|\s|$)/.exec(line);
     if (m) names.add(m[1]);
   }
   return names;

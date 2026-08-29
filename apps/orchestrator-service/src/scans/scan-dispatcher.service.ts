@@ -6,6 +6,36 @@ import { loadEnv } from '@ctem/config';
 import { currentTraceId, rootLogger } from '@ctem/observability';
 import { ScanPlannerService } from './scan-planner.service';
 
+export interface DispatchAsset {
+  id: string;
+  kind: string;
+  externalKey: string;
+  attributes: unknown;
+  integrationId: string | null;
+}
+
+/** Target metadata the scanner is allowed to see — includes connector attributes. */
+export function scanJobTarget(asset: Pick<DispatchAsset, 'externalKey' | 'kind' | 'attributes'>): Record<string, unknown> {
+  const attrs =
+    asset.attributes && typeof asset.attributes === 'object' && !Array.isArray(asset.attributes)
+      ? (asset.attributes as Record<string, unknown>)
+      : {};
+  return {
+    externalKey: asset.externalKey,
+    kind: asset.kind,
+    ...attrs,
+  };
+}
+
+/** Pointer only — never the secret. Missing integration → null (public path). */
+export function scanJobCredentialRef(
+  asset: Pick<DispatchAsset, 'integrationId'>,
+  refs: Map<string, string | null>,
+): string | null {
+  if (!asset.integrationId) return null;
+  return refs.get(asset.integrationId) ?? null;
+}
+
 @Injectable()
 export class ScanDispatcherService {
   private readonly log = rootLogger.child({ component: 'scan-dispatcher' });
@@ -67,6 +97,7 @@ export class ScanDispatcherService {
     const jobs = await this.prisma.withOrg(orgId, (tx) =>
       tx.scanJob.findMany({ where: { scanId: scan.id } }),
     );
+    const credByIntegration = await this.credentialRefsFor(orgId, assets);
 
     for (const job of jobs) {
       const asset = assets.find((a) => a.id === job.assetId)!;
@@ -76,13 +107,10 @@ export class ScanDispatcherService {
         orgId,
         scannerType: request.scannerType as ScannerType,
         assetId: job.assetId,
-        target: {
-          externalKey: asset.externalKey,
-          kind: asset.kind,
-          ...(asset.attributes as Record<string, unknown>),
-        },
-        // Resolved from the secret store at dispatch time, not stored on the job.
-        credentialRef: null,
+        target: scanJobTarget(asset),
+        // Pointer from the discovering integration — resolved by the scanner
+        // via the platform-operated env: allowlist, never stored as a secret.
+        credentialRef: scanJobCredentialRef(asset, credByIntegration),
         options: request.options,
         attempt: 1,
         deadlineAt: new Date(Date.now() + env.SCANNER_JOB_TIMEOUT_MS),
@@ -108,6 +136,7 @@ export class ScanDispatcherService {
     const asset = await this.prisma.withOrg(orgId, (tx) =>
       tx.asset.findUniqueOrThrow({ where: { id: job.assetId } }),
     );
+    const credByIntegration = await this.credentialRefsFor(orgId, [asset]);
 
     await this.bus.publish(SUBJECTS.scanJobDispatched, orgId, {
       jobId: job.id,
@@ -115,13 +144,28 @@ export class ScanDispatcherService {
       orgId,
       scannerType: job.scannerType,
       assetId: job.assetId,
-      target: { externalKey: asset.externalKey, kind: asset.kind },
-      credentialRef: null,
+      target: scanJobTarget(asset),
+      credentialRef: scanJobCredentialRef(asset, credByIntegration),
       options: {},
       attempt: job.attempt,
       deadlineAt: new Date(Date.now() + loadEnv().SCANNER_JOB_TIMEOUT_MS),
       traceId: currentTraceId(),
     });
     return job;
+  }
+
+  private async credentialRefsFor(
+    orgId: string,
+    assets: Array<{ integrationId: string | null }>,
+  ): Promise<Map<string, string | null>> {
+    const ids = [...new Set(assets.map((a) => a.integrationId).filter((id): id is string => Boolean(id)))];
+    if (!ids.length) return new Map();
+    const rows = await this.prisma.withOrg(orgId, (tx) =>
+      tx.integration.findMany({
+        where: { id: { in: ids } },
+        select: { id: true, credentialRef: true },
+      }),
+    );
+    return new Map(rows.map((r) => [r.id, r.credentialRef]));
   }
 }
