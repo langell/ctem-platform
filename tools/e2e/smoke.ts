@@ -208,7 +208,7 @@ async function main(): Promise<void> {
       return scan;
     };
 
-    await step('dispatch a scan and watch it complete', async () => {
+    await step('dispatch a source SCA scan that fails closed without a cloneable repo', async () => {
       const created = await api(GATEWAY, 'POST', '/v1/scans', {
         token: patA,
         body: { scannerType: 'sca', assetSelector: {}, options: {} },
@@ -218,11 +218,13 @@ async function main(): Promise<void> {
         `expected 2xx with id, got ${created.status}: ${JSON.stringify(created.json)}`,
       );
       const scan = await awaitScan(String(created.json!.id));
+      // github:smoke/… is not a real repo. Source SCA must throw rather than
+      // succeed with zero findings (that would auto-resolve prior hits).
       expect(
-        scan.status === 'succeeded',
-        `scan ended as '${scan.status}' — expected succeeded (no SBOM, so zero findings is fine)`,
+        scan.status === 'failed',
+        `scan ended as '${scan.status}' — expected failed (source SCA fails closed when checkout cannot run)`,
       );
-      return `scan ${created.json!.id} succeeded`;
+      return `scan ${created.json!.id} failed closed`;
     });
 
     await step('SBOM ingest produces real findings (queries OSV — needs internet)', async () => {

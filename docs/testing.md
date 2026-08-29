@@ -34,7 +34,7 @@ via `@ctem/testing` factories and deleting them in `afterAll`
 
 **E2E smoke** — one scripted golden path against the live stack: health →
 machine-token issuance → gateway PAT auth → asset registration → cross-org
-isolation → permission denial → scan dispatch to completion → SBOM ingest
+isolation → permission denial → source SCA fail-closed (no cloneable repo) → SBOM ingest
 producing real findings for `express@4.17.1` → feed mirror population →
 threat-intel refresh (KEV/EPSS) enriching those findings → GitHub discovery of a live fixture → org-B isolation after discovery → findings listing.
 The SBOM and intel steps query OSV/CISA/FIRST, so they need internet access;
