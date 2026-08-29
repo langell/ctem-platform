@@ -9,7 +9,8 @@ import { isPrivateTarget, resolveGithubCredential } from './github.credential';
 const execFileAsync = promisify(execFile);
 
 const SAFE_REF = /^[A-Za-z0-9._/-]+$/;
-const GITHUB_REPO = /^[\w.-]+$/;
+const SCM_SEGMENT = /^[\w.-]+$/;
+const ALLOWED_CLONE_HOSTS = new Set(['github.com', 'www.github.com', 'gitlab.com', 'www.gitlab.com']);
 
 export class CheckoutError extends Error {
   constructor(message: string) {
@@ -33,10 +34,12 @@ export interface ResolvedCheckout {
  * The SDK already creates and deletes that directory — this does not invent
  * a second sandbox.
  *
- * Egress is allowlisted: only `https://github.com/owner/repo` from `cloneUrl`
- * or a `github:owner/repo` externalKey. Tenant-writable `htmlUrl` / `url` /
- * `git@` are refused. Missing or refused sources throw so the job fails
- * closed instead of scanning an empty workDir.
+ * Egress is allowlisted: `https://github.com/owner/repo` or
+ * `https://gitlab.com/owner/repo` (nested GitLab groups allowed) from
+ * `cloneUrl`, or a `github:owner/repo` / `gitlab:owner/repo` externalKey.
+ * Tenant-writable `htmlUrl` / `url` / `git@` are refused. Missing or refused
+ * sources throw so the job fails closed instead of scanning an empty workDir.
+ * Self-hosted GitLab is later explicit config — not any hostname in cloneUrl.
  */
 @Injectable()
 export class GitRepoCheckout implements RepoCheckout {
@@ -58,19 +61,27 @@ export function resolveCheckout(job: Pick<ScanJob, 'target' | 'credentialRef'>):
 
 export function resolveCloneUrl(target: Record<string, unknown>): string {
   if (typeof target.cloneUrl === 'string' && target.cloneUrl.length > 0) {
-    return allowlistedGithubHttps(target.cloneUrl);
+    return allowlistedCloneHttps(target.cloneUrl);
   }
   const key = target.externalKey;
   if (typeof key === 'string' && key.startsWith('github:')) {
     return githubKeyToHttps(key);
   }
+  if (typeof key === 'string' && key.startsWith('gitlab:')) {
+    return gitlabKeyToHttps(key);
+  }
   throw new CheckoutError(
-    'SCA source scan needs an allowlisted clone source (cloneUrl on github.com, or github:owner/repo). ' +
+    'SCA source scan needs an allowlisted clone source (cloneUrl on github.com or gitlab.com, or github:owner/repo / gitlab:owner/repo). ' +
       'htmlUrl / url / git@ are refused so tenant-writable target metadata cannot drive scanner egress.',
   );
 }
 
+/** @deprecated use allowlistedCloneHttps — kept so existing imports keep working. */
 export function allowlistedGithubHttps(raw: string): string {
+  return allowlistedCloneHttps(raw);
+}
+
+export function allowlistedCloneHttps(raw: string): string {
   if (raw.startsWith('git@') || raw.startsWith('ssh:')) {
     throw new CheckoutError(`Refusing git@ / ssh clone URL: ${raw}`);
   }
@@ -83,8 +94,11 @@ export function allowlistedGithubHttps(raw: string): string {
   if (parsed.protocol !== 'https:') {
     throw new CheckoutError(`Refusing non-https clone URL: ${raw}`);
   }
-  if (parsed.hostname !== 'github.com' && parsed.hostname !== 'www.github.com') {
-    throw new CheckoutError(`Refusing clone host '${parsed.hostname}' — only github.com is allowlisted`);
+  const canonical = canonicalCloneHost(parsed.hostname);
+  if (!canonical) {
+    throw new CheckoutError(
+      `Refusing clone host '${parsed.hostname}' — only github.com and gitlab.com are allowlisted`,
+    );
   }
   if (parsed.port && parsed.port !== '443') {
     throw new CheckoutError(`Refusing clone URL with non-default port: ${raw}`);
@@ -93,10 +107,16 @@ export function allowlistedGithubHttps(raw: string): string {
     throw new CheckoutError('Refusing clone URL that already embeds credentials');
   }
   const parts = parsed.pathname.replace(/\.git$/, '').split('/').filter(Boolean);
-  if (parts.length !== 2 || !GITHUB_REPO.test(parts[0]) || !GITHUB_REPO.test(parts[1])) {
-    throw new CheckoutError(`Refusing clone URL with an unexpected GitHub path: ${raw}`);
+  if (canonical === 'github.com') {
+    if (parts.length !== 2 || !parts.every((p) => SCM_SEGMENT.test(p))) {
+      throw new CheckoutError(`Refusing clone URL with an unexpected GitHub path: ${raw}`);
+    }
+    return `https://github.com/${parts[0]}/${parts[1]}.git`;
   }
-  return `https://github.com/${parts[0]}/${parts[1]}.git`;
+  if (parts.length < 2 || parts.length > 10 || !parts.every((p) => SCM_SEGMENT.test(p))) {
+    throw new CheckoutError(`Refusing clone URL with an unexpected GitLab path: ${raw}`);
+  }
+  return `https://gitlab.com/${parts.join('/')}.git`;
 }
 
 export function githubKeyToHttps(externalKey: string): string {
@@ -105,6 +125,24 @@ export function githubKeyToHttps(externalKey: string): string {
     throw new CheckoutError(`Refusing malformed github externalKey: ${externalKey}`);
   }
   return `https://github.com/${m[1]}/${m[2]}.git`;
+}
+
+export function gitlabKeyToHttps(externalKey: string): string {
+  const m = /^gitlab:([\w.-]+(?:\/[\w.-]+)+)$/.exec(externalKey);
+  if (!m) {
+    throw new CheckoutError(`Refusing malformed gitlab externalKey: ${externalKey}`);
+  }
+  const parts = m[1].split('/');
+  if (parts.length > 10) {
+    throw new CheckoutError(`Refusing malformed gitlab externalKey: ${externalKey}`);
+  }
+  return `https://gitlab.com/${m[1]}.git`;
+}
+
+function canonicalCloneHost(hostname: string): 'github.com' | 'gitlab.com' | null {
+  if (hostname === 'github.com' || hostname === 'www.github.com') return 'github.com';
+  if (hostname === 'gitlab.com' || hostname === 'www.gitlab.com') return 'gitlab.com';
+  return null;
 }
 
 function requireUsableCredential(job: Pick<ScanJob, 'target' | 'credentialRef'>): string | undefined {
@@ -124,11 +162,11 @@ function requireUsableCredential(job: Pick<ScanJob, 'target' | 'credentialRef'>)
     if (ref) {
       throw new CheckoutError(
         `credentialRef '${ref}' is set but cannot be used — refusing to clone unauthenticated ` +
-          '(private GitHub assets would be missed; a public-only clone must not report empty success)',
+          '(private GitHub/GitLab assets would be missed; a public-only clone must not report empty success)',
       );
     }
     throw new CheckoutError(
-      'Private repository requires a usable credentialRef (env:GITHUB_*). ' +
+      'Private repository requires a usable credentialRef (env:GITHUB_* or env:GITLAB_*). ' +
         'Refusing to clone unauthenticated.',
     );
   }
@@ -137,7 +175,21 @@ function requireUsableCredential(job: Pick<ScanJob, 'target' | 'credentialRef'>)
 
 /** `http.extraHeader` value. Never embed the PAT in the remote URL or .git/config. */
 export function githubHttpExtraHeader(token: string): string {
-  const basic = Buffer.from(`x-access-token:${token}`, 'utf8').toString('base64');
+  return basicAuthExtraHeader('x-access-token', token);
+}
+
+/** GitLab HTTPS PAT — same extraHeader path, oauth2 basic user. */
+export function gitlabHttpExtraHeader(token: string): string {
+  return basicAuthExtraHeader('oauth2', token);
+}
+
+export function cloneHttpExtraHeader(url: string, token: string): string {
+  const host = canonicalCloneHost(new URL(url).hostname);
+  return host === 'gitlab.com' ? gitlabHttpExtraHeader(token) : githubHttpExtraHeader(token);
+}
+
+function basicAuthExtraHeader(user: string, token: string): string {
+  const basic = Buffer.from(`${user}:${token}`, 'utf8').toString('base64');
   return `AUTHORIZATION: basic ${basic}`;
 }
 
@@ -170,7 +222,7 @@ export async function shallowClone(
   }
   try {
     const parsed = new URL(url);
-    if (parsed.protocol !== 'https:' || (parsed.hostname !== 'github.com' && parsed.hostname !== 'www.github.com')) {
+    if (parsed.protocol !== 'https:' || !ALLOWED_CLONE_HOSTS.has(parsed.hostname)) {
       throw new CheckoutError(`Refusing to clone URL with unsupported scheme or host`);
     }
     if (parsed.username || parsed.password) {
@@ -185,7 +237,7 @@ export async function shallowClone(
     // extraHeader via git's env config — not argv, not remote URL, not .git/config.
     env.GIT_CONFIG_COUNT = '1';
     env.GIT_CONFIG_KEY_0 = 'http.extraHeader';
-    env.GIT_CONFIG_VALUE_0 = githubHttpExtraHeader(options.token);
+    env.GIT_CONFIG_VALUE_0 = cloneHttpExtraHeader(url, options.token);
   }
   for (const args of gitCheckoutCommands(url, ref, dest)) {
     await exec('git', args, { timeout: 60_000, env });

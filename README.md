@@ -4,7 +4,7 @@
 
 Continuous Threat Exposure Management. Discovers what you own, scans it continuously across four surfaces, and prioritizes findings by real exposure rather than raw CVSS.
 
-This repository is a **scaffold**: the architecture, contracts, data model, event flows and service boundaries are in place and compile. GitHub repository discovery is live; SCA can ingest an SBOM or resolve lockfiles from a cloned repo. Remaining connectors and scanner internals are stubbed with explicit `TODO`s marking the extension points.
+This repository is a **scaffold**: the architecture, contracts, data model, event flows and service boundaries are in place and compile. GitHub and GitLab.com repository discovery is live; SCA can ingest an SBOM or resolve lockfiles from a cloned repo. Remaining connectors and scanner internals are stubbed with explicit `TODO`s marking the extension points.
 
 ## Stack
 
@@ -115,7 +115,7 @@ Every tenant table carries `orgId` and has RLS enabled with `FORCE`. The app con
 
 ## Not yet built
 
-Scanner internals beyond SCA SBOM ingest and lockfile resolution (image layer walking, IaC parsing, port scanning), remaining discovery connectors (GitLab, cloud), reachability analysis, the web UI, distributed scheduling (the schedulers use naive intervals and need leader election before running multiple replicas), and Redis-backed rate limiting. SCA clones only allowlisted `github.com` sources (`cloneUrl` or `github:owner/repo`); a failed checkout or unusable private-repo credential fails the job. `pom.xml`, `*.csproj` and `requirements.txt` are pinned-manifest fallbacks, not dependency graphs.
+Scanner internals beyond SCA SBOM ingest and lockfile resolution (image layer walking, IaC parsing, port scanning), remaining discovery connectors (cloud), reachability analysis, the web UI, distributed scheduling (the schedulers use naive intervals and need leader election before running multiple replicas), and Redis-backed rate limiting. SCA clones only allowlisted `github.com` / `gitlab.com` sources (`cloneUrl` or `github:` / `gitlab:` externalKey); a failed checkout or unusable private-repo credential fails the job. Self-hosted GitLab is later explicit connector config, not an arbitrary hostname. `pom.xml`, `*.csproj` and `requirements.txt` are pinned-manifest fallbacks, not dependency graphs.
 
 The vulnerability mirror ingests OSV (demand-driven per observed package), GHSA, and NVD into the shared `vulnerabilities` / `vulnerability_affects` tables, with paged EPSS and KEV enrichment. First-seen packages may still hit OSV live once; a sync row after that keeps SCA matching local.
 

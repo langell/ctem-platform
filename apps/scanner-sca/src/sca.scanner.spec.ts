@@ -120,7 +120,7 @@ describe('ScaScanner source path', () => {
     ).rejects.toThrow(CheckoutError);
     await expect(
       scanner.execute(ctx({ target: { cloneUrl: 'https://evil.example/acme/app.git' } })),
-    ).rejects.toThrow(/only github.com is allowlisted/);
+    ).rejects.toThrow(/only github.com and gitlab.com are allowlisted/);
     await expect(
       scanner.execute(ctx({ target: { cloneUrl: 'git@github.com:acme/app.git' } })),
     ).rejects.toThrow(/git@/);

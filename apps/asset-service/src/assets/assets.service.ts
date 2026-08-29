@@ -91,8 +91,8 @@ export class AssetsService {
   /**
    * Connectors mark what they saw; anything not seen in this sync is archived
    * rather than deleted, so historical findings keep their asset context.
-   * Scoped to the discovering integration — two GitHub integrations in one
-   * org must not archive each other's inventory.
+   * Scoped to the discovering integration — two GitHub or GitLab integrations
+   * in one org must not archive each other's inventory.
    */
   async archiveStale(orgId: string, source: string, seenBefore: Date, integrationId: string) {
     return this.prisma.withOrg(orgId, (tx) =>

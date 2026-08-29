@@ -3,6 +3,7 @@ import { isPrivateTarget, resolveGithubCredential } from './github.credential';
 
 afterEach(() => {
   delete process.env.GITHUB_TOKEN;
+  delete process.env.GITLAB_TOKEN;
 });
 
 describe('resolveGithubCredential', () => {
@@ -13,6 +14,11 @@ describe('resolveGithubCredential', () => {
   it('reads an allowlisted GITHUB_* env var', () => {
     process.env.GITHUB_TOKEN = 'ghp_test';
     expect(resolveGithubCredential('env:GITHUB_TOKEN')).toBe('ghp_test');
+  });
+
+  it('reads an allowlisted GITLAB_* env var', () => {
+    process.env.GITLAB_TOKEN = 'glpat_test';
+    expect(resolveGithubCredential('env:GITLAB_TOKEN')).toBe('glpat_test');
   });
 
   it('refuses env:DATABASE_URL', () => {

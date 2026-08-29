@@ -28,7 +28,15 @@ export class ScanPlannerService {
     orgId: string,
     scannerType: ScannerType,
     selector: CreateScanRequest['assetSelector'],
-  ): Promise<Array<{ id: string; kind: string; externalKey: string; attributes: unknown }>> {
+  ): Promise<
+    Array<{
+      id: string;
+      kind: string;
+      externalKey: string;
+      attributes: unknown;
+      integrationId: string | null;
+    }>
+  > {
     const kinds = selector.kinds?.length
       ? selector.kinds.filter((k) => SCANNER_ASSET_KINDS[scannerType].includes(k))
       : SCANNER_ASSET_KINDS[scannerType];
@@ -42,7 +50,7 @@ export class ScanPlannerService {
           // Tag filters use JSON containment so `{team: "payments"}` matches.
           ...(selector.tags ? { tags: { equals: selector.tags as object } } : {}),
         },
-        select: { id: true, kind: true, externalKey: true, attributes: true },
+        select: { id: true, kind: true, externalKey: true, attributes: true, integrationId: true },
       }),
     );
 
