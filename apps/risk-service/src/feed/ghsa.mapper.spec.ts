@@ -102,4 +102,21 @@ describe('ghsaRangeToOsv', () => {
       ranges: [{ type: 'SEMVER', events: [{ introduced: '1.0.0' }, { fixed: '1.4.2' }] }],
     });
   });
+
+  it('does not treat a missing range as all versions', () => {
+    expect(ghsaRangeToOsv(null)).toEqual({});
+    expect(ghsaRangeToOsv('')).toEqual({});
+    expect(ghsaRangeToOsv(undefined, '1.4.2')).toEqual({
+      ranges: [{ type: 'SEMVER', events: [{ introduced: '0' }, { fixed: '1.4.2' }] }],
+    });
+    const row = ghsaToRow({
+      ghsa_id: 'GHSA-xxxx-yyyy-zzzz',
+      vulnerabilities: [{ package: { ecosystem: 'npm', name: 'left-pad' } }],
+    });
+    expect(row.affected).toEqual([]);
+    expect(ghsaAffects({
+      ghsa_id: 'GHSA-xxxx-yyyy-zzzz',
+      vulnerabilities: [{ package: { ecosystem: 'npm', name: 'left-pad' } }],
+    })).toEqual([]);
+  });
 });

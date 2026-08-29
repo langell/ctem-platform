@@ -77,12 +77,12 @@ export class VulnFeedService implements OnApplicationBootstrap, OnModuleDestroy 
   private async mirrorPackage(ecosystem: string, name: string): Promise<void> {
     const advisories = await this.fetchAdvisories(ecosystem, name);
     for (const advisory of advisories) {
-      await this.writeAdvisory(advisoryToRow(advisory), advisoryAffects(advisory));
+      await this.writeAdvisory(advisoryToRow(advisory), advisoryAffects(advisory), 'replace');
     }
 
     const ghsa = await this.fetchGhsaSafe(ecosystem, name);
     for (const advisory of ghsa) {
-      await this.writeAdvisory(ghsaToRow(advisory), ghsaAffects(advisory));
+      await this.writeAdvisory(ghsaToRow(advisory), ghsaAffects(advisory), 'fill');
     }
 
     const cves = collectCves(advisories, ghsa).slice(0, NVD_PER_PACKAGE);
@@ -121,6 +121,9 @@ export class VulnFeedService implements OnApplicationBootstrap, OnModuleDestroy 
       pageToken = body.next_page_token;
       if (!pageToken) break;
     }
+    if (pageToken) {
+      throw truncatedError('OSV', `${ecosystem}/${name}`);
+    }
     return advisories;
   }
 
@@ -128,6 +131,7 @@ export class VulnFeedService implements OnApplicationBootstrap, OnModuleDestroy 
     try {
       return await this.fetchGhsa(ecosystem, name);
     } catch (err) {
+      if (isTruncated(err)) throw err;
       this.log.warn({ err, ecosystem, name }, 'GHSA query failed; OSV mirror still written');
       return [];
     }
@@ -155,6 +159,7 @@ export class VulnFeedService implements OnApplicationBootstrap, OnModuleDestroy 
       const items = (await res.json()) as GhsaAdvisory[];
       advisories.push(...items.filter((a) => !a.withdrawn_at));
       if (items.length < GHSA_PAGE_SIZE) break;
+      if (page === MAX_PAGES) throw truncatedError('GHSA', `${ecosystem}/${name}`);
     }
     return advisories;
   }
@@ -204,20 +209,26 @@ export class VulnFeedService implements OnApplicationBootstrap, OnModuleDestroy 
 
   private async ingestRecentGhsa(): Promise<number> {
     const env = loadEnv();
+    const since = new Date(Date.now() - NVD_RECENT_MS);
     let ingested = 0;
     for (let page = 1; page <= MAX_PAGES; page++) {
       const url = new URL(`${env.GITHUB_API_URL}/advisories`);
       url.searchParams.set('type', 'reviewed');
+      url.searchParams.set('sort', 'updated');
+      url.searchParams.set('direction', 'desc');
+      // GitHub date-range syntax: updated=>=ISO (see search syntax).
+      url.searchParams.set('updated', `>=${since.toISOString()}`);
       url.searchParams.set('per_page', String(GHSA_PAGE_SIZE));
       url.searchParams.set('page', String(page));
       const res = await fetch(url, { headers: ghsaHeaders(), signal: AbortSignal.timeout(20_000) });
       if (!res.ok) throw new Error(`GHSA feed returned ${res.status}`);
       const items = (await res.json()) as GhsaAdvisory[];
-      for (const advisory of items.filter((a) => !a.withdrawn_at)) {
-        await this.writeAdvisory(ghsaToRow(advisory), ghsaAffects(advisory));
+      for (const advisory of items.filter((a) => !a.withdrawn_at && isUpdatedSince(a.updated_at, since))) {
+        await this.writeAdvisory(ghsaToRow(advisory), ghsaAffects(advisory), 'fill');
         ingested += 1;
       }
       if (items.length < GHSA_PAGE_SIZE) break;
+      if (page === MAX_PAGES) throw truncatedError('GHSA', 'recent feed');
     }
     return ingested;
   }
@@ -228,6 +239,7 @@ export class VulnFeedService implements OnApplicationBootstrap, OnModuleDestroy 
     const start = new Date(end.getTime() - NVD_RECENT_MS);
     let startIndex = 0;
     let ingested = 0;
+    let totalResults = 0;
 
     for (let page = 0; page < MAX_PAGES; page++) {
       const url = new URL(`${env.NVD_API_URL}/cves/2.0`);
@@ -249,13 +261,52 @@ export class VulnFeedService implements OnApplicationBootstrap, OnModuleDestroy 
         ingested += 1;
       }
       const pageSize = body.resultsPerPage ?? (body.vulnerabilities?.length ?? 0);
+      totalResults = body.totalResults ?? totalResults;
       startIndex += pageSize;
-      if (!pageSize || startIndex >= (body.totalResults ?? 0)) break;
+      if (!pageSize || startIndex >= totalResults) break;
     }
+    if (startIndex < totalResults) throw truncatedError('NVD', 'recent feed');
     return ingested;
   }
 
-  private async writeAdvisory(row: VulnerabilityRow, affects: Array<{ ecosystem: string; packageName: string }>): Promise<void> {
+  /**
+   * `replace` — OSV is authoritative for ranges; rewrite `affected` and the
+   * package index. `fill` — NVD-style: never wipe existing OSV ranges, union
+   * the package index. GHSA must use `fill` because OSV ids for GitHub vulns
+   * are typically `GHSA-…`.
+   */
+  private async writeAdvisory(
+    row: VulnerabilityRow,
+    affects: Array<{ ecosystem: string; packageName: string }>,
+    mode: 'replace' | 'fill',
+  ): Promise<void> {
+    if (mode === 'fill') {
+      const existing = await this.store.vulnerability.findUnique({ where: { id: row.id } });
+      if (existing && hasAffectedPayload(existing.affected)) {
+        const aliases = [...new Set([...existing.aliases, ...row.aliases])];
+        await this.store.$transaction([
+          this.store.vulnerability.update({
+            where: { id: row.id },
+            data: {
+              summary: existing.summary || row.summary,
+              details: existing.details || row.details,
+              severity: existing.cvssScore != null ? existing.severity : row.severity,
+              cvssVector: existing.cvssVector ?? row.cvssVector,
+              cvssScore: existing.cvssScore ?? row.cvssScore,
+              publishedAt: existing.publishedAt ?? row.publishedAt,
+              modifiedAt: row.modifiedAt ?? existing.modifiedAt,
+              aliases,
+            },
+          }),
+          this.store.vulnerabilityAffects.createMany({
+            data: affects.map((a) => ({ vulnId: row.id, ...a })),
+            skipDuplicates: true,
+          }),
+        ]);
+        return;
+      }
+    }
+
     const { id: _id, ...update } = row;
     await this.store.$transaction([
       // Never clobber enrichment (kev, epssScore) other jobs may have written.
@@ -326,6 +377,24 @@ export class VulnFeedService implements OnApplicationBootstrap, OnModuleDestroy 
       }
     }
   }
+}
+
+function hasAffectedPayload(affected: unknown): boolean {
+  return Array.isArray(affected) && affected.length > 0;
+}
+
+function isUpdatedSince(updatedAt: string | undefined, since: Date): boolean {
+  if (!updatedAt) return true;
+  const at = new Date(updatedAt);
+  return Number.isNaN(at.getTime()) || at.getTime() >= since.getTime();
+}
+
+function truncatedError(source: string, what: string): Error {
+  return new Error(`${source} listing truncated at ${MAX_PAGES} pages for ${what}`);
+}
+
+function isTruncated(err: unknown): boolean {
+  return err instanceof Error && err.message.includes('truncated at');
 }
 
 function collectCves(osv: OsvAdvisory[], ghsa: GhsaAdvisory[]): string[] {

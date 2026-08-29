@@ -63,7 +63,7 @@ export function osvEcosystemToGhsa(ecosystem: string): string {
 }
 
 export function ghsaToRow(advisory: GhsaAdvisory): VulnerabilityRow {
-  const affected = (advisory.vulnerabilities ?? []).map((v) => ({
+  const affected = ghsaVulnerableEntries(advisory).map((v) => ({
     package: {
       name: v.package?.name,
       ecosystem: ghsaEcosystemToOsv(v.package?.ecosystem),
@@ -97,12 +97,20 @@ export function ghsaToRow(advisory: GhsaAdvisory): VulnerabilityRow {
 export function ghsaAffects(advisory: GhsaAdvisory): AffectsRow[] {
   return advisoryAffects({
     id: advisory.ghsa_id,
-    affected: (advisory.vulnerabilities ?? []).map((v) => ({
+    affected: ghsaVulnerableEntries(advisory).map((v) => ({
       package: {
         name: v.package?.name,
         ecosystem: ghsaEcosystemToOsv(v.package?.ecosystem),
       },
     })),
+  });
+}
+
+/** Entries GitHub actually constrained. A bare `{ package }` is not “all versions.” */
+export function ghsaVulnerableEntries(advisory: GhsaAdvisory): NonNullable<GhsaAdvisory['vulnerabilities']> {
+  return (advisory.vulnerabilities ?? []).filter((v) => {
+    if (!v.package?.name || !v.package?.ecosystem) return false;
+    return Boolean(v.vulnerable_version_range?.trim() || v.first_patched_version?.identifier);
   });
 }
 
@@ -114,14 +122,10 @@ export interface OsvRangeShape {
 /** Converts a GitHub version range (`>= 1.0.0, < 1.2.3`) into OSV events. */
 export function ghsaRangeToOsv(range: string | null | undefined, patched?: string | null): OsvRangeShape {
   if (!range?.trim()) {
-    return {
-      ranges: [
-        {
-          type: 'SEMVER',
-          events: patched ? [{ introduced: '0' }, { fixed: patched }] : [{ introduced: '0' }],
-        },
-      ],
-    };
+    // A missing range is not “every version.” Only a patched version is enough
+    // to bound the interval; otherwise leave the entry unconstrained-empty.
+    if (!patched) return {};
+    return { ranges: [{ type: 'SEMVER', events: [{ introduced: '0' }, { fixed: patched }] }] };
   }
 
   let introduced = '0';
