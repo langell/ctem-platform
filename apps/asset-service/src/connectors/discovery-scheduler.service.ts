@@ -87,7 +87,7 @@ export class DiscoverySchedulerService implements OnApplicationBootstrap {
         credentialRef: integration.credentialRef,
         since: integration.lastSyncAt,
       })) {
-        await this.assets.upsert(integration.orgId, asset);
+        await this.assets.upsert(integration.orgId, asset, integration.id);
         upserted += 1;
       }
 
@@ -95,6 +95,7 @@ export class DiscoverySchedulerService implements OnApplicationBootstrap {
         integration.orgId,
         integration.provider,
         syncStartedAt,
+        integration.id,
       );
       await this.prisma.withOrg(integration.orgId, (tx) =>
         tx.integration.update({

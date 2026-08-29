@@ -4,7 +4,7 @@
 
 Continuous Threat Exposure Management. Discovers what you own, scans it continuously across four surfaces, and prioritizes findings by real exposure rather than raw CVSS.
 
-This repository is a **scaffold**: the architecture, contracts, data model, event flows and service boundaries are in place and compile. Scanner internals and connectors are stubbed with explicit `TODO`s marking the extension points.
+This repository is a **scaffold**: the architecture, contracts, data model, event flows and service boundaries are in place and compile. GitHub repository discovery is live; remaining connectors and scanner internals (beyond SCA SBOM ingest) are stubbed with explicit `TODO`s marking the extension points.
 
 ## Stack
 
@@ -115,6 +115,6 @@ Every tenant table carries `orgId` and has RLS enabled with `FORCE`. The app con
 
 ## Not yet built
 
-Scanner internals beyond the SCA SBOM path (repo cloning and lockfile resolution, image layer walking, IaC parsing, port scanning), discovery connectors, NVD/GHSA feeds and EPSS paging for the vulnerability mirror (OSV advisories are mirrored demand-driven today; unmirrored packages still hit OSV live once), reachability analysis, the web UI, distributed scheduling (the schedulers use naive intervals and need leader election before running multiple replicas), and Redis-backed rate limiting.
+Scanner internals beyond the SCA SBOM path (repo cloning and lockfile resolution, image layer walking, IaC parsing, port scanning), remaining discovery connectors (GitLab, cloud), NVD/GHSA feeds and EPSS paging for the vulnerability mirror (OSV advisories are mirrored demand-driven today; unmirrored packages still hit OSV live once), reachability analysis, the web UI, distributed scheduling (the schedulers use naive intervals and need leader election before running multiple replicas), and Redis-backed rate limiting.
 
 See `docs/architecture.md` for the full design and the build order.

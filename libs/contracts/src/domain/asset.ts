@@ -64,6 +64,7 @@ export const Asset = z
     firstSeenAt: z.coerce.date(),
     lastSeenAt: z.coerce.date(),
     archivedAt: z.coerce.date().nullable().default(null),
+    integrationId: z.string().uuid().nullable().default(null),
   })
   .merge(AuditMeta);
 export type Asset = z.infer<typeof Asset>;

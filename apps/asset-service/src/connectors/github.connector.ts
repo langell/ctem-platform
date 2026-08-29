@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { z } from 'zod';
 import { loadEnv } from '@ctem/config';
 import { rootLogger } from '@ctem/observability';
 import type { UpsertAssetRequest } from '@ctem/contracts';
@@ -19,15 +20,17 @@ export interface GitHubRepo {
   owner?: { login?: string };
 }
 
-export interface GitHubConnectorConfig {
+export const GitHubConnectorConfig = z.object({
   /** User or organization whose repositories to inventory. */
-  owner: string;
-  ownerType?: 'user' | 'org';
+  owner: z.string().min(1),
+  /** Required so an org integration cannot silently hit /user/repos and yield zero. */
+  ownerType: z.enum(['user', 'org']),
   /** Optional allowlist of repo names; omit to inventory everything. */
-  repos?: string[];
-  includeArchived?: boolean;
-  includeForks?: boolean;
-}
+  repos: z.array(z.string().min(1)).optional(),
+  includeArchived: z.boolean().optional(),
+  includeForks: z.boolean().optional(),
+});
+export type GitHubConnectorConfig = z.infer<typeof GitHubConnectorConfig>;
 
 /** Pure mapping from a GitHub repository to our asset shape. */
 export function repoToAsset(repo: GitHubRepo): UpsertAssetRequest {
@@ -51,14 +54,18 @@ export function repoToAsset(repo: GitHubRepo): UpsertAssetRequest {
   };
 }
 
-const PER_PAGE = 100;
-const MAX_PAGES = 20;
+export const GITHUB_PER_PAGE = 100;
+export const GITHUB_MAX_PAGES = 20;
 
 /**
  * Repository inventory via the GitHub REST API. With a token whose subject is
  * the configured user, private repositories are included (`/user/repos`);
  * without one, only the public surface is visible — which is itself useful
  * signal for an external-attack-surface view.
+ *
+ * This connector always full-scans. `ctx.orgId` is unused (tenancy is applied
+ * by the scheduler on persist) and `ctx.since` is unused — GitHub's repo list
+ * endpoints do not offer a reliable incremental window for this inventory.
  */
 @Injectable()
 export class GitHubConnector implements AssetConnector {
@@ -67,8 +74,7 @@ export class GitHubConnector implements AssetConnector {
   private readonly log = rootLogger.child({ component: 'github-connector' });
 
   async *discover(ctx: DiscoveryContext): AsyncIterable<UpsertAssetRequest> {
-    const config = ctx.config as unknown as GitHubConnectorConfig;
-    if (!config.owner) throw new Error('github connector requires config.owner');
+    const config = GitHubConnectorConfig.parse(ctx.config);
 
     const token = resolveCredential(ctx.credentialRef);
     if (!token) {
@@ -95,18 +101,19 @@ export class GitHubConnector implements AssetConnector {
     token: string | undefined,
   ): AsyncIterable<GitHubRepo> {
     const base = loadEnv().GITHUB_API_URL;
+    const owner = encodeURIComponent(config.owner);
     const path =
       config.ownerType === 'org'
-        ? `/orgs/${config.owner}/repos?type=all`
+        ? `/orgs/${owner}/repos?type=all`
         : token
           ? // The authenticated-user listing is the only one that includes
             // private repos for a user account; filtered to the owner below.
             `/user/repos?affiliation=owner`
-          : `/users/${config.owner}/repos`;
+          : `/users/${owner}/repos`;
 
-    for (let page = 1; page <= MAX_PAGES; page++) {
+    for (let page = 1; page <= GITHUB_MAX_PAGES; page++) {
       const sep = path.includes('?') ? '&' : '?';
-      const res = await fetch(`${base}${path}${sep}per_page=${PER_PAGE}&page=${page}`, {
+      const res = await fetch(`${base}${path}${sep}per_page=${GITHUB_PER_PAGE}&page=${page}`, {
         headers: {
           accept: 'application/vnd.github+json',
           'x-github-api-version': '2022-11-28',
@@ -125,7 +132,16 @@ export class GitHubConnector implements AssetConnector {
         if (login && login.toLowerCase() !== config.owner.toLowerCase()) continue;
         yield repo;
       }
-      if (repos.length < PER_PAGE) break;
+      if (repos.length < GITHUB_PER_PAGE) break;
+      if (page === GITHUB_MAX_PAGES) {
+        this.log.error(
+          { owner: config.owner, pages: GITHUB_MAX_PAGES, perPage: GITHUB_PER_PAGE },
+          'github listing truncated at page cap',
+        );
+        throw new Error(
+          `GitHub listing truncated at ${GITHUB_MAX_PAGES * GITHUB_PER_PAGE} repositories (page cap ${GITHUB_MAX_PAGES}); refusing to archive unseen assets`,
+        );
+      }
     }
   }
 }

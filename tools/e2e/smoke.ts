@@ -117,7 +117,14 @@ async function main(): Promise<void> {
         headers: principalHeaders(orgA.id),
         body: {
           name: 'smoke-a',
-          scopes: ['asset:read', 'asset:write', 'scan:read', 'scan:run', 'finding:read'],
+          scopes: [
+            'asset:read',
+            'asset:write',
+            'scan:read',
+            'scan:run',
+            'finding:read',
+            'integration:manage',
+          ],
         },
       });
       expect(a.status < 300 && a.json?.token, `org A token: HTTP ${a.status}`);
@@ -285,8 +292,6 @@ async function main(): Promise<void> {
       // listing. With GITHUB_TOKEN set (asset-service reads it from ITS env,
       // e.g. `export GITHUB_TOKEN=$(gh auth token)` before `make dev`), the
       // authenticated private-repo path is exercised instead.
-      const ASSET = process.env.ASSET_SERVICE_URL ?? 'http://localhost:3002';
-
       await db.integration.create({
         data: {
           orgId: orgA.id,
@@ -297,9 +302,7 @@ async function main(): Promise<void> {
         },
       });
 
-      const res = await api(ASSET, 'POST', '/internal/assets/discover', {
-        headers: principalHeaders(orgA.id),
-      });
+      const res = await api(GATEWAY, 'POST', '/v1/assets/discover', { token: patA });
       expect(res.status < 300, `discover returned ${res.status}: ${JSON.stringify(res.json)}`);
       const results = res.json as unknown as Array<{ upserted: number; error: string | null }>;
       expect(
@@ -314,6 +317,16 @@ async function main(): Promise<void> {
         'ctem-scan-target missing from the inventory after discovery',
       );
       return `github:langell/ctem-scan-target inventoried from live GitHub (${process.env.GITHUB_TOKEN ? 'authenticated' : 'public listing'})`;
+    });
+
+    await step('org B cannot see org A GitHub-discovered assets', async () => {
+      const res = await api(GATEWAY, 'GET', '/v1/assets', { token: patB });
+      expect(res.status === 200, `expected 200, got ${res.status}`);
+      const items = (res.json?.items ?? res.json ?? []) as Array<{ externalKey: string }>;
+      expect(
+        !items.some((a) => a.externalKey === 'github:langell/ctem-scan-target'),
+        `org A's GitHub-discovered asset leaked into org B's listing`,
+      );
     });
 
     await step('threat-intel refresh enriches findings (KEV/EPSS — needs internet)', async () => {
