@@ -1,0 +1,11 @@
+[[package]]
+name = "nested"
+version = "0.1.0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
+name = "libc"
+version = "0.2.150"
+source = "registry+https://github.com/rust-lang/crates.io-index"

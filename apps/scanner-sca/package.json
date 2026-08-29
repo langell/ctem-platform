@@ -28,6 +28,7 @@
     "@ctem/events": "workspace:*",
     "@ctem/storage": "workspace:*",
     "@ctem/scanner-sdk": "workspace:*",
-    "@ctem/db": "workspace:*"
+    "@ctem/db": "workspace:*",
+    "yaml": "^2.8.1"
   }
 }

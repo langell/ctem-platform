@@ -1,9 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { BaseScanner, type ScanContext, type ScanOutcome } from '@ctem/scanner-sdk';
 import type { RawFinding, ScannerType } from '@ctem/contracts';
-import { rootLogger } from '@ctem/observability';
 import { SbomParser, type ResolvedComponent } from './sbom.parser';
 import { VulnMatcher } from './vuln.matcher';
+import { resolveLockfiles } from './lockfiles';
+import { GitRepoCheckout } from './repo.checkout';
 
 /**
  * Software Composition Analysis — dependencies and SBOMs.
@@ -23,11 +24,11 @@ export class ScaScanner extends BaseScanner {
   readonly type: ScannerType = 'sca';
   readonly name = 'ctem-sca';
   readonly version = '0.1.0';
-  private readonly log = rootLogger.child({ scanner: 'sca' });
 
   constructor(
     private readonly sbom: SbomParser,
     private readonly matcher: VulnMatcher,
+    private readonly checkout: GitRepoCheckout = new GitRepoCheckout(),
   ) {
     super();
   }
@@ -113,15 +114,12 @@ export class ScaScanner extends BaseScanner {
   /**
    * Repo path: clone at the pinned ref, detect ecosystems, resolve lockfiles.
    * Lockfile-first — a range in package.json is a guess, a lockfile is the truth.
+   *
+   * Reachability (call-graph analysis) is deliberately not done here. Findings
+   * keep `evidence.reachability = 'unknown'` until that slice ships.
    */
   private async resolveFromSource(ctx: ScanContext): Promise<ResolvedComponent[]> {
-    this.log.warn(
-      { assetId: ctx.job.assetId },
-      'source-based resolution not implemented — supply an SBOM artifact key',
-    );
-    // TODO: shallow clone into ctx.workDir, then per-ecosystem resolvers:
-    //   npm/pnpm/yarn lockfiles, Cargo.lock, go.sum, poetry.lock/requirements.txt,
-    //   Gemfile.lock, pom.xml/gradle.lockfile, composer.lock, *.csproj.
-    return [];
+    await this.checkout.checkout(ctx);
+    return resolveLockfiles(ctx.workDir);
   }
 }

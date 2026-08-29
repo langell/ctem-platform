@@ -1,0 +1,22 @@
+lockfileVersion: '9.0'
+
+importers:
+  .:
+    dependencies:
+      express:
+        specifier: 4.17.1
+        version: 4.17.1
+
+packages:
+  express@4.17.1:
+    resolution: {integrity: sha512-express}
+
+  qs@6.7.0:
+    resolution: {integrity: sha512-qs}
+
+snapshots:
+  express@4.17.1:
+    dependencies:
+      qs: 6.7.0
+
+  qs@6.7.0: {}

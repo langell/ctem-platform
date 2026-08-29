@@ -105,7 +105,7 @@ The mitigation is that `@ctem/contracts` is the single source of truth for every
 
 ## Known gaps in this scaffold
 
-- Scanner internals beyond SCA SBOM ingest are stubbed: repo cloning, image layer walking, IaC parsing, port scanning. Remaining discovery connectors (GitLab, cloud) are not built yet.
+- Scanner internals beyond SCA SBOM ingest and lockfile resolution are stubbed: image layer walking, IaC parsing, port scanning. Remaining discovery connectors (GitLab, cloud) are not built yet. Reachability analysis is still unbuilt.
 - Gateway PAT verification path is a `TODO`; JWT works.
 - Rate limiting is in-memory — correct for one replica only.
 - SLA breach de-duplication is in-memory and resets on restart.
