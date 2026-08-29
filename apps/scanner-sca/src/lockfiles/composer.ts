@@ -8,6 +8,7 @@ export const composerParser: EcosystemParser = {
   group: 'php',
   priority: 10,
   matches: (fileName) => fileName === 'composer.lock',
+  companionFiles: ['composer.json'],
   parse: (input) => parseComposerLock(input.content, input.relPath, input.companions['composer.json']),
 };
 

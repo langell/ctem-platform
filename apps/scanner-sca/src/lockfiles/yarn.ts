@@ -9,6 +9,7 @@ export const yarnParser: EcosystemParser = {
   group: 'javascript',
   priority: 20,
   matches: (fileName) => fileName === 'yarn.lock',
+  companionFiles: ['package.json'],
   parse: (input) => {
     const directNames = directFromPackageJson(input.companions['package.json']);
     return isYarnBerry(input.content)

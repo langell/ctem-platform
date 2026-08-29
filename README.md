@@ -115,7 +115,7 @@ Every tenant table carries `orgId` and has RLS enabled with `FORCE`. The app con
 
 ## Not yet built
 
-Scanner internals beyond SCA SBOM ingest and lockfile resolution (image layer walking, IaC parsing, port scanning), remaining discovery connectors (GitLab, cloud), reachability analysis, the web UI, distributed scheduling (the schedulers use naive intervals and need leader election before running multiple replicas), and Redis-backed rate limiting.
+Scanner internals beyond SCA SBOM ingest and lockfile resolution (image layer walking, IaC parsing, port scanning), remaining discovery connectors (GitLab, cloud), reachability analysis, the web UI, distributed scheduling (the schedulers use naive intervals and need leader election before running multiple replicas), and Redis-backed rate limiting. SCA clones only allowlisted `github.com` sources (`cloneUrl` or `github:owner/repo`); a failed checkout or unusable private-repo credential fails the job. `pom.xml`, `*.csproj` and `requirements.txt` are pinned-manifest fallbacks, not dependency graphs.
 
 The vulnerability mirror ingests OSV (demand-driven per observed package), GHSA, and NVD into the shared `vulnerabilities` / `vulnerability_affects` tables, with paged EPSS and KEV enrichment. First-seen packages may still hit OSV live once; a sync row after that keeps SCA matching local.
 

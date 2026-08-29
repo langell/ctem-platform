@@ -32,6 +32,8 @@ export interface EcosystemParser {
   group: string;
   priority: number;
   matches: (fileName: string) => boolean;
+  /** Basenames we will read besides the lockfile itself. Never slurp the whole directory. */
+  companionFiles?: string[];
   parse: (input: LockfileInput) => ResolvedComponent[];
 }
 

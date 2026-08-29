@@ -88,16 +88,19 @@ export function parsePomXml(content: string, manifestPath: string) {
 
 function parsePomProperties(xml: string): Record<string, string> {
   const props: Record<string, string> = {};
-  const version = extractTagInner(xml, 'version');
   const parentInner = extractTagInner(xml, 'parent');
+  const header = projectHeader(xml);
+  // Direct project children only — the first <version> in a POM is often the
+  // parent's and must not become ${project.version}.
+  const version = extractTagInner(header, 'version');
   if (version) {
     props['project.version'] = version;
     props['pom.version'] = version;
   }
   const parentVersion = parentInner ? extractTagInner(parentInner, 'version') : null;
   if (parentVersion) props['project.parent.version'] = parentVersion;
-  const groupId = extractTagInner(xml, 'groupId');
-  const artifactId = extractTagInner(xml, 'artifactId');
+  const groupId = extractTagInner(header, 'groupId') ?? (parentInner ? extractTagInner(parentInner, 'groupId') : null);
+  const artifactId = extractTagInner(header, 'artifactId');
   if (groupId) props['project.groupId'] = groupId;
   if (artifactId) props['project.artifactId'] = artifactId;
 
@@ -122,6 +125,25 @@ function parseDependencies(
     out.push({ name: `${groupId}:${artifactId}`, version });
   }
   return out;
+}
+
+/** Project-level coords: strip parent/deps/build so the first <version> is the child's. */
+function projectHeader(xml: string): string {
+  let header = xml;
+  for (const tag of [
+    'parent',
+    'properties',
+    'dependencyManagement',
+    'dependencies',
+    'build',
+    'profiles',
+    'reporting',
+    'repositories',
+    'pluginRepositories',
+  ]) {
+    header = header.replace(new RegExp(`<${tag}\\b[^>]*>[\\s\\S]*?</${tag}>`, 'gi'), '');
+  }
+  return header;
 }
 
 function extractTagInner(xml: string, tag: string): string | null {

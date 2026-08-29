@@ -6,7 +6,8 @@ import type { ArtifactStore } from '@ctem/storage';
 import { ScaScanner } from './sca.scanner';
 import { SbomParser } from './sbom.parser';
 import { VulnMatcher } from './vuln.matcher';
-import type { GitRepoCheckout } from './repo.checkout';
+import { CheckoutError, GitRepoCheckout } from './repo.checkout';
+import { LockfileResolutionError } from './lockfiles/resolve';
 
 const FIX = join(__dirname, 'lockfiles', '__fixtures__', 'npm');
 
@@ -104,5 +105,43 @@ describe('ScaScanner source path', () => {
     await scanner.execute(ctx({ options: { sbomArtifactKey: 'org/sbom.json' } }));
     expect(checkout.checkout).not.toHaveBeenCalled();
     expect(sbom.fromArtifact).toHaveBeenCalledWith('org/sbom.json');
+  });
+
+  it('throws on a missing or refused clone URL instead of succeeding with findings:[]', async () => {
+    const matcher = { match: vi.fn(), warmCache: vi.fn() };
+    const scanner = new ScaScanner(
+      new SbomParser(null as unknown as ArtifactStore),
+      matcher as unknown as VulnMatcher,
+      new GitRepoCheckout(),
+    );
+
+    await expect(
+      scanner.execute(ctx({ target: { kind: 'repository', htmlUrl: 'https://github.com/acme/app' } })),
+    ).rejects.toThrow(CheckoutError);
+    await expect(
+      scanner.execute(ctx({ target: { cloneUrl: 'https://evil.example/acme/app.git' } })),
+    ).rejects.toThrow(/only github.com is allowlisted/);
+    await expect(
+      scanner.execute(ctx({ target: { cloneUrl: 'git@github.com:acme/app.git' } })),
+    ).rejects.toThrow(/git@/);
+    expect(matcher.match).not.toHaveBeenCalled();
+  });
+
+  it('throws when every lockfile parser fails rather than returning an empty success', async () => {
+    const matcher = { match: vi.fn(), warmCache: vi.fn() };
+    const checkout = { checkout: vi.fn(async () => undefined) };
+    const scanner = new ScaScanner(
+      new SbomParser(null as unknown as ArtifactStore),
+      matcher as unknown as VulnMatcher,
+      checkout as unknown as GitRepoCheckout,
+    );
+
+    await expect(
+      scanner.execute({
+        ...ctx(),
+        workDir: join(__dirname, 'lockfiles', '__fixtures__', 'corrupt'),
+      }),
+    ).rejects.toThrow(LockfileResolutionError);
+    expect(matcher.match).not.toHaveBeenCalled();
   });
 });

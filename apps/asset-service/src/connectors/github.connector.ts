@@ -49,6 +49,7 @@ export function repoToAsset(repo: GitHubRepo): UpsertAssetRequest {
       description: repo.description ?? null,
       fork: repo.fork,
       archived: repo.archived,
+      private: repo.private,
       pushedAt: repo.pushed_at ?? null,
     },
   };

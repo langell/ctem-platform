@@ -7,6 +7,7 @@ export const golangParser: EcosystemParser = {
   group: 'golang',
   priority: 10,
   matches: (fileName) => fileName === 'go.sum' || fileName === 'go.mod',
+  companionFiles: ['go.mod', 'go.sum'],
   parse: (input) =>
     parseGoModules(
       input.companions['go.mod'] ?? (input.relPath.endsWith('go.mod') ? input.content : ''),

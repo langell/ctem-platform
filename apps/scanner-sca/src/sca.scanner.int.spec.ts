@@ -99,7 +99,7 @@ describe('ScaScanner lockfile → local mirror (integration)', () => {
         orgId: randomUUID(),
         scannerType: 'sca',
         assetId: randomUUID(),
-        target: { kind: 'repository', htmlUrl: 'https://github.com/acme/app' },
+        target: { kind: 'repository', externalKey: 'github:acme/app' },
         credentialRef: null,
         options: {},
         attempt: 1,
@@ -137,6 +137,11 @@ describe('ScaScanner lockfile → local mirror (integration)', () => {
         }),
       }),
     ]);
-    expect(outcome.stats?.mirroredComponents).toBe(2);
+    // Only `pkg` has a sync row. The transitive is the first-seen live hop —
+    // that is the product, not a scanner miss.
+    expect(outcome.stats?.mirroredComponents).toBe(1);
+    expect(outcome.vulnPackagesObserved).toEqual([
+      { ecosystem: 'npm', name: `${pkg}-lib` },
+    ]);
   });
 });

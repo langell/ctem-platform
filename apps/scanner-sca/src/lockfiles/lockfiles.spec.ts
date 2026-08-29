@@ -6,14 +6,13 @@ import { parseComposerLock } from './composer';
 import { parseGemfileLock } from './gem';
 import { parseGoModules } from './golang';
 import { parseGradleLockfile, parsePomXml } from './maven';
-import { parseNpmLock } from './npm';
+import { npmParser, parseNpmLock } from './npm';
 import { parseCsproj, parsePackagesLock } from './nuget';
 import { parseRequirementsTxt } from './pip';
 import { parsePnpmLock, splitPnpmKey } from './pnpm';
 import { parsePoetryLock } from './poetry';
-import { resolveLockfiles } from './resolve';
-import { parseYarnClassic } from './yarn';
-import { yarnParser } from './yarn';
+import { filesToRead, LockfileResolutionError, resolveLockfiles } from './resolve';
+import { parseYarnClassic, yarnParser } from './yarn';
 
 const FIX = join(__dirname, '__fixtures__');
 
@@ -189,6 +188,12 @@ describe('Maven / Gradle', () => {
     expect(map['org.example:ranged']).toBeUndefined();
   });
 
+  it('uses the child POM version for ${project.version}, not the parent', () => {
+    const map = byName(parsePomXml(load('maven-parent', 'pom.xml'), 'pom.xml'));
+    expect(map['com.acme:child-app'].version).toBe('1.2.3');
+    expect(map['com.acme:parent-bom-note'].version).toBe('9.9.9');
+  });
+
   it('parses gradle.lockfile as a flat list without a graph', () => {
     const map = byName(parseGradleLockfile(load('gradle', 'gradle.lockfile'), 'gradle.lockfile'));
     expect(map['org.apache.commons:commons-lang3']).toMatchObject({
@@ -249,5 +254,38 @@ describe('resolveLockfiles', () => {
   it('prefers poetry.lock over requirements.txt in the same directory', async () => {
     const components = await resolveLockfiles(join(FIX, 'poetry'));
     expect(components.every((c) => c.manifestPath.endsWith('poetry.lock'))).toBe(true);
+  });
+
+  it('keeps the same package from two manifests (monorepo) as separate components', async () => {
+    const components = await resolveLockfiles(join(FIX, 'monorepo'));
+    const lodashes = components.filter((c) => c.name === 'lodash');
+    expect(lodashes).toHaveLength(2);
+    expect(lodashes.map((c) => c.manifestPath).sort()).toEqual([
+      'app-a/package-lock.json',
+      'app-b/package-lock.json',
+    ]);
+  });
+
+  it('throws when every selected lockfile fails to parse', async () => {
+    await expect(resolveLockfiles(join(FIX, 'corrupt'))).rejects.toThrow(LockfileResolutionError);
+  });
+
+  it('reads only the lockfile and declared companions, not every sibling', () => {
+    const dirFiles = [
+      { absPath: '/r/yarn.lock', relPath: 'yarn.lock', fileName: 'yarn.lock' },
+      { absPath: '/r/package.json', relPath: 'package.json', fileName: 'package.json' },
+      { absPath: '/r/README.md', relPath: 'README.md', fileName: 'README.md' },
+      { absPath: '/r/huge.bin', relPath: 'huge.bin', fileName: 'huge.bin' },
+    ];
+    expect(filesToRead(yarnParser, 'yarn.lock', dirFiles).map((f) => f.fileName)).toEqual([
+      'yarn.lock',
+      'package.json',
+    ]);
+    expect(
+      filesToRead(npmParser, 'package-lock.json', [
+        { absPath: '/r/package-lock.json', relPath: 'package-lock.json', fileName: 'package-lock.json' },
+        ...dirFiles,
+      ]).map((f) => f.fileName),
+    ).toEqual(['package-lock.json']);
   });
 });

@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { rootLogger } from '@ctem/observability';
 import { cargoParser } from './cargo';
 import { composerParser } from './composer';
@@ -11,14 +11,27 @@ import { pipParser } from './pip';
 import { pnpmParser } from './pnpm';
 import { poetryParser } from './poetry';
 import type { EcosystemParser, ResolvedComponent } from './types';
-import { listRepoFiles, posixDir } from './walk';
+import { listRepoFiles, posixDir, type RepoFile } from './walk';
 import { yarnParser } from './yarn';
 
 const log = rootLogger.child({ component: 'lockfile-resolve' });
 
+/** Refuse to slurp a "lockfile" that is actually a multi-gigabyte sibling. */
+export const MAX_LOCKFILE_BYTES = 8 * 1024 * 1024;
+
+export class LockfileResolutionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'LockfileResolutionError';
+  }
+}
+
 /**
  * Lockfile-first discovery. Parsers that share a group compete inside one
  * directory so `package.json` / `pom.xml` / `*.csproj` never override a lockfile.
+ *
+ * `pom.xml`, `*.csproj`, and `requirements.txt` are pinned-manifest fallbacks —
+ * they are not dependency graphs. Prefer the lockfile when both exist.
  */
 export const PARSERS: EcosystemParser[] = [
   pnpmParser,
@@ -36,6 +49,11 @@ export const PARSERS: EcosystemParser[] = [
   csprojParser,
 ];
 
+export function filesToRead(parser: EcosystemParser, lockfileName: string, dirFiles: RepoFile[]): RepoFile[] {
+  const needed = new Set([lockfileName, ...(parser.companionFiles ?? [])]);
+  return dirFiles.filter((file) => needed.has(file.fileName));
+}
+
 export async function resolveLockfiles(repoRoot: string): Promise<ResolvedComponent[]> {
   const files = await listRepoFiles(repoRoot);
   if (!files.length) return [];
@@ -52,6 +70,12 @@ export async function resolveLockfiles(repoRoot: string): Promise<ResolvedCompon
   const read = async (relPath: string, absPath: string): Promise<string> => {
     const cached = contents.get(relPath);
     if (cached !== undefined) return cached;
+    const size = (await stat(absPath)).size;
+    if (size > MAX_LOCKFILE_BYTES) {
+      throw new LockfileResolutionError(
+        `Refusing to read ${relPath} (${size} bytes) — lockfile/companion cap is ${MAX_LOCKFILE_BYTES} bytes`,
+      );
+    }
     const text = await readFile(absPath, 'utf8');
     contents.set(relPath, text);
     return text;
@@ -76,10 +100,11 @@ export async function resolveLockfiles(repoRoot: string): Promise<ResolvedCompon
   }
 
   const collected: ResolvedComponent[] = [];
+  let failures = 0;
   for (const { parser, file, dirFiles } of selected) {
     try {
       const companions: Record<string, string> = {};
-      for (const sibling of dirFiles) {
+      for (const sibling of filesToRead(parser, file.fileName, dirFiles)) {
         companions[sibling.fileName] = await read(sibling.relPath, sibling.absPath);
       }
       const parsed = parser.parse({
@@ -89,18 +114,29 @@ export async function resolveLockfiles(repoRoot: string): Promise<ResolvedCompon
       });
       collected.push(...parsed);
     } catch (err) {
+      failures += 1;
       log.warn({ err, parser: parser.id, file: file.relPath }, 'lockfile parse failed — skipping');
     }
+  }
+
+  if (selected.length > 0 && failures === selected.length) {
+    throw new LockfileResolutionError(
+      `Every lockfile parser failed (${failures}/${selected.length}) — refusing an empty successful scan`,
+    );
   }
 
   return dedupeComponents(collected);
 }
 
-/** Same package from several lockfiles: prefer a direct hit, then a shorter path. */
+/**
+ * Same package from the same manifest: prefer a direct hit, then a shorter path.
+ * `manifestPath` is part of the key so two apps in a monorepo that share
+ * lodash@4.17.21 keep independent paths.
+ */
 export function dedupeComponents(components: ResolvedComponent[]): ResolvedComponent[] {
   const byKey = new Map<string, ResolvedComponent>();
   for (const component of components) {
-    const key = `${component.ecosystem}:${component.name}@${component.version}`;
+    const key = `${component.ecosystem}:${component.name}@${component.version}:${component.manifestPath ?? ''}`;
     const existing = byKey.get(key);
     if (!existing) {
       byKey.set(key, component);

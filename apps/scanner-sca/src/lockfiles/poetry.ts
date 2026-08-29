@@ -9,6 +9,7 @@ export const poetryParser: EcosystemParser = {
   group: 'python',
   priority: 30,
   matches: (fileName) => fileName === 'poetry.lock',
+  companionFiles: ['pyproject.toml'],
   parse: (input) => parsePoetryLock(input.content, input.relPath, input.companions['pyproject.toml']),
 };
 
