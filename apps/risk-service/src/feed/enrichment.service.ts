@@ -4,15 +4,9 @@ import { rootLogger } from '@ctem/observability';
 import { EventBus } from '@ctem/events';
 import { SUBJECTS } from '@ctem/contracts';
 import { FeedStore } from './feed.store';
-import {
-  chunk,
-  computeEpssUpdates,
-  computeKevUpdates,
-  type KevEntry,
-} from './enrichment.logic';
+import { computeEpssUpdates, computeKevUpdates, type KevEntry } from './enrichment.logic';
+import { fetchEpssPaged } from './epss.client';
 
-/** EPSS batch size — keeps the query-string well under URL limits. */
-const EPSS_BATCH = 80;
 const SIX_HOURS_MS = 6 * 3_600_000;
 
 export interface EnrichmentSummary {
@@ -129,27 +123,14 @@ export class EnrichmentService implements OnApplicationBootstrap, OnModuleDestro
       ),
     ] as string[];
 
-    const scores = new Map<string, { epss: number; percentile: number | null }>();
-    for (const batch of chunk(cves, EPSS_BATCH)) {
-      const res = await fetch(`${env.EPSS_API_URL}?cve=${batch.join(',')}`, {
-        signal: AbortSignal.timeout(30_000),
-      });
-      if (!res.ok) {
+    return fetchEpssPaged({
+      apiUrl: env.EPSS_API_URL,
+      cves,
+      onPageError: (status) => {
         // Partial EPSS data is fine — enrich what we can, next sweep fills gaps.
-        this.log.warn({ status: res.status }, 'EPSS batch failed, continuing');
-        continue;
-      }
-      const body = (await res.json()) as {
-        data?: Array<{ cve: string; epss: string; percentile?: string }>;
-      };
-      for (const entry of body.data ?? []) {
-        scores.set(entry.cve, {
-          epss: Number(entry.epss),
-          percentile: entry.percentile ? Number(entry.percentile) : null,
-        });
-      }
-    }
-    return scores;
+        this.log.warn({ status }, 'EPSS page failed, continuing');
+      },
+    });
   }
 
   /**

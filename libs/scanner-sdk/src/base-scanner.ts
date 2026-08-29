@@ -16,7 +16,7 @@ export interface ScanOutcome {
   stats?: Record<string, number>;
   /**
    * Packages this run had to match against a live feed because the local
-   * vulnerability mirror had nothing fresh. The worker reports them so the
+   * vulnerability mirror has never seen them. The worker reports them so the
    * feed ingester can mirror them for next time.
    */
   vulnPackagesObserved?: Array<{ ecosystem: string; name: string }>;

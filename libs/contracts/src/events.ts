@@ -79,7 +79,7 @@ export type FindingsReportedPayload = z.infer<typeof FindingsReportedPayload>;
 
 /**
  * A scanner matched these packages against a live feed because the local
- * mirror had nothing fresh. The feed ingester mirrors them so the next scan
+ * mirror has never seen them. The feed ingester mirrors them so the next scan
  * is served locally.
  */
 export const VulnPackagesObservedPayload = z.object({

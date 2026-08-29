@@ -95,7 +95,7 @@ The mitigation is that `@ctem/contracts` is the single source of truth for every
 
 ## Build order
 
-1. **Vulnerability feed mirror.** Ingest OSV + NVD + GHSA + EPSS + KEV into `vulnerabilities` and match locally. Per-scan calls to a third-party API are both slow and someone else's uptime problem.
+1. **Vulnerability feed mirror.** OSV (demand-driven) + NVD + GHSA ingest into `vulnerabilities`, with paged EPSS and KEV enrichment. SCA matches locally once a package has a sync row; live OSV is only the first-seen hop. A full bulk dump (to drop that hop) is optional later work.
 2. **SCA depth.** Lockfile resolvers per ecosystem, real dependency paths, then reachability. Reachability is the single largest reduction in noise available.
 3. **GitLab + cloud connectors.** GitHub repository discovery is live; remaining connectors are what keep the inventory from being a spreadsheet.
 4. **Web UI.** The API is only half a product.

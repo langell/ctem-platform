@@ -1,10 +1,11 @@
-import { Injectable, Optional } from '@nestjs/common';
+import { Injectable, OnModuleDestroy, Optional } from '@nestjs/common';
 import { loadEnv } from '@ctem/config';
 import { rootLogger } from '@ctem/observability';
 import { Severity } from '@ctem/contracts';
 import { PrismaService } from '@ctem/db';
 import { versionAffected, type OsvAffected } from './osv-range';
 import type { ResolvedComponent } from './sbom.parser';
+import { fetchEpssPaged } from './epss.client';
 
 export interface VulnMatch {
   id: string;
@@ -25,40 +26,45 @@ export interface MatchResult {
   mirrored: boolean;
 }
 
-/** A mirror entry older than this is treated as a miss and re-observed. */
-const MIRROR_TTL_MS = 24 * 3_600_000;
+const INTEL_REFRESH_MS = 6 * 3_600_000;
+/** Catalog pages used only when the matcher has no database (unit / live path). */
+const EPSS_LIVE_PAGES = 5;
 
 /**
  * Matches resolved components against vulnerability intelligence.
  *
  * Local-first: if the mirror (`vulnerabilities` + `vulnerability_affects`,
- * maintained by the risk-service feed ingester) has a fresh sync row for the
- * package, matching is a pure database read. Otherwise we fall back to a live
- * OSV query and report the package as observed so the ingester mirrors it —
- * the second scan of any package never leaves the building.
+ * maintained by the risk-service feed ingester) has a sync row for the
+ * package, matching is a pure database read — even when that row is stale.
+ * Stale refresh is the ingester's job. Live OSV is reserved for first-seen
+ * packages (no sync row), which are reported as observed so the next scan
+ * never leaves the building.
  */
 @Injectable()
-export class VulnMatcher {
+export class VulnMatcher implements OnModuleDestroy {
   private readonly log = rootLogger.child({ component: 'vuln-matcher' });
   private readonly kevIds = new Set<string>();
   private readonly epss = new Map<string, number>();
+  private timer?: NodeJS.Timeout;
 
   /** Optional so unit tests can run the live path without a database. */
   constructor(@Optional() private readonly prisma?: PrismaService) {}
 
-  /** Pulls KEV and EPSS once at startup; both are small and change daily. */
+  onModuleDestroy(): void {
+    if (this.timer) clearInterval(this.timer);
+  }
+
+  /** Pulls KEV and pages EPSS into the overlay cache; refreshes both on a timer. */
   async warmCache(): Promise<void> {
-    const env = loadEnv();
-    try {
-      const res = await fetch(env.KEV_FEED_URL, { signal: AbortSignal.timeout(20_000) });
-      const kev = (await res.json()) as { vulnerabilities?: Array<{ cveID: string }> };
-      for (const v of kev.vulnerabilities ?? []) this.kevIds.add(v.cveID);
-      this.log.info({ count: this.kevIds.size }, 'KEV catalog loaded');
-    } catch (err) {
-      // A cold cache degrades prioritization; it must not stop the scanner.
-      this.log.warn({ err }, 'failed to load KEV catalog, continuing without it');
+    await this.refreshIntel();
+    if (!this.timer) {
+      this.timer = setInterval(() => void this.refreshIntel(), INTEL_REFRESH_MS);
     }
-    // TODO: page the EPSS API into this.epss, and refresh both on a timer.
+  }
+
+  async refreshIntel(): Promise<void> {
+    await this.loadKev();
+    await this.loadEpss();
   }
 
   async match(component: ResolvedComponent): Promise<MatchResult> {
@@ -67,17 +73,23 @@ export class VulnMatcher {
     return { matches: await this.matchLive(component), mirrored: false };
   }
 
-  /** Returns null when the mirror has nothing fresh for this package. */
+  /**
+   * Returns null only when this package has never been mirrored (no sync row),
+   * so the caller can take the one-time live OSV + observe path. A present
+   * sync row — fresh or stale — is authoritative.
+   */
   private async matchLocal(component: ResolvedComponent): Promise<VulnMatch[] | null> {
     if (!this.prisma || component.ecosystem === 'unknown') return null;
 
+    let seen = false;
     try {
       const sync = await this.prisma.vulnPackageSync.findUnique({
         where: {
           ecosystem_packageName: { ecosystem: component.ecosystem, packageName: component.name },
         },
       });
-      if (!sync || Date.now() - sync.syncedAt.getTime() > MIRROR_TTL_MS) return null;
+      if (!sync) return null;
+      seen = true;
 
       const rows = await this.prisma.vulnerabilityAffects.findMany({
         where: { ecosystem: component.ecosystem, packageName: component.name },
@@ -93,7 +105,11 @@ export class VulnMatcher {
         )
         .map((row) => this.rowToMatch(row.vulnerability, component));
     } catch (err) {
-      // The mirror is an optimization; a read failure must not fail the scan.
+      if (seen) {
+        // A mirrored package must not fall back to live OSV.
+        this.log.warn({ err, component: component.name }, 'mirror lookup failed; not falling back to live OSV');
+        return [];
+      }
       this.log.warn({ err, component: component.name }, 'mirror lookup failed, using live OSV');
       return null;
     }
@@ -177,6 +193,47 @@ export class VulnMatcher {
       kev: cveId ? this.kevIds.has(cveId) : false,
       fixedVersion: firstFixedVersion(vuln, component.ecosystem),
     };
+  }
+
+  private async loadKev(): Promise<void> {
+    const env = loadEnv();
+    try {
+      const res = await fetch(env.KEV_FEED_URL, { signal: AbortSignal.timeout(20_000) });
+      const kev = (await res.json()) as { vulnerabilities?: Array<{ cveID: string }> };
+      this.kevIds.clear();
+      for (const v of kev.vulnerabilities ?? []) this.kevIds.add(v.cveID);
+      this.log.info({ count: this.kevIds.size }, 'KEV catalog loaded');
+    } catch (err) {
+      // A cold cache degrades prioritization; it must not stop the scanner.
+      this.log.warn({ err }, 'failed to load KEV catalog, continuing without it');
+    }
+  }
+
+  private async loadEpss(): Promise<void> {
+    const env = loadEnv();
+    try {
+      const cves = await this.mirroredCves();
+      const scores = await fetchEpssPaged({
+        apiUrl: env.EPSS_API_URL,
+        // Complete coverage of mirrored CVEs when we have a database; otherwise
+        // a bounded catalog crawl so the live path still has an overlay.
+        ...(cves === undefined ? { maxPages: EPSS_LIVE_PAGES } : { cves }),
+        onPageError: (status) => this.log.warn({ status }, 'EPSS page failed, continuing'),
+      });
+      this.epss.clear();
+      for (const [cve, score] of scores) this.epss.set(cve, score.epss);
+      this.log.info({ count: this.epss.size, mode: cves ? 'mirrored' : 'catalog' }, 'EPSS cache loaded');
+    } catch (err) {
+      this.log.warn({ err }, 'failed to page EPSS, continuing without it');
+    }
+  }
+
+  private async mirroredCves(): Promise<string[] | undefined> {
+    if (!this.prisma) return undefined;
+    const rows = await this.prisma.vulnerability.findMany({ select: { id: true, aliases: true } });
+    return [
+      ...new Set(rows.flatMap((r) => [r.id, ...r.aliases]).filter((id) => id.startsWith('CVE-'))),
+    ];
   }
 }
 
