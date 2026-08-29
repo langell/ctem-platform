@@ -45,8 +45,7 @@ export class GitRepoCheckout implements RepoCheckout {
   async checkout(ctx: ScanContext): Promise<void> {
     const resolved = resolveCheckout(ctx.job);
     this.log.info({ url: resolved.url, ref: resolveRef(ctx.job), workDir: ctx.workDir }, 'shallow checkout');
-    const fetchUrl = resolved.token ? withGithubToken(resolved.url, resolved.token) : resolved.url;
-    await shallowClone(fetchUrl, resolveRef(ctx.job), ctx.workDir);
+    await shallowClone(resolved.url, resolveRef(ctx.job), ctx.workDir, { token: resolved.token });
   }
 }
 
@@ -136,11 +135,10 @@ function requireUsableCredential(job: Pick<ScanJob, 'target' | 'credentialRef'>)
   return token;
 }
 
-export function withGithubToken(url: string, token: string): string {
-  const parsed = new URL(url);
-  parsed.username = 'x-access-token';
-  parsed.password = token;
-  return parsed.toString();
+/** `http.extraHeader` value. Never embed the PAT in the remote URL or .git/config. */
+export function githubHttpExtraHeader(token: string): string {
+  const basic = Buffer.from(`x-access-token:${token}`, 'utf8').toString('base64');
+  return `AUTHORIZATION: basic ${basic}`;
 }
 
 export function resolveRef(job: { options: Record<string, unknown>; target: Record<string, unknown> }): string {
@@ -164,8 +162,9 @@ export async function shallowClone(
   url: string,
   ref: string,
   dest: string,
-  exec: typeof execFileAsync = execFileAsync,
+  options: { exec?: typeof execFileAsync; token?: string } = {},
 ): Promise<void> {
+  const exec = options.exec ?? execFileAsync;
   if (!SAFE_REF.test(ref)) {
     throw new CheckoutError(`Refusing to checkout unsafe git ref: ${ref}`);
   }
@@ -174,14 +173,21 @@ export async function shallowClone(
     if (parsed.protocol !== 'https:' || (parsed.hostname !== 'github.com' && parsed.hostname !== 'www.github.com')) {
       throw new CheckoutError(`Refusing to clone URL with unsupported scheme or host`);
     }
+    if (parsed.username || parsed.password) {
+      throw new CheckoutError('Refusing clone URL that already embeds credentials');
+    }
   } catch (err) {
     if (err instanceof CheckoutError) throw err;
     throw new CheckoutError(`Refusing unparseable clone URL`);
   }
+  const env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: 'echo' };
+  if (options.token) {
+    // extraHeader via git's env config — not argv, not remote URL, not .git/config.
+    env.GIT_CONFIG_COUNT = '1';
+    env.GIT_CONFIG_KEY_0 = 'http.extraHeader';
+    env.GIT_CONFIG_VALUE_0 = githubHttpExtraHeader(options.token);
+  }
   for (const args of gitCheckoutCommands(url, ref, dest)) {
-    await exec('git', args, {
-      timeout: 60_000,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: 'echo' },
-    });
+    await exec('git', args, { timeout: 60_000, env });
   }
 }

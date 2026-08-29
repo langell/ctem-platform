@@ -101,7 +101,9 @@ function parseNpmV2(doc: NpmLockV2, manifestPath: string) {
     edges.set(id, next);
   }
 
-  const directIds = [...idByKey.values()].filter((id) => directNames.has(nameFromNodeId(id)));
+  const directIds = [...idByKey.entries()]
+    .filter(([key, id]) => isDirectInstall(key, nameFromNodeId(id), directNames))
+    .map(([, id]) => id);
   const paths = shortestPathsFromRoots(directIds, edges);
 
   const seen = new Set<string>();
@@ -110,7 +112,7 @@ function parseNpmV2(doc: NpmLockV2, manifestPath: string) {
     seen.add(id);
     const name = nameFromNodeId(id);
     const version = packages[key]!.version!;
-    const direct = directNames.has(name);
+    const direct = isDirectInstall(key, name, directNames);
     components.push(
       makeComponent({
         name,
@@ -124,6 +126,20 @@ function parseNpmV2(doc: NpmLockV2, manifestPath: string) {
     );
   }
   return components;
+}
+
+/**
+ * Direct means the top-level install of a root/workspace dependency.
+ * Nested copies (`node_modules/other/node_modules/foo`) stay transitive
+ * even when `foo` is also a top-level dep.
+ */
+function isDirectInstall(key: string, name: string, directNames: Set<string>): boolean {
+  if (!directNames.has(name)) return false;
+  const suffix = `node_modules/${name}`;
+  if (key === suffix) return true;
+  if (!key.endsWith(`/${suffix}`)) return false;
+  const parent = key.slice(0, -(suffix.length + 1));
+  return !parent.includes('node_modules/');
 }
 
 function parseNpmV1(tree: Record<string, NpmLockV1Node>, manifestPath: string) {

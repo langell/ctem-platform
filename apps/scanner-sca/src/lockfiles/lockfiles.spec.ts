@@ -1,4 +1,6 @@
+import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parseCargoLock } from './cargo';
@@ -12,6 +14,7 @@ import { parseRequirementsTxt } from './pip';
 import { parsePnpmLock, splitPnpmKey } from './pnpm';
 import { parsePoetryLock } from './poetry';
 import { filesToRead, LockfileResolutionError, resolveLockfiles } from './resolve';
+import { listRepoFiles } from './walk';
 import { parseYarnClassic, yarnParser } from './yarn';
 
 const FIX = join(__dirname, '__fixtures__');
@@ -59,6 +62,46 @@ describe('npm package-lock.json', () => {
     expect(map.express.direct).toBe(true);
     expect(map.qs.dependencyPath).toEqual(['express', 'qs']);
   });
+
+  it('marks only the top-level install as direct when a nested copy shares the name', () => {
+    const components = parseNpmLock({
+      relPath: 'package-lock.json',
+      content: JSON.stringify({
+        name: 'app',
+        lockfileVersion: 3,
+        packages: {
+          '': { dependencies: { lodash: '4.17.21', other: '1.0.0' } },
+          'node_modules/lodash': {
+            version: '4.17.21',
+            resolved: 'https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz',
+          },
+          'node_modules/other': {
+            version: '1.0.0',
+            resolved: 'https://registry.npmjs.org/other/-/other-1.0.0.tgz',
+            dependencies: { lodash: '3.10.1' },
+          },
+          'node_modules/other/node_modules/lodash': {
+            version: '3.10.1',
+            resolved: 'https://registry.npmjs.org/lodash/-/lodash-3.10.1.tgz',
+          },
+        },
+      }),
+      companions: {},
+    });
+    const lodashes = components.filter((c) => c.name === 'lodash');
+    expect(lodashes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ version: '4.17.21', direct: true, dependencyPath: ['lodash'] }),
+        expect.objectContaining({
+          version: '3.10.1',
+          direct: false,
+          dependencyPath: ['other', 'lodash'],
+        }),
+      ]),
+    );
+    expect(lodashes).toHaveLength(2);
+    expect(components.find((c) => c.name === 'other')).toMatchObject({ direct: true });
+  });
 });
 
 describe('yarn.lock', () => {
@@ -80,6 +123,29 @@ describe('yarn.lock', () => {
     );
     expect(map.express.direct).toBe(true);
     expect(map.qs.dependencyPath).toEqual(['express', 'qs']);
+  });
+
+  it('keeps every locked version of the same package name', () => {
+    const lock = [
+      '# yarn lockfile v1',
+      '',
+      'lodash@^4.17.0:',
+      '  version "4.17.21"',
+      '  resolved "https://registry.yarnpkg.com/lodash/-/lodash-4.17.21.tgz"',
+      '',
+      'lodash@^3.10.0:',
+      '  version "3.10.1"',
+      '  resolved "https://registry.yarnpkg.com/lodash/-/lodash-3.10.1.tgz"',
+      '',
+    ].join('\n');
+    const components = parseYarnClassic(lock, 'yarn.lock', new Set(['lodash']));
+    expect(components).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'lodash', version: '4.17.21' }),
+        expect.objectContaining({ name: 'lodash', version: '3.10.1' }),
+      ]),
+    );
+    expect(components).toHaveLength(2);
   });
 });
 
@@ -140,6 +206,23 @@ describe('go.mod / go.sum', () => {
       dependencyPath: [],
     });
   });
+
+  it('keeps every go.sum version of a module, not first-version-wins', () => {
+    const sum = [
+      'github.com/pkg/errors v0.8.1 h1:old==',
+      'github.com/pkg/errors v0.8.1/go.mod h1:old==',
+      'github.com/pkg/errors v0.9.1 h1:new==',
+      'github.com/pkg/errors v0.9.1/go.mod h1:new==',
+    ].join('\n');
+    const components = parseGoModules('require github.com/pkg/errors v0.9.1\n', sum, 'go.sum');
+    expect(components).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'github.com/pkg/errors', version: 'v0.9.1', direct: true }),
+        expect.objectContaining({ name: 'github.com/pkg/errors', version: 'v0.8.1', direct: false }),
+      ]),
+    );
+    expect(components).toHaveLength(2);
+  });
 });
 
 describe('poetry.lock', () => {
@@ -175,6 +258,23 @@ describe('Gemfile.lock', () => {
       ecosystem: 'RubyGems',
     });
   });
+
+  it('strips the bang suffix from DEPENDENCIES so git/path pins still match specs', () => {
+    const lock = [
+      'GEM',
+      '  remote: https://rubygems.org/',
+      '  specs:',
+      '    rails (7.0.4)',
+      '',
+      'DEPENDENCIES',
+      '  rails!',
+      '',
+    ].join('\n');
+    const components = parseGemfileLock(lock, 'Gemfile.lock');
+    expect(components).toEqual([
+      expect.objectContaining({ name: 'rails', version: '7.0.4', direct: true }),
+    ]);
+  });
 });
 
 describe('Maven / Gradle', () => {
@@ -192,6 +292,41 @@ describe('Maven / Gradle', () => {
     const map = byName(parsePomXml(load('maven-parent', 'pom.xml'), 'pom.xml'));
     expect(map['com.acme:child-app'].version).toBe('1.2.3');
     expect(map['com.acme:parent-bom-note'].version).toBe('9.9.9');
+  });
+
+  it('does not treat plugin classpath dependencies as product deps', () => {
+    const pom = `<?xml version="1.0" encoding="UTF-8"?>
+<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.acme</groupId>
+  <artifactId>app</artifactId>
+  <version>1.0.0</version>
+  <dependencies>
+    <dependency>
+      <groupId>org.apache.commons</groupId>
+      <artifactId>commons-lang3</artifactId>
+      <version>3.12.0</version>
+    </dependency>
+  </dependencies>
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <dependencies>
+          <dependency>
+            <groupId>com.acme</groupId>
+            <artifactId>compiler-helper</artifactId>
+            <version>9.9.9</version>
+          </dependency>
+        </dependencies>
+      </plugin>
+    </plugins>
+  </build>
+</project>`;
+    const components = parsePomXml(pom, 'pom.xml');
+    expect(components.map((c) => c.name)).toEqual(['org.apache.commons:commons-lang3']);
+    expect(components.find((c) => c.name === 'com.acme:compiler-helper')).toBeUndefined();
   });
 
   it('parses gradle.lockfile as a flat list without a graph', () => {
@@ -268,6 +403,21 @@ describe('resolveLockfiles', () => {
 
   it('throws when every selected lockfile fails to parse', async () => {
     await expect(resolveLockfiles(join(FIX, 'corrupt'))).rejects.toThrow(LockfileResolutionError);
+  });
+
+  it('caps the directory walk so a huge tree cannot list forever', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'ctem-walk-'));
+    await writeFile(join(root, 'a.txt'), 'a');
+    await writeFile(join(root, 'b.txt'), 'b');
+    await mkdir(join(root, 'deep', 'nested'), { recursive: true });
+    await writeFile(join(root, 'deep', 'nested', 'c.txt'), 'c');
+
+    const filesCap = await listRepoFiles(root, { maxFiles: 1 });
+    expect(filesCap).toHaveLength(1);
+
+    const depthCap = await listRepoFiles(root, { maxDepth: 0 });
+    expect(depthCap.every((f) => !f.relPath.includes('/'))).toBe(true);
+    expect(depthCap.some((f) => f.fileName === 'c.txt')).toBe(false);
   });
 
   it('reads only the lockfile and declared companions, not every sibling', () => {

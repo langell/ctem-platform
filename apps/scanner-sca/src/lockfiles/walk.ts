@@ -29,14 +29,36 @@ export interface RepoFile {
   fileName: string;
 }
 
-/** Recursive listing that skips dependency/build trees. Lockfiles live at the project root of each package. */
-export async function listRepoFiles(root: string): Promise<RepoFile[]> {
+export const MAX_WALK_FILES = 10_000;
+export const MAX_WALK_DEPTH = 32;
+
+export interface WalkLimits {
+  maxFiles?: number;
+  maxDepth?: number;
+}
+
+/**
+ * Recursive listing that skips dependency/build trees. Caps file count and
+ * depth so a huge checkout cannot unbounded-walk the worker.
+ */
+export async function listRepoFiles(root: string, limits: WalkLimits = {}): Promise<RepoFile[]> {
   const out: RepoFile[] = [];
-  await walk(root, root, out);
+  await walk(root, root, out, 0, {
+    maxFiles: limits.maxFiles ?? MAX_WALK_FILES,
+    maxDepth: limits.maxDepth ?? MAX_WALK_DEPTH,
+  });
   return out;
 }
 
-async function walk(root: string, dir: string, out: RepoFile[]): Promise<void> {
+async function walk(
+  root: string,
+  dir: string,
+  out: RepoFile[],
+  depth: number,
+  limits: { maxFiles: number; maxDepth: number },
+): Promise<void> {
+  if (out.length >= limits.maxFiles || depth > limits.maxDepth) return;
+
   let entries;
   try {
     entries = await readdir(dir, { withFileTypes: true });
@@ -45,9 +67,11 @@ async function walk(root: string, dir: string, out: RepoFile[]): Promise<void> {
   }
 
   for (const entry of entries) {
+    if (out.length >= limits.maxFiles) return;
     if (entry.isDirectory()) {
       if (IGNORE_DIRS.has(entry.name) || entry.name.startsWith('.')) continue;
-      await walk(root, join(dir, entry.name), out);
+      if (depth + 1 > limits.maxDepth) continue;
+      await walk(root, join(dir, entry.name), out, depth + 1, limits);
       continue;
     }
     if (!entry.isFile()) continue;

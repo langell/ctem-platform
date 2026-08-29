@@ -22,6 +22,17 @@ function isYarnBerry(content: string): boolean {
   return /^\s*__metadata:/m.test(content);
 }
 
+interface YarnDep {
+  name: string;
+  range?: string;
+}
+
+interface YarnEntry {
+  name: string;
+  version: string;
+  deps: YarnDep[];
+}
+
 /**
  * Yarn classic (`# yarn lockfile v1`) is not YAML. Entries look like:
  *   left-pad@^1.1.1, left-pad@^1.1.3:
@@ -30,7 +41,7 @@ function isYarnBerry(content: string): boolean {
  *       foo "1.0.0"
  */
 export function parseYarnClassic(content: string, manifestPath: string, directNames: Set<string>) {
-  const entries: Array<{ name: string; version: string; deps: string[] }> = [];
+  const entries: YarnEntry[] = [];
   const blocks = content.split(/\n{2,}/);
 
   for (const block of blocks) {
@@ -42,7 +53,7 @@ export function parseYarnClassic(content: string, manifestPath: string, directNa
     const name = nameFromDescriptor(descriptors[0] ?? '');
     const versionMatch = block.match(/^\s+version\s+"([^"]+)"/m);
     if (!name || !versionMatch) continue;
-    const deps: string[] = [];
+    const deps: YarnDep[] = [];
     let inDeps = false;
     for (const line of lines) {
       if (/^\s+dependencies:/.test(line)) {
@@ -54,9 +65,9 @@ export function parseYarnClassic(content: string, manifestPath: string, directNa
           inDeps = false;
           continue;
         }
-        const m = /^\s{4}(?:"([^"]+)"|(\S+))\s+"/.exec(line);
+        const m = /^\s{4}(?:"([^"]+)"|(\S+))\s+"([^"]*)"/.exec(line);
         const depName = m?.[1] ?? m?.[2];
-        if (depName) deps.push(depName);
+        if (depName) deps.push({ name: depName, range: m?.[3] });
       }
     }
     entries.push({ name, version: versionMatch[1], deps });
@@ -69,7 +80,7 @@ function parseYarnBerry(content: string, manifestPath: string, directNames: Set<
   const doc = parseYaml(content) as Record<string, unknown> | null;
   if (!doc || typeof doc !== 'object') return [];
 
-  const entries: Array<{ name: string; version: string; deps: string[] }> = [];
+  const entries: YarnEntry[] = [];
   for (const [key, value] of Object.entries(doc)) {
     if (key === '__metadata' || !value || typeof value !== 'object') continue;
     const entry = value as {
@@ -85,37 +96,50 @@ function parseYarnBerry(content: string, manifestPath: string, directNames: Set<
       name,
       version: String(entry.version),
       deps: [
-        ...Object.keys(entry.dependencies ?? {}),
-        ...Object.keys(entry.optionalDependencies ?? {}),
+        ...Object.entries(entry.dependencies ?? {}).map(([depName, range]) => ({
+          name: depName,
+          range,
+        })),
+        ...Object.entries(entry.optionalDependencies ?? {}).map(([depName, range]) => ({
+          name: depName,
+          range,
+        })),
       ],
     });
   }
   return toComponents(entries, manifestPath, directNames);
 }
 
-function toComponents(
-  entries: Array<{ name: string; version: string; deps: string[] }>,
-  manifestPath: string,
-  directNames: Set<string>,
-) {
-  // Prefer the first resolved version per name (yarn may list a name once per descriptor).
-  const byName = new Map<string, { version: string; deps: string[] }>();
+/**
+ * Yarn lists one entry per descriptor, so the same package can lock two
+ * versions. Deduping on name alone drops the second copy — keep every
+ * `name@version`.
+ */
+function toComponents(entries: YarnEntry[], manifestPath: string, directNames: Set<string>) {
+  const byId = new Map<string, YarnEntry>();
+  const versionsByName = new Map<string, string[]>();
   for (const e of entries) {
-    if (!byName.has(e.name)) byName.set(e.name, e);
+    const id = nodeId(e.name, e.version);
+    if (byId.has(id)) continue;
+    byId.set(id, e);
+    const versions = versionsByName.get(e.name) ?? [];
+    versions.push(e.version);
+    versionsByName.set(e.name, versions);
   }
 
   const edges = new Map<string, string[]>();
-  for (const [name, e] of byName) {
-    const id = nodeId(name, e.version);
+  for (const [id, e] of byId) {
     edges.set(
       id,
-      e.deps.filter((d) => byName.has(d)).map((d) => nodeId(d, byName.get(d)!.version)),
+      e.deps
+        .map((dep) => resolveYarnDep(dep, versionsByName))
+        .filter((depId): depId is string => Boolean(depId)),
     );
   }
 
-  const directIds = [...byName.entries()]
-    .filter(([name]) => directNames.has(name))
-    .map(([name, e]) => nodeId(name, e.version));
+  const directIds = [...byId.values()]
+    .filter((e) => directNames.has(e.name))
+    .map((e) => nodeId(e.name, e.version));
   // No package.json → treat packages that nothing depends on as direct.
   const inferredDirect =
     directIds.length > 0
@@ -123,19 +147,35 @@ function toComponents(
       : [...edges.keys()].filter((id) => ![...edges.values()].some((deps) => deps.includes(id)));
   const paths = shortestPathsFromRoots(inferredDirect, edges);
 
-  return [...byName.entries()].map(([name, e]) => {
-    const id = nodeId(name, e.version);
+  return [...byId.values()].map((e) => {
+    const id = nodeId(e.name, e.version);
     const direct = inferredDirect.includes(id);
     return makeComponent({
-      name,
+      name: e.name,
       version: e.version,
       ecosystem: ECOSYSTEM.npm,
-      purl: purlFor(ECOSYSTEM.npm, name, e.version),
+      purl: purlFor(ECOSYSTEM.npm, e.name, e.version),
       direct,
-      dependencyPath: paths.get(id)?.map(nameFromNodeId) ?? (direct ? [name] : []),
+      dependencyPath: paths.get(id)?.map(nameFromNodeId) ?? (direct ? [e.name] : []),
       manifestPath,
     });
   });
+}
+
+function resolveYarnDep(dep: YarnDep, versionsByName: Map<string, string[]>): string | undefined {
+  const versions = versionsByName.get(dep.name);
+  if (!versions?.length) return undefined;
+  const hint = exactVersionHint(dep.range);
+  if (hint && versions.includes(hint)) return nodeId(dep.name, hint);
+  return nodeId(dep.name, versions[0]);
+}
+
+/** `6.7.0` / `npm:6.7.0` → exact version; ranges (`^1.0.0`) cannot pick a copy. */
+function exactVersionHint(range?: string): string | undefined {
+  if (!range) return undefined;
+  const raw = range.startsWith('npm:') ? range.slice('npm:'.length) : range;
+  if (!raw || /[<>^*=~ ]/.test(raw)) return undefined;
+  return raw;
 }
 
 export function directFromPackageJson(source?: string): Set<string> {

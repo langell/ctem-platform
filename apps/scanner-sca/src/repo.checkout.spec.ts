@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   CheckoutError,
+  githubHttpExtraHeader,
   gitCheckoutCommands,
   resolveCheckout,
   resolveCloneUrl,
@@ -109,10 +110,35 @@ describe('resolveRef', () => {
 describe('shallowClone', () => {
   it('runs init/fetch/checkout against the existing workDir', async () => {
     const exec = vi.fn(async () => ({ stdout: '', stderr: '' }));
-    await shallowClone('https://github.com/acme/api.git', 'main', '/tmp/work', exec as never);
+    await shallowClone('https://github.com/acme/api.git', 'main', '/tmp/work', { exec: exec as never });
     expect(exec.mock.calls.map((c) => c[1])).toEqual(
       gitCheckoutCommands('https://github.com/acme/api.git', 'main', '/tmp/work'),
     );
+  });
+
+  it('passes the PAT as http.extraHeader and never puts it on the remote', async () => {
+    const token = 'ghp_not_for_remote_url';
+    const exec = vi.fn(async () => ({ stdout: '', stderr: '' }));
+    await shallowClone('https://github.com/acme/api.git', 'main', '/tmp/work', {
+      exec: exec as never,
+      token,
+    });
+
+    const argLists = exec.mock.calls.map((c) => c[1] as string[]);
+    expect(argLists.some((args) => args.includes('https://github.com/acme/api.git'))).toBe(true);
+    expect(JSON.stringify(argLists)).not.toContain(token);
+    expect(JSON.stringify(argLists)).not.toContain('x-access-token');
+
+    const envs = exec.mock.calls.map((c) => c[2] as { env?: NodeJS.ProcessEnv });
+    expect(envs.every((opts) => opts.env?.GIT_CONFIG_KEY_0 === 'http.extraHeader')).toBe(true);
+    expect(envs.every((opts) => opts.env?.GIT_CONFIG_VALUE_0 === githubHttpExtraHeader(token))).toBe(true);
+    expect(envs.every((opts) => !opts.env?.GIT_CONFIG_VALUE_0?.includes(token))).toBe(true);
+  });
+
+  it('refuses a remote URL that already embeds credentials', async () => {
+    await expect(
+      shallowClone('https://x-access-token:ghp_leak@github.com/acme/api.git', 'main', '/tmp/w'),
+    ).rejects.toThrow(/embeds credentials/);
   });
 
   it('refuses flag-like refs', async () => {
