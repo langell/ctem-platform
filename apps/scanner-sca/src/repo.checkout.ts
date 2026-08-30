@@ -37,6 +37,9 @@ export interface ResolvedCheckout {
  * Egress is allowlisted: `https://github.com/owner/repo` or
  * `https://gitlab.com/owner/repo` (nested GitLab groups allowed) from
  * `cloneUrl`, or a `github:owner/repo` / `gitlab:owner/repo` externalKey.
+ * The github:/gitlab: key is the asset identity: when both a cloneUrl and a
+ * key are present they must canonicalize to the same host+path or the job
+ * fails closed (a tenant-writable cloneUrl cannot redirect the clone).
  * Tenant-writable `htmlUrl` / `url` / `git@` are refused. Missing or refused
  * sources throw so the job fails closed instead of scanning an empty workDir.
  * Self-hosted GitLab is later explicit config — not any hostname in cloneUrl.
@@ -60,15 +63,24 @@ export function resolveCheckout(job: Pick<ScanJob, 'target' | 'credentialRef'>):
 }
 
 export function resolveCloneUrl(target: Record<string, unknown>): string {
-  if (typeof target.cloneUrl === 'string' && target.cloneUrl.length > 0) {
-    return allowlistedCloneHttps(target.cloneUrl);
+  const hasCloneUrl = typeof target.cloneUrl === 'string' && target.cloneUrl.length > 0;
+  const key = typeof target.externalKey === 'string' ? target.externalKey : undefined;
+  const fromKey = key ? httpsFromScmIdentityKey(key) : null;
+
+  if (hasCloneUrl && fromKey) {
+    const fromClone = allowlistedCloneHttps(target.cloneUrl as string);
+    if (canonicalHostPath(fromClone) !== canonicalHostPath(fromKey)) {
+      throw new CheckoutError(
+        `cloneUrl does not match asset identity '${key}' — refusing to clone a different repository`,
+      );
+    }
+    return fromClone;
   }
-  const key = target.externalKey;
-  if (typeof key === 'string' && key.startsWith('github:')) {
-    return githubKeyToHttps(key);
+  if (hasCloneUrl) {
+    return allowlistedCloneHttps(target.cloneUrl as string);
   }
-  if (typeof key === 'string' && key.startsWith('gitlab:')) {
-    return gitlabKeyToHttps(key);
+  if (fromKey) {
+    return fromKey;
   }
   throw new CheckoutError(
     'SCA source scan needs an allowlisted clone source (cloneUrl on github.com or gitlab.com, or github:owner/repo / gitlab:owner/repo). ' +
@@ -137,6 +149,26 @@ export function gitlabKeyToHttps(externalKey: string): string {
     throw new CheckoutError(`Refusing malformed gitlab externalKey: ${externalKey}`);
   }
   return `https://gitlab.com/${m[1]}.git`;
+}
+
+/** github: / gitlab: keys only — other externalKeys are not clone identities. */
+function httpsFromScmIdentityKey(externalKey: string): string | null {
+  if (externalKey.startsWith('github:')) return githubKeyToHttps(externalKey);
+  if (externalKey.startsWith('gitlab:')) return gitlabKeyToHttps(externalKey);
+  return null;
+}
+
+/** Compare allowlisted clone origins as host+path (github.com / gitlab.com only). */
+function canonicalHostPath(url: string): string {
+  const parsed = new URL(url);
+  const host = canonicalCloneHost(parsed.hostname);
+  if (!host) {
+    throw new CheckoutError(
+      `Refusing clone host '${parsed.hostname}' — only github.com and gitlab.com are allowlisted`,
+    );
+  }
+  const path = parsed.pathname.replace(/\.git$/, '').replace(/\/+$/, '');
+  return `${host}${path}`.toLowerCase();
 }
 
 function canonicalCloneHost(hostname: string): 'github.com' | 'gitlab.com' | null {
