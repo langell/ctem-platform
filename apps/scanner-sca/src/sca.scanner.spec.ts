@@ -8,6 +8,12 @@ import { SbomParser } from './sbom.parser';
 import { VulnMatcher } from './vuln.matcher';
 import { CheckoutError, GitRepoCheckout } from './repo.checkout';
 import { LockfileResolutionError } from './lockfiles/resolve';
+import {
+  emptyReachabilityGraph,
+  ReachabilityAnalysisError,
+  type ReachabilityAnalyzer,
+  type ReachabilityGraph,
+} from './reachability';
 
 const FIX = join(__dirname, 'lockfiles', '__fixtures__', 'npm');
 
@@ -33,28 +39,39 @@ function ctx(overrides: Partial<ScanContext['job']> = {}): ScanContext {
   };
 }
 
+function matchingMatcher() {
+  return {
+    match: vi.fn(async () => ({
+      matches: [
+        {
+          id: 'GHSA-test',
+          source: 'GHSA',
+          aliases: [],
+          summary: 'test advisory',
+          severity: 'high',
+          cvssVector: null,
+          cvssScore: 7.5,
+          epssScore: null,
+          kev: false,
+          fixedVersion: '4.17.3',
+        },
+      ],
+      mirrored: true,
+    })),
+    warmCache: vi.fn(),
+  };
+}
+
+function jsGraph(imported: string[]): ReachabilityGraph {
+  const graph = emptyReachabilityGraph();
+  graph.languages.add('javascript');
+  graph.imported.set('javascript', new Set(imported));
+  return graph;
+}
+
 describe('ScaScanner source path', () => {
-  it('resolves lockfiles when no SBOM key is given and leaves reachability unknown', async () => {
-    const matcher = {
-      match: vi.fn(async () => ({
-        matches: [
-          {
-            id: 'GHSA-test',
-            source: 'GHSA',
-            aliases: [],
-            summary: 'test advisory',
-            severity: 'high',
-            cvssVector: null,
-            cvssScore: 7.5,
-            epssScore: null,
-            kev: false,
-            fixedVersion: '4.17.3',
-          },
-        ],
-        mirrored: true,
-      })),
-      warmCache: vi.fn(),
-    };
+  it('resolves lockfiles when no SBOM key is given and does not treat lockfile hits as reachable', async () => {
+    const matcher = matchingMatcher();
 
     const checkout = { checkout: vi.fn(async () => undefined) };
     const scanner = new ScaScanner(
@@ -72,9 +89,86 @@ describe('ScaScanner source path', () => {
     );
     expect(express).toMatchObject({ version: '4.17.1', direct: true });
     expect(outcome.findings.length).toBeGreaterThan(0);
+    // Lockfile-only fixture: graph is produced, but nothing is imported.
     expect(outcome.findings.every((f) => f.evidence.reachability === 'unknown')).toBe(true);
+    expect(outcome.findings.every((f) => f.evidence.reachability !== 'reachable')).toBe(true);
     expect(outcome.findings[0].evidence.dependencyPath).toEqual(['express']);
     expect(outcome.stats?.mirroredComponents).toBeGreaterThan(0);
+  });
+
+  it('fills reachable vs not_reachable from the import/call graph', async () => {
+    const matcher = matchingMatcher();
+    const checkout = { checkout: vi.fn(async () => undefined) };
+    const reachability = { analyze: vi.fn(async () => jsGraph(['express'])) };
+    const scanner = new ScaScanner(
+      new SbomParser(null as unknown as ArtifactStore),
+      matcher as unknown as VulnMatcher,
+      checkout as unknown as GitRepoCheckout,
+      reachability as unknown as ReachabilityAnalyzer,
+    );
+
+    const outcome = await scanner.execute(ctx());
+    const byName = Object.fromEntries(
+      outcome.findings.map((f) => [f.location.packageName, f.evidence.reachability]),
+    );
+    expect(byName.express).toBe('reachable');
+    expect(byName.qs).toBe('not_reachable');
+    expect(reachability.analyze).toHaveBeenCalledOnce();
+  });
+
+  it('leaves unknown when the produced graph cannot say', async () => {
+    const matcher = matchingMatcher();
+    const checkout = { checkout: vi.fn(async () => undefined) };
+    const graph = jsGraph(['express']);
+    graph.ambiguous.add('javascript');
+    const reachability = { analyze: vi.fn(async () => graph) };
+    const scanner = new ScaScanner(
+      new SbomParser(null as unknown as ArtifactStore),
+      matcher as unknown as VulnMatcher,
+      checkout as unknown as GitRepoCheckout,
+      reachability as unknown as ReachabilityAnalyzer,
+    );
+
+    const outcome = await scanner.execute(ctx());
+    const byName = Object.fromEntries(
+      outcome.findings.map((f) => [f.location.packageName, f.evidence.reachability]),
+    );
+    expect(byName.express).toBe('reachable');
+    expect(byName.qs).toBe('unknown');
+  });
+
+  it('fails the job when analysis crashes instead of succeeding with findings', async () => {
+    const matcher = matchingMatcher();
+    const checkout = { checkout: vi.fn(async () => undefined) };
+    const reachability = {
+      analyze: vi.fn(async () => {
+        throw new Error('parser panicked');
+      }),
+    };
+    const scanner = new ScaScanner(
+      new SbomParser(null as unknown as ArtifactStore),
+      matcher as unknown as VulnMatcher,
+      checkout as unknown as GitRepoCheckout,
+      reachability as unknown as ReachabilityAnalyzer,
+    );
+
+    await expect(scanner.execute(ctx())).rejects.toThrow(ReachabilityAnalysisError);
+    expect(matcher.match).not.toHaveBeenCalled();
+  });
+
+  it('fails the job when analysis returns no graph instead of all-unknown success', async () => {
+    const matcher = matchingMatcher();
+    const checkout = { checkout: vi.fn(async () => undefined) };
+    const reachability = { analyze: vi.fn(async () => null) };
+    const scanner = new ScaScanner(
+      new SbomParser(null as unknown as ArtifactStore),
+      matcher as unknown as VulnMatcher,
+      checkout as unknown as GitRepoCheckout,
+      reachability as unknown as ReachabilityAnalyzer,
+    );
+
+    await expect(scanner.execute(ctx())).rejects.toThrow(/did not produce a graph/);
+    expect(matcher.match).not.toHaveBeenCalled();
   });
 
   it('does not clone when an SBOM artifact key is supplied', async () => {
@@ -91,20 +185,22 @@ describe('ScaScanner source path', () => {
         },
       ]),
     };
-    const matcher = {
-      match: vi.fn(async () => ({ matches: [], mirrored: true })),
-      warmCache: vi.fn(),
-    };
+    const matcher = matchingMatcher();
     const checkout = { checkout: vi.fn() };
+    const reachability = { analyze: vi.fn() };
     const scanner = new ScaScanner(
       sbom as unknown as SbomParser,
       matcher as unknown as VulnMatcher,
       checkout as unknown as GitRepoCheckout,
+      reachability as unknown as ReachabilityAnalyzer,
     );
 
-    await scanner.execute(ctx({ options: { sbomArtifactKey: 'org/sbom.json' } }));
+    const outcome = await scanner.execute(ctx({ options: { sbomArtifactKey: 'org/sbom.json' } }));
     expect(checkout.checkout).not.toHaveBeenCalled();
+    expect(reachability.analyze).not.toHaveBeenCalled();
     expect(sbom.fromArtifact).toHaveBeenCalledWith('org/sbom.json');
+    expect(outcome.findings.length).toBeGreaterThan(0);
+    expect(outcome.findings.every((f) => f.evidence.reachability === 'unknown')).toBe(true);
   });
 
   it('throws on a missing or refused clone URL instead of succeeding with findings:[]', async () => {
