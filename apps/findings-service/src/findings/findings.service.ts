@@ -26,11 +26,10 @@ export class FindingsService {
    */
   async ingest(orgId: string, payload: FindingsReportedPayload): Promise<void> {
     const seenAt = new Date();
-    const fingerprints: string[] = [];
+    const collapsed = this.normalizer.collapseScan(payload.assetId, payload.findings);
+    const fingerprints = collapsed.map((row) => row.fingerprint);
 
-    for (const raw of payload.findings) {
-      const fingerprint = this.normalizer.fingerprint(payload.assetId, raw);
-      fingerprints.push(fingerprint);
+    for (const { fingerprint, finding: raw, location, evidence } of collapsed) {
       const severity = this.normalizer.reconcileSeverity(raw);
 
       const { finding, created } = await this.prisma.withOrg(orgId, async (tx) => {
@@ -55,8 +54,8 @@ export class FindingsService {
             cvssVector: raw.cvssVector,
             epssScore: raw.epssScore,
             kev: raw.kev,
-            location: raw.location as object,
-            evidence: raw.evidence as object,
+            location: location as object,
+            evidence: evidence as object,
             fixAvailable: raw.fix.available,
             fixedVersion: raw.fix.fixedVersion ?? null,
             artifactKey: payload.artifactKey,
@@ -64,7 +63,7 @@ export class FindingsService {
             lastSeenAt: seenAt,
           },
           update: {
-            // A re-reported finding refreshes evidence but never resets triage.
+            // A re-reported finding refreshes evidence/location but never resets triage.
             lastSeenAt: seenAt,
             severity,
             cvssScore: raw.cvssScore,
@@ -72,7 +71,8 @@ export class FindingsService {
             kev: raw.kev,
             fixAvailable: raw.fix.available,
             fixedVersion: raw.fix.fixedVersion ?? null,
-            evidence: raw.evidence as object,
+            location: location as object,
+            evidence: evidence as object,
             artifactKey: payload.artifactKey,
             ...(existing?.state === 'resolved'
               ? { state: 'open', resolvedAt: null } // regression
