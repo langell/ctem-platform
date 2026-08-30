@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
-# Per-boot reconciliation for the CTEM platform development environment.
+# Per-boot startup for the CTEM platform development environment.
 #
-# Brings up everything the services need before the terminals entry launches
-# them: the Docker daemon, the docker-compose infra (Postgres, Redis, NATS,
-# MinIO, Keycloak), the database schema + row-level security, and the demo
-# seed. It is idempotent — safe to run on every boot and safe to re-run.
+# Brings up everything the services need and then runs the service stack in the
+# foreground (attached): the Docker daemon, the docker-compose infra (Postgres,
+# Redis, NATS, MinIO, Keycloak), the database schema + row-level security, the
+# demo seed, and finally the eight NestJS services + scanner workers.
+#
+# It is idempotent — safe to run on every boot and safe to re-run: infra and the
+# database converge without duplicating state, and the service stack is only
+# launched when it is not already healthy.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -83,9 +87,24 @@ migrate_and_seed() {
   pnpm db:seed
 }
 
+# ── Services ──────────────────────────────────────────────────────────────────
+# The eight NestJS services + scanner workers run from dist on the host (they
+# reach the infra over localhost). tsc watches for rebuilds; nx runs the stack.
+# This is the attached, non-daemonizing process the environment keeps alive.
+run_services() {
+  if curl -sf -m 3 http://localhost:3000/health/live >/dev/null 2>&1; then
+    log "service stack already healthy — not launching a duplicate"
+    exec sleep infinity
+  fi
+  log "starting service stack (nx run-many -t dev)"
+  pnpm exec tsc -b tsconfig.build.json --watch --preserveWatchOutput &
+  exec pnpm nx run-many -t dev --parallel=12
+}
+
 start_dockerd
 fix_bridge_networking
 start_infra
 migrate_and_seed
 
-echo "✔ start complete — infra up, database migrated and seeded"
+echo "✔ infra up, database migrated and seeded — launching services"
+run_services
