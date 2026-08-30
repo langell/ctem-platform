@@ -5,6 +5,14 @@ import { SbomParser, type ResolvedComponent } from './sbom.parser';
 import { VulnMatcher } from './vuln.matcher';
 import { resolveLockfiles } from './lockfiles';
 import { GitRepoCheckout } from './repo.checkout';
+import {
+  isReachabilityGraph,
+  ReachabilityAnalysisError,
+  ReachabilityAnalyzer,
+  verdictForComponent,
+  type ReachabilityGraph,
+  type ReachabilityVerdict,
+} from './reachability';
 
 /**
  * Software Composition Analysis — dependencies and SBOMs.
@@ -12,12 +20,13 @@ import { GitRepoCheckout } from './repo.checkout';
  * Two input paths:
  *   1. CI uploaded a CycloneDX/SPDX document; we parse it and match. Fast, no
  *      repo access needed, and the customer's build already resolved versions.
- *   2. We were given a repo; we resolve the manifest ourselves.
+ *   2. We were given a repo; we resolve the manifest ourselves, then fill
+ *      evidence.reachability from an import/call graph of that clone.
  *
- * The differentiator versus a plain "CVE grep" is reachability: knowing a
- * vulnerable function is actually called changes a wall of criticals into a
- * short list. That lives behind `analyzeReachability` and is the highest-value
- * piece of unbuilt work in this scanner.
+ * Lockfile presence is not reachability. `reachable` / `not_reachable` only
+ * land when the graph says so. A package the graph cannot prove stays
+ * `unknown`. If analysis crashes, times out, or never produces a graph, the
+ * job fails — never an empty or all-unknown success from a failed analysis.
  */
 @Injectable()
 export class ScaScanner extends BaseScanner {
@@ -29,6 +38,7 @@ export class ScaScanner extends BaseScanner {
     private readonly sbom: SbomParser,
     private readonly matcher: VulnMatcher,
     private readonly checkout: GitRepoCheckout = new GitRepoCheckout(),
+    private readonly reachability: ReachabilityAnalyzer = new ReachabilityAnalyzer(),
   ) {
     super();
   }
@@ -40,8 +50,8 @@ export class ScaScanner extends BaseScanner {
   async execute(ctx: ScanContext): Promise<ScanOutcome> {
     const sbomKey = ctx.job.options.sbomArtifactKey as string | undefined;
 
-    const components: ResolvedComponent[] = sbomKey
-      ? await this.sbom.fromArtifact(sbomKey)
+    const { components, graph } = sbomKey
+      ? { components: await this.sbom.fromArtifact(sbomKey), graph: undefined }
       : await this.resolveFromSource(ctx);
 
     ctx.log(`resolved ${components.length} components`);
@@ -60,6 +70,9 @@ export class ScaScanner extends BaseScanner {
           name: component.name,
         });
       }
+      const reachability: ReachabilityVerdict = graph
+        ? verdictForComponent(component, graph)
+        : 'unknown';
       for (const vuln of matches) {
         findings.push({
           externalId: vuln.id,
@@ -90,8 +103,7 @@ export class ScaScanner extends BaseScanner {
           evidence: {
             direct: component.direct,
             dependencyPath: component.dependencyPath,
-            // TODO: reachability verdict from static call-graph analysis.
-            reachability: 'unknown',
+            reachability,
           },
           raw: {},
         });
@@ -112,14 +124,30 @@ export class ScaScanner extends BaseScanner {
   }
 
   /**
-   * Repo path: clone at the pinned ref, detect ecosystems, resolve lockfiles.
-   * Lockfile-first — a range in package.json is a guess, a lockfile is the truth.
-   *
-   * Reachability (call-graph analysis) is deliberately not done here. Findings
-   * keep `evidence.reachability = 'unknown'` until that slice ships.
+   * Repo path: clone at the pinned ref, resolve lockfiles, then build the
+   * import/call graph on that workDir. Graph analysis is required: a crash or
+   * missing graph fails the job so findings-service cannot auto-resolve prior
+   * SCA hits from an empty or all-unknown success.
    */
-  private async resolveFromSource(ctx: ScanContext): Promise<ResolvedComponent[]> {
+  private async resolveFromSource(
+    ctx: ScanContext,
+  ): Promise<{ components: ResolvedComponent[]; graph: ReachabilityGraph }> {
     await this.checkout.checkout(ctx);
-    return resolveLockfiles(ctx.workDir);
+    const components = await resolveLockfiles(ctx.workDir);
+    let graph: unknown;
+    try {
+      graph = await this.reachability.analyze(ctx.workDir, ctx.checkDeadline);
+    } catch (err) {
+      if (err instanceof ReachabilityAnalysisError) throw err;
+      throw new ReachabilityAnalysisError(
+        `Reachability analysis failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    if (!isReachabilityGraph(graph)) {
+      throw new ReachabilityAnalysisError(
+        'Reachability analyzer did not produce a graph — refusing an all-unknown success',
+      );
+    }
+    return { components, graph };
   }
 }
