@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import type { RawFinding } from '@ctem/contracts';
 import { FindingNormalizer } from './finding-normalizer';
@@ -46,6 +47,22 @@ describe('FindingNormalizer.fingerprint', () => {
     );
   });
 
+  it('is (asset, sca, vuln, purl) and does not include lockfile path', () => {
+    const expected = createHash('sha256')
+      .update(['asset-1', 'sca', 'CVE-2024-0001', 'pkg:npm/express@4.17.1'].join('|'))
+      .digest('hex');
+    const fromA = normalizer.fingerprint(
+      'asset-1',
+      raw({ location: { purl: 'pkg:npm/express@4.17.1', path: 'app-a/package-lock.json' } }),
+    );
+    const fromB = normalizer.fingerprint(
+      'asset-1',
+      raw({ location: { purl: 'pkg:npm/express@4.17.1', path: 'app-b/package-lock.json' } }),
+    );
+    expect(fromA).toBe(expected);
+    expect(fromB).toBe(expected);
+  });
+
   it('ignores line numbers for code findings so a diff above the match is not a new finding', () => {
     const base = raw({
       scannerType: 'sast',
@@ -69,5 +86,39 @@ describe('FindingNormalizer.reconcileSeverity', () => {
 
   it('falls back to the scanner label when there is no CVSS', () => {
     expect(normalizer.reconcileSeverity(raw({ severity: 'high' }))).toBe('high');
+  });
+});
+
+describe('FindingNormalizer.collapseScan', () => {
+  const lodashA = raw({
+    location: { purl: 'pkg:npm/lodash@4.17.21', path: 'app-a/package-lock.json' },
+    evidence: { direct: true, dependencyPath: ['lodash'] },
+  });
+  const lodashB = raw({
+    location: { purl: 'pkg:npm/lodash@4.17.21', path: 'app-b/package-lock.json' },
+    evidence: { direct: false, dependencyPath: ['express', 'lodash'] },
+  });
+  const qs = raw({
+    location: { purl: 'pkg:npm/qs@6.5.2', path: 'app-a/package-lock.json' },
+    evidence: { direct: false, dependencyPath: ['express', 'qs'] },
+  });
+
+  it('unions lockfile path and dependencyPath for the same purl in one scan', () => {
+    const collapsed = normalizer.collapseScan('asset-1', [lodashA, lodashB]);
+    expect(collapsed).toHaveLength(1);
+    expect(collapsed[0].location.path).toEqual(['app-a/package-lock.json', 'app-b/package-lock.json']);
+    expect(collapsed[0].evidence.dependencyPath).toEqual([
+      ['lodash'],
+      ['express', 'lodash'],
+    ]);
+    expect(collapsed[0].fingerprint).toBe(normalizer.fingerprint('asset-1', lodashA));
+    expect(collapsed[0].fingerprint).toBe(normalizer.fingerprint('asset-1', lodashB));
+  });
+
+  it('keeps different purls as two findings', () => {
+    const collapsed = normalizer.collapseScan('asset-1', [lodashA, qs]);
+    expect(collapsed).toHaveLength(2);
+    const purls = collapsed.map((row) => row.location.purl).sort();
+    expect(purls).toEqual(['pkg:npm/lodash@4.17.21', 'pkg:npm/qs@6.5.2']);
   });
 });
