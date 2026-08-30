@@ -124,6 +124,17 @@ describe('ScaScanner source path', () => {
     await expect(
       scanner.execute(ctx({ target: { cloneUrl: 'git@github.com:acme/app.git' } })),
     ).rejects.toThrow(/git@/);
+    await expect(
+      scanner.execute(
+        ctx({
+          target: {
+            kind: 'repository',
+            externalKey: 'github:acme/app',
+            cloneUrl: 'https://github.com/evil/other.git',
+          },
+        }),
+      ),
+    ).rejects.toThrow(/does not match asset identity/);
     expect(matcher.match).not.toHaveBeenCalled();
   });
 

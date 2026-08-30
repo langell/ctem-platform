@@ -43,6 +43,54 @@ describe('resolveCloneUrl', () => {
     );
   });
 
+  it('proceeds when cloneUrl and a github:/gitlab: key canonicalize to the same host+path', () => {
+    expect(
+      resolveCloneUrl({
+        kind: 'repository',
+        externalKey: 'github:acme/api',
+        cloneUrl: 'https://github.com/acme/api.git',
+      }),
+    ).toBe('https://github.com/acme/api.git');
+    expect(
+      resolveCloneUrl({
+        kind: 'repository',
+        externalKey: 'github:acme/api',
+        cloneUrl: 'https://www.github.com/acme/api',
+      }),
+    ).toBe('https://github.com/acme/api.git');
+    expect(
+      resolveCloneUrl({
+        kind: 'repository',
+        externalKey: 'gitlab:acme/platform/api',
+        cloneUrl: 'https://gitlab.com/acme/platform/api.git',
+      }),
+    ).toBe('https://gitlab.com/acme/platform/api.git');
+  });
+
+  it('fails closed when cloneUrl points at a different owner/repo than the github:/gitlab: key', () => {
+    expect(() =>
+      resolveCloneUrl({
+        kind: 'repository',
+        externalKey: 'github:acme/api',
+        cloneUrl: 'https://github.com/evil/other.git',
+      }),
+    ).toThrow(/does not match asset identity 'github:acme\/api'/);
+    expect(() =>
+      resolveCloneUrl({
+        kind: 'repository',
+        externalKey: 'gitlab:acme/platform/api',
+        cloneUrl: 'https://gitlab.com/acme/other.git',
+      }),
+    ).toThrow(/does not match asset identity/);
+    expect(() =>
+      resolveCloneUrl({
+        kind: 'repository',
+        externalKey: 'github:acme/api',
+        cloneUrl: 'https://gitlab.com/acme/api.git',
+      }),
+    ).toThrow(/does not match asset identity/);
+  });
+
   it('ignores htmlUrl even when it points at GitHub — tenant-writable metadata is not egress', () => {
     expect(() =>
       resolveCloneUrl({ kind: 'repository', htmlUrl: 'https://github.com/acme/api' }),
