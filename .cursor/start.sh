@@ -24,6 +24,10 @@ start_dockerd() {
     log "docker daemon already running"
   else
     log "starting docker daemon (fuse-overlayfs)"
+    # A stale /tmp/dockerd.log can be baked into the base snapshot as a
+    # read-only overlay artifact that even root cannot truncate in place;
+    # remove it first so the redirect below succeeds on a fresh boot.
+    sudo rm -f /tmp/dockerd.log
     sudo bash -c 'nohup dockerd >/tmp/dockerd.log 2>&1 &'
     for _ in $(seq 1 30); do
       sudo docker info >/dev/null 2>&1 && break
