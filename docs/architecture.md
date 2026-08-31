@@ -98,14 +98,14 @@ The mitigation is that `@ctem/contracts` is the single source of truth for every
 1. **Vulnerability feed mirror.** OSV (demand-driven) + NVD + GHSA ingest into `vulnerabilities`, with paged EPSS and KEV enrichment. SCA matches locally once a package has a sync row; live OSV is only the first-seen hop. A full bulk dump (to drop that hop) is optional later work.
 2. **SCA depth.** Lockfile resolvers per ecosystem, real dependency paths, then reachability. Reachability is the single largest reduction in noise available.
 3. **Cloud connectors.** GitHub and GitLab.com repository discovery is live; AWS/GCP/Azure are what keep the inventory from being a spreadsheet. Self-hosted GitLab is later explicit connector config.
-4. **Web UI.** The API is only half a product.
+4. **Web UI.** Thin Nx app at `apps/web`, served by the gateway. Login, assets, findings, finding risk + reachability, kick a scan. Org is taken from the JWT only.
 5. **Distributed scheduling.** The discovery and scan schedulers use naive intervals; they need leader election or a JetStream-backed work queue before a second replica of either runs.
 6. **Container layer scanning**, then IaC parsing, then ASM probing depth.
 7. **Reachability + exploit validation.** This is what separates a CTEM platform from a vulnerability scanner with a dashboard.
 
 ## Known gaps in this scaffold
 
-- Scanner internals beyond SCA SBOM ingest and lockfile resolution are stubbed: image layer walking, IaC parsing, port scanning. Remaining discovery connectors (cloud) are not built yet. Reachability analysis is still unbuilt.
+- Scanner internals beyond SCA SBOM ingest and lockfile resolution are stubbed: image layer walking, IaC parsing, port scanning. Remaining discovery connectors (cloud) are not built yet.
 - SCA source clone is allowlisted to `https://github.com/owner/repo` or `https://gitlab.com/owner/repo` from `cloneUrl` or a `github:` / `gitlab:` externalKey. A refused/missing checkout, a private repo without a usable `env:GITHUB_*` / `env:GITLAB_*` credentialRef, or every lockfile parser failing throws — the job must not succeed with zero findings. `pom.xml` / `*.csproj` / `requirements.txt` are pinned-manifest fallbacks, not graphs.
 - Gateway PAT verification path is a `TODO`; JWT works.
 - Rate limiting is in-memory — correct for one replica only.

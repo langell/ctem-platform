@@ -12,7 +12,8 @@ export class RateLimitMiddleware implements NestMiddleware {
   private readonly windowMs = 60_000;
 
   use(req: Request, res: Response, next: NextFunction): void {
-    const key = (req.headers['x-ctem-org'] as string) ?? req.ip ?? 'anonymous';
+    // Key by IP, never by a client-supplied org header — org comes from the JWT.
+    const key = req.ip ?? 'anonymous';
     const now = Date.now();
     const bucket = this.buckets.get(key) ?? { tokens: this.capacity, refilledAt: now };
 

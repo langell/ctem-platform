@@ -1,6 +1,9 @@
 import 'reflect-metadata';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { NestFactory } from '@nestjs/core';
 import type { INestApplication } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { loadEnv } from '@ctem/config';
 import { rootLogger } from '@ctem/observability';
@@ -11,6 +14,10 @@ export interface BootstrapOptions {
   port: number;
   /** Only the gateway publishes docs publicly; internal services keep them on /docs behind the mesh. */
   swagger?: { title: string; description: string; version?: string };
+  /** Serve a built SPA. API/docs/health routes always win. Gateway-only. */
+  staticDir?: string;
+  /** Browser clients on a different origin (Vite) talk only to this process. */
+  cors?: boolean;
 }
 
 export async function bootstrapService(
@@ -21,9 +28,13 @@ export async function bootstrapService(
   const env = loadEnv();
   const log = rootLogger.child({ service: options.serviceName });
 
-  const app = await NestFactory.create(module as never, { bufferLogs: true });
+  const app = await NestFactory.create<NestExpressApplication>(module as never, { bufferLogs: true });
   app.useGlobalFilters(new ProblemDetailsFilter());
   app.enableShutdownHooks();
+
+  if (options.cors) {
+    app.enableCors({ origin: true });
+  }
 
   if (options.swagger) {
     const config = new DocumentBuilder()
@@ -33,6 +44,18 @@ export async function bootstrapService(
       .addBearerAuth()
       .build();
     SwaggerModule.setup('docs', app, SwaggerModule.createDocument(app, config));
+  }
+
+  if (options.staticDir && existsSync(join(options.staticDir, 'index.html'))) {
+    app.useStaticAssets(options.staticDir, { index: false });
+    app.use((req: { method: string; path: string }, res: { sendFile: (p: string) => void }, next: () => void) => {
+      if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+      const path = req.path ?? '';
+      if (path.startsWith('/v1') || path.startsWith('/docs') || path.startsWith('/health')) {
+        return next();
+      }
+      res.sendFile(join(options.staticDir as string, 'index.html'));
+    });
   }
 
   // env.PORT has a schema default of 3000, so it can only win when the

@@ -54,7 +54,7 @@ export class GatewayAuthGuard implements CanActivate {
     if (token.startsWith(PAT_PREFIX)) {
       principal = await this.verifyPat(token);
     } else {
-      principal = await this.verifyJwt(token, req);
+      principal = await this.verifyJwt(token);
     }
 
     const required =
@@ -80,7 +80,7 @@ export class GatewayAuthGuard implements CanActivate {
   // JWT path (human users via OIDC)
   // ---------------------------------------------------------------------------
 
-  private async verifyJwt(token: string, req: { headers: Record<string, string> }): Promise<Principal> {
+  private async verifyJwt(token: string): Promise<Principal> {
     let claims;
     try {
       claims = await this.jwt.verify(token);
@@ -88,9 +88,10 @@ export class GatewayAuthGuard implements CanActivate {
       throw new UnauthorizedException('Invalid token');
     }
 
-    // A user can belong to several orgs; the active one comes from the token or
-    // an explicit header, and is always re-checked against membership.
-    const orgId = (req.headers['x-ctem-org'] as string) || claims.org_id;
+    // Tenant is taken from the verified JWT only. A client-supplied org id
+    // (x-ctem-org, query, body) must never select the organization — that is
+    // how findings leak across tenants.
+    const orgId = claims.org_id;
     if (!orgId) throw new ForbiddenException('No organization selected');
 
     const role = Role.safeParse(claims.roles?.[0] ?? 'developer');

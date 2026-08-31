@@ -21,6 +21,8 @@
     "db:studio": "prisma studio --schema libs/db/prisma/schema.prisma",
     "db:seed": "tsx libs/db/prisma/seed.ts",
     "start:gateway": "node apps/api-gateway/dist/main.js",
+    "build:web": "pnpm --filter @ctem/web build",
+    "dev:web": "pnpm --filter @ctem/web dev",
     "graph": "nx graph",
     "test:int": "vitest run --config vitest.int.config.ts",
     "e2e": "tsx tools/e2e/smoke.ts"

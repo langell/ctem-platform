@@ -6,10 +6,10 @@ export default [
   { ignores: ['**/dist/**', '**/node_modules/**', '.nx/**', 'libs/db/src/generated/**'] },
   js.configs.recommended,
   {
-    files: ['**/*.ts'],
+    files: ['**/*.{ts,tsx}'],
     languageOptions: {
       parser: tsparser,
-      parserOptions: { ecmaVersion: 2023, sourceType: 'module' },
+      parserOptions: { ecmaVersion: 2023, sourceType: 'module', ecmaFeatures: { jsx: true } },
     },
     plugins: { '@typescript-eslint': tseslint },
     rules: {

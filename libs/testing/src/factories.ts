@@ -209,6 +209,7 @@ export async function seedDemoOrg(prisma: PrismaClient) {
         fixAvailable: true,
         fixedVersion: '4.19.2',
         location: { packageName: 'express', packageVersion: '4.17.1', packageEcosystem: 'npm' },
+        evidence: { reachability: 'reachable', dependencyPath: ['express'] },
         slaDueAt: new Date(Date.now() + 24 * 3_600_000),
       },
       {
@@ -229,6 +230,7 @@ export async function seedDemoOrg(prisma: PrismaClient) {
         fixAvailable: true,
         fixedVersion: '4.19.2',
         location: { packageName: 'express', packageVersion: '4.17.1', packageEcosystem: 'npm' },
+        evidence: { reachability: 'not_reachable', dependencyPath: ['express'] },
       },
       {
         orgId: org.id,
