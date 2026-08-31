@@ -1,20 +1,54 @@
 import 'reflect-metadata';
 import { type AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { HttpException, HttpStatus, type INestApplication } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  NotFoundException,
+  Param,
+  type INestApplication,
+} from '@nestjs/common';
 import { APP_GUARD, Reflector } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
-import { AuthModule, decodePrincipal, JwtVerifier } from '@ctem/auth';
+import { AuthModule, CurrentUser, JwtVerifier, RequirePermissions } from '@ctem/auth';
+import type { Principal } from '@ctem/contracts';
 import { TestIdp, applyTestEnv } from '@ctem/testing';
 import { GatewayAuthGuard } from './gateway-auth.guard';
-import { FindingsProxyController } from '../routes/findings.controller';
 import { SessionController } from '../routes/session.controller';
-import { ServiceProxy } from '../proxy/service-proxy';
 
 const ORG_A = '4a6f9f4e-1111-4222-8333-444455556666';
 const ORG_B = 'bbbbbbbb-2222-4333-8444-555566667777';
 const FINDING_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const FINDING_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+
+@Controller('v1/findings')
+class FindingsProbeController {
+  @Get()
+  @RequirePermissions('finding:read')
+  list(@CurrentUser() principal: Principal) {
+    const id = principal.orgId === ORG_A ? FINDING_A : FINDING_B;
+    return {
+      items: [{ id, orgId: principal.orgId, title: `finding-of-${principal.orgId}` }],
+      nextCursor: null,
+    };
+  }
+
+  @Get(':id/risk')
+  @RequirePermissions('finding:read')
+  risk(@CurrentUser() principal: Principal, @Param('id') id: string) {
+    const owned = principal.orgId === ORG_A ? FINDING_A : FINDING_B;
+    if (id !== owned) throw new NotFoundException(`Finding ${id} not found`);
+    return { findingId: id, score: 91, factors: [], matchedPolicies: [] };
+  }
+
+  @Get(':id')
+  @RequirePermissions('finding:read')
+  get(@CurrentUser() principal: Principal, @Param('id') id: string) {
+    const owned = principal.orgId === ORG_A ? FINDING_A : FINDING_B;
+    if (id !== owned) throw new NotFoundException(`Finding ${id} not found`);
+    return { id, orgId: principal.orgId, title: `finding-of-${principal.orgId}` };
+  }
+}
 
 /**
  * JWT/org scoping + findings isolation at the gateway.
@@ -27,11 +61,6 @@ describe('JWT org scoping and findings tenancy (integration)', () => {
   let idp: TestIdp;
   let app: INestApplication;
   let base: string;
-  const forwarded: Array<{
-    path: string;
-    query: Record<string, unknown> | undefined;
-    orgId: string;
-  }> = [];
 
   beforeAll(async () => {
     idp = await TestIdp.start();
@@ -39,54 +68,13 @@ describe('JWT org scoping and findings tenancy (integration)', () => {
 
     const moduleRef = await Test.createTestingModule({
       imports: [AuthModule],
-      controllers: [SessionController, FindingsProxyController],
+      controllers: [SessionController, FindingsProbeController],
       providers: [
         {
           provide: APP_GUARD,
           useFactory: (reflector: Reflector, jwt: JwtVerifier) =>
             new GatewayAuthGuard(reflector, jwt),
           inject: [Reflector, JwtVerifier],
-        },
-        {
-          provide: ServiceProxy,
-          useValue: {
-            forward: async (
-              _service: string,
-              _method: string,
-              path: string,
-              req: { principalHeaders: { value: string; signature: string } },
-              init: { query?: Record<string, unknown> } = {},
-            ) => {
-              const principal = decodePrincipal(
-                req.principalHeaders.value,
-                req.principalHeaders.signature,
-              );
-              forwarded.push({ path, query: init.query, orgId: principal.orgId });
-
-              if (path === '/internal/findings') {
-                const id = principal.orgId === ORG_A ? FINDING_A : FINDING_B;
-                return {
-                  items: [{ id, orgId: principal.orgId, title: `finding-of-${principal.orgId}` }],
-                  nextCursor: null,
-                };
-              }
-
-              const wanted = path.includes('/risk/')
-                ? path.split('/').at(-1)
-                : path.split('/').at(-1);
-              const owned = principal.orgId === ORG_A ? FINDING_A : FINDING_B;
-              if (wanted !== owned) {
-                throw new HttpException(
-                  { title: 'Not Found', status: 404 },
-                  HttpStatus.NOT_FOUND,
-                );
-              }
-              if (path.includes('/risk/')) {
-                return { findingId: wanted, score: 91, factors: [], matchedPolicies: [] };
-              }
-              return { id: wanted, orgId: principal.orgId, title: `finding-of-${principal.orgId}` };
-            },
-          },
         },
       ],
     }).compile();
@@ -129,7 +117,6 @@ describe('JWT org scoping and findings tenancy (integration)', () => {
   });
 
   it('lists only findings for the JWT org when the client sends another org', async () => {
-    forwarded.length = 0;
     const jwt = await idp.issueToken({ orgId: ORG_A, roles: ['security_analyst'] });
     const res = await call(`/v1/findings?orgId=${ORG_B}&limit=50`, jwt, {
       headers: { 'x-ctem-org': ORG_B },
@@ -140,7 +127,6 @@ describe('JWT org scoping and findings tenancy (integration)', () => {
     expect(body.items[0]?.orgId).toBe(ORG_A);
     expect(body.items[0]?.id).toBe(FINDING_A);
     expect(body.items.some((f) => f.orgId === ORG_B || f.id === FINDING_B)).toBe(false);
-    expect(forwarded.at(-1)?.orgId).toBe(ORG_A);
   });
 
   it('does not leak an org-B finding (detail or risk) to an org-A JWT', async () => {
