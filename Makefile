@@ -18,8 +18,9 @@ infra: ## Start Postgres, Redis, NATS, MinIO and Keycloak
 infra-down: ## Stop infra and delete volumes
 	docker compose down -v
 
-build: ## Compile all libs and services
+build: ## Compile all libs and services, then the web UI
 	pnpm build
+	pnpm build:web
 
 typecheck: ## Type-check without emitting
 	pnpm typecheck
@@ -47,9 +48,10 @@ db-seed: ## Seed a demo org with assets, findings and policies
 
 dev: ## Build once, then run every service from dist with rebuild-and-restart watch (needs infra up)
 	pnpm build
+	pnpm build:web
 	pnpm exec tsc -b tsconfig.build.json --watch --preserveWatchOutput & \
 	  TSC_PID=$$!; \
-	  pnpm nx run-many -t dev --parallel=12; \
+	pnpm nx run-many -t dev --parallel=16 --exclude=@ctem/web; \
 	  kill $$TSC_PID 2>/dev/null
 
 clean:

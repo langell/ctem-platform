@@ -56,8 +56,9 @@ without it those steps fail with a message saying so.
 1. New logic → unit tests next to it.
 2. Touches the database or RLS → integration test asserting behavior **as
    `ctem_app`**, not as the owner.
-3. Touches auth, tokens, or the principal → extend the gateway guard suite or
-   the identity token suite.
+3. Touches auth, tokens, or the principal → extend the gateway guard suite,
+   the org-scoping/findings-tenancy suite, or the identity token suite.
+   The web client must keep covering that it never sends an org id.
 4. Adds a tenant table → nothing to do; the RLS sweep fails until
    `libs/db/prisma/manual/000_rls.sql` covers it. Fix the SQL, not the test.
 5. Changes the golden path (new endpoint in the flow, changed contract) →

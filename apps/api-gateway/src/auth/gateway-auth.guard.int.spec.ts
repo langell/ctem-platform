@@ -137,6 +137,18 @@ describe('GatewayAuthGuard (integration)', () => {
     expect((await get('/probe/read', jwt)).status).toBe(403);
   });
 
+  it('ignores a client-supplied x-ctem-org that disagrees with the JWT', async () => {
+    const otherOrg = 'bbbbbbbb-2222-4333-8444-555566667777';
+    const jwt = await idp.issueToken({ sub: 'idp|alice', orgId, roles: ['owner'] });
+    const res = await fetch(`${base}/probe/read`, {
+      headers: { authorization: `Bearer ${jwt}`, 'x-ctem-org': otherOrg },
+    });
+    expect(res.status).toBe(200);
+    const principal = (await res.json()) as Principal;
+    expect(principal.orgId).toBe(orgId);
+    expect(principal.orgId).not.toBe(otherOrg);
+  });
+
   it('rejects a JWT with an unknown role', async () => {
     const jwt = await idp.issueToken({ orgId, roles: ['superuser'] });
     expect((await get('/probe/read', jwt)).status).toBe(403);

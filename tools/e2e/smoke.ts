@@ -132,7 +132,7 @@ async function main(): Promise<void> {
 
       const b = await api(IDENTITY, 'POST', '/internal/tokens', {
         headers: principalHeaders(orgB.id),
-        body: { name: 'smoke-b', scopes: ['asset:read'] },
+        body: { name: 'smoke-b', scopes: ['asset:read', 'finding:read'] },
       });
       expect(b.status < 300 && b.json?.token, `org B token: HTTP ${b.status}`);
       patB = b.json.token;
@@ -370,6 +370,43 @@ async function main(): Promise<void> {
         `qs finding should explain its path as express → qs, got ${JSON.stringify(transitive!.evidence?.dependencyPath)}`,
       );
       return 'transitive qs finding carries path express → qs';
+    });
+
+    let orgAFindingId = '';
+    await step('org B cannot list org A findings (tenant isolation)', async () => {
+      const listed = await api(GATEWAY, 'GET', '/v1/findings', { token: patA });
+      const aItems = (listed.json?.items ?? []) as Array<{ id: string; title: string }>;
+      expect(aItems.length > 0, 'org A should have findings after the SBOM scan');
+      orgAFindingId = aItems[0]!.id;
+
+      const res = await api(GATEWAY, 'GET', '/v1/findings', { token: patB });
+      expect(res.status === 200, `expected 200, got ${res.status}`);
+      const items = (res.json?.items ?? []) as Array<{ id: string }>;
+      expect(
+        !items.some((f) => f.id === orgAFindingId),
+        `org A's finding ${orgAFindingId} leaked into org B's listing`,
+      );
+    });
+
+    await step('org B cannot read org A finding detail or risk', async () => {
+      expect(Boolean(orgAFindingId), 'missing org A finding id from the previous step');
+      const detail = await api(GATEWAY, 'GET', `/v1/findings/${orgAFindingId}`, { token: patB });
+      expect(detail.status === 404, `expected 404 on detail, got ${detail.status}`);
+      const risk = await api(GATEWAY, 'GET', `/v1/findings/${orgAFindingId}/risk`, { token: patB });
+      expect(risk.status === 404, `expected 404 on risk, got ${risk.status}`);
+    });
+
+    await step('client-supplied org header cannot switch tenant on findings', async () => {
+      const res = await api(GATEWAY, 'GET', `/v1/findings?orgId=${orgA.id}`, {
+        token: patB,
+        headers: { 'x-ctem-org': orgA.id },
+      });
+      expect(res.status === 200, `expected 200, got ${res.status}`);
+      const items = (res.json?.items ?? []) as Array<{ id: string }>;
+      expect(
+        !items.some((f) => f.id === orgAFindingId),
+        'x-ctem-org / ?orgId= leaked org A findings to an org B token',
+      );
     });
   } finally {
     await deleteOrgCascade(db, orgA.id).catch(() => undefined);

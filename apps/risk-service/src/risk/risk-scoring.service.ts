@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@ctem/db';
 import { SEVERITY_ORDER, type RiskExplanation, type RiskWeights, type Severity } from '@ctem/contracts';
 
@@ -47,8 +47,11 @@ export class RiskScoringService {
 
   async score(orgId: string, findingId: string): Promise<RiskExplanation> {
     const finding = await this.prisma.withOrg(orgId, (tx) =>
-      tx.finding.findUniqueOrThrow({ where: { id: findingId }, include: { asset: true } }),
+      tx.finding.findUnique({ where: { id: findingId }, include: { asset: true } }),
     );
+    // RLS fail-closed looks the same as a missing row. Never 500 — that is how
+    // a cross-tenant GET /v1/findings/:id/risk would leak that the id exists.
+    if (!finding) throw new NotFoundException(`Finding ${findingId} not found`);
 
     const weights = DEFAULT_WEIGHTS; // TODO: load per-org overrides from policy
 

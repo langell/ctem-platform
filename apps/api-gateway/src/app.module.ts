@@ -10,6 +10,7 @@ import { ServiceProxy } from './proxy/service-proxy';
 import { AssetsProxyController } from './routes/assets.controller';
 import { ScansProxyController } from './routes/scans.controller';
 import { FindingsProxyController } from './routes/findings.controller';
+import { SessionController } from './routes/session.controller';
 import { RateLimitMiddleware } from './rate-limit.middleware';
 
 /**
@@ -21,6 +22,7 @@ import { RateLimitMiddleware } from './rate-limit.middleware';
   imports: [CtemConfigModule, ObservabilityModule, AuthModule, EventsModule],
   controllers: [
     HealthController,
+    SessionController,
     AssetsProxyController,
     ScansProxyController,
     FindingsProxyController,
