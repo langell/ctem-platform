@@ -1,9 +1,13 @@
 import { randomUUID } from 'node:crypto';
+import { NotFoundException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import type { EventBus } from '@ctem/events';
 import type { FindingsReportedPayload, RawFinding } from '@ctem/contracts';
 import { FindingNormalizer } from './finding-normalizer';
 import { FindingsService } from './findings.service';
+
+const ORG_B = 'bbbbbbbb-2222-4333-8444-555566667777';
+const FINDING_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 
 function raw(overrides: Partial<RawFinding> = {}): RawFinding {
   return {
@@ -129,5 +133,16 @@ describe('FindingsService.ingest persist', () => {
     expect(upserts).toHaveLength(1);
     expect(upserts[0].create.fingerprint).toBe(normalizer.fingerprint(batch.assetId, batch.findings[0]));
     expect(upserts[0].create.fingerprint).toBe(normalizer.fingerprint(batch.assetId, batch.findings[1]));
+  });
+});
+
+describe('FindingsService.get', () => {
+  it('returns 404 when the finding is absent in the org (including RLS miss)', async () => {
+    const { findings, tx } = service();
+    await expect(findings.get(ORG_B, FINDING_A)).rejects.toBeInstanceOf(NotFoundException);
+    expect(tx.finding.findUnique).toHaveBeenCalledWith({
+      where: { id: FINDING_A },
+      include: { events: true, asset: true },
+    });
   });
 });

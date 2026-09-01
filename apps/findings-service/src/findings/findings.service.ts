@@ -139,6 +139,8 @@ export class FindingsService {
     const finding = await this.prisma.withOrg(orgId, (tx) =>
       tx.finding.findUnique({ where: { id }, include: { events: true, asset: true } }),
     );
+    // RLS fail-closed looks the same as a missing row. Never 500 — that is how
+    // a cross-tenant GET /v1/findings/:id would leak that the id exists (P2025).
     if (!finding) throw new NotFoundException(`Finding ${id} not found`);
     return finding;
   }

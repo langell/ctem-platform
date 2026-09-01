@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@ctem/db';
 
 export interface GraphNode {
@@ -31,7 +31,10 @@ export class AssetGraphService {
     assetId: string,
     depth = 2,
   ): Promise<{ nodes: GraphNode[]; edges: GraphEdge[] }> {
-    return this.prisma.withOrg(orgId, async (tx) => {
+    const graph = await this.prisma.withOrg(orgId, async (tx) => {
+      const exists = await tx.asset.findUnique({ where: { id: assetId }, select: { id: true } });
+      if (!exists) return null;
+
       // Recursive CTE beats N round-trips; RLS still applies inside the CTE.
       const rows = await tx.$queryRawUnsafe<
         Array<{ from_id: string; to_id: string; kind: string; confidence: number }>
@@ -72,6 +75,10 @@ export class AssetGraphService {
         })),
       };
     });
+    // RLS fail-closed looks the same as a missing row. Never 200-empty or 500 —
+    // match GET /v1/assets/:id so a cross-tenant graph fetch cannot leak existence.
+    if (!graph) throw new NotFoundException(`Asset ${assetId} not found`);
+    return graph;
   }
 
   /** True when the asset is reachable from anything classified as internet-facing. */

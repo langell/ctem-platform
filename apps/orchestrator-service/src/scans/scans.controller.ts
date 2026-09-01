@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, NotFoundException, Param, Post, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { CurrentOrg, CurrentUser, RequirePermissions } from '@ctem/auth';
 import { CreateScanRequest, IngestSbomRequest, type Principal } from '@ctem/contracts';
@@ -26,10 +26,14 @@ export class ScansController {
 
   @Get(':id')
   @RequirePermissions('scan:read')
-  get(@CurrentOrg() orgId: string, @Param('id') id: string) {
-    return this.prisma.withOrg(orgId, (tx) =>
-      tx.scan.findUniqueOrThrow({ where: { id }, include: { jobs: true } }),
+  async get(@CurrentOrg() orgId: string, @Param('id') id: string) {
+    const scan = await this.prisma.withOrg(orgId, (tx) =>
+      tx.scan.findUnique({ where: { id }, include: { jobs: true } }),
     );
+    // RLS fail-closed looks the same as a missing row. Never 500 — that is how
+    // a cross-tenant GET /v1/scans/:id would leak that the id exists (P2025).
+    if (!scan) throw new NotFoundException(`Scan ${id} not found`);
+    return scan;
   }
 
   @Post()

@@ -84,6 +84,8 @@ export class AssetsService {
 
   async get(orgId: string, id: string) {
     const asset = await this.prisma.withOrg(orgId, (tx) => tx.asset.findUnique({ where: { id } }));
+    // RLS fail-closed looks the same as a missing row. Never 500 — that is how
+    // a cross-tenant GET /v1/assets/:id would leak that the id exists (P2025).
     if (!asset) throw new NotFoundException(`Asset ${id} not found`);
     return asset;
   }
