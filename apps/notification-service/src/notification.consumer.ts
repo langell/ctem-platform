@@ -3,7 +3,9 @@ import { EventBus } from '@ctem/events';
 import { SUBJECTS } from '@ctem/contracts';
 import { rootLogger } from '@ctem/observability';
 import { ChannelRegistry } from './channels/channel.registry';
+import { SlackChannel } from './channels/slack.channel';
 import { WebhookChannel } from './channels/webhook.channel';
+import { notifyPolicyViolated } from './policy-notify';
 
 @Injectable()
 export class NotificationConsumer implements OnApplicationBootstrap {
@@ -13,10 +15,12 @@ export class NotificationConsumer implements OnApplicationBootstrap {
     private readonly bus: EventBus,
     private readonly registry: ChannelRegistry,
     private readonly webhook: WebhookChannel,
+    private readonly slack: SlackChannel,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
     this.registry.register(this.webhook);
+    this.registry.register(this.slack);
 
     await this.bus.subscribe(
       SUBJECTS.notificationRequested,
@@ -42,15 +46,19 @@ export class NotificationConsumer implements OnApplicationBootstrap {
       },
     );
 
-    // Policy hits and SLA breaches become notifications; routing (which team,
-    // which channel) is resolved from asset ownership.
+    // Policy hits become Slack when the action is notify. The hook URL is
+    // platform env:SLACK_* — not tenant config/body/query, not message.target.
     await this.bus.subscribe(
       SUBJECTS.policyViolated,
       { durable: 'notification-policy' },
       async (payload, envelope) => {
-        this.log.info({ orgId: envelope.orgId, payload }, 'policy violation received');
-        // TODO: resolve owner -> channel, render the template, then publish
-        // notificationRequested so delivery retries independently of routing.
+        const notice = payload as {
+          findingId: string;
+          policyId: string;
+          actions: string[];
+        };
+        this.log.info({ orgId: envelope.orgId, payload: notice }, 'policy violation received');
+        await notifyPolicyViolated(envelope.orgId, notice, this.slack);
       },
     );
   }

@@ -3,6 +3,11 @@ import { PrismaService } from '@ctem/db';
 import { EventBus } from '@ctem/events';
 import { SEVERITY_ORDER, SUBJECTS, type PolicyCondition, type Severity } from '@ctem/contracts';
 import { rootLogger } from '@ctem/observability';
+import {
+  SEED_KEV_OR_CRITICAL_POLICY_ID,
+  SEED_NOTIFY_ACTIONS,
+  matchesSeedKevOrCritical,
+} from './seed-notify';
 
 interface EvaluableFinding {
   id: string;
@@ -64,6 +69,22 @@ export class PolicyEngineService {
 
       this.log.info({ findingId, policyId: policy.id, actions: policy.actions }, 'policy matched');
       return policy.actions;
+    }
+
+    // Seed rule, not a policy editor: KEV or critical → notify when no tenant
+    // policy matched, so `ctem.policy.violated` actually emits.
+    if (matchesSeedKevOrCritical(finding)) {
+      const actions = [...SEED_NOTIFY_ACTIONS];
+      await this.bus.publish(SUBJECTS.policyViolated, orgId, {
+        findingId,
+        policyId: SEED_KEV_OR_CRITICAL_POLICY_ID,
+        actions,
+      });
+      this.log.info(
+        { findingId, policyId: SEED_KEV_OR_CRITICAL_POLICY_ID, actions },
+        'seed KEV-or-critical policy matched',
+      );
+      return actions;
     }
 
     return [];
