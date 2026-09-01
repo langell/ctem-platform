@@ -12,8 +12,8 @@ export interface DiscoveryContext {
 /**
  * Asset discovery connectors. Each one turns an external system into a stream of
  * upsert requests; the service handles persistence, archival and events.
- * GitHub and GitLab are registered; this remains the extension point for
- * further providers (cloud is a later PR).
+ * GitHub, GitLab, and AWS are registered; this remains the extension point
+ * for further providers (Azure/GCP are later PRs).
  */
 export interface AssetConnector {
   readonly provider: string;
@@ -41,7 +41,8 @@ export class ConnectorRegistry {
 /**
  * Roadmap of connectors, in the order they earn their keep:
  *   github / gitlab      -> repositories, default branches, CODEOWNERS
- *   aws / azure / gcp    -> cloud resources, public IPs, security groups
+ *   aws                  -> cloud resources, public IPs, security groups
+ *   azure / gcp          -> later cloud inventory (not this connector)
  *   kubernetes           -> workloads, images in use, ingress exposure
  *   ecr / ghcr           -> container images and tags
  *   dns + cert transparency -> external domains nobody remembers owning
