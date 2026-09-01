@@ -53,11 +53,14 @@ services:
 
   keycloak:
     image: quay.io/keycloak/keycloak:26.0
-    command: ['start-dev', '--http-port=8080']
+    command: ['start-dev', '--http-port=8080', '--import-realm']
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: admin
     ports: ['8080:8080']
+    volumes:
+      # Local-only realm: issuer http://localhost:8080/realms/ctem, demo analyst, ctem-api audience.
+      - ./deploy/keycloak/ctem-realm.json:/opt/keycloak/data/import/ctem-realm.json:ro
 
 volumes:
   pgdata:
