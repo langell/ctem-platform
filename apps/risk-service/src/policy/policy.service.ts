@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import type { ZodTypeAny } from 'zod';
+import type { z } from 'zod';
 import { PrismaService } from '@ctem/db';
 import {
   CreatePolicyRequest,
@@ -72,7 +72,7 @@ export class PolicyService {
     });
   }
 
-  private parseWrite<T>(schema: ZodTypeAny, body: unknown): T {
+  private parseWrite<S extends z.ZodTypeAny>(schema: S, body: unknown): z.infer<S> {
     const webhookKeys = findTenantWebhookKeys(body);
     if (webhookKeys.length) {
       throw new BadRequestException(
@@ -91,6 +91,6 @@ export class PolicyService {
         })),
       });
     }
-    return parsed.data as T;
+    return parsed.data;
   }
 }
