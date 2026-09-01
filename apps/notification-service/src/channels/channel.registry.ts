@@ -31,7 +31,7 @@ export class ChannelRegistry {
 
 /**
  * Planned channels:
- *   slack          -> per-team channel routing off asset ownership
+ *   slack          -> implemented: policy.violated → hooks.slack.com via env:SLACK_*
  *   jira / linear  -> ticket per finding, with dedup on the finding fingerprint
  *   github_issue   -> issue in the repo the finding came from
  *   email          -> digest, not per-finding — nobody reads per-finding email

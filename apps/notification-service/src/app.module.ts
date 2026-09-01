@@ -8,6 +8,7 @@ import { DbModule } from '@ctem/db';
 import { HealthController } from '@ctem/service-kit';
 import { NotificationConsumer } from './notification.consumer';
 import { ChannelRegistry } from './channels/channel.registry';
+import { SlackChannel } from './channels/slack.channel';
 import { WebhookChannel } from './channels/webhook.channel';
 
 @Module({
@@ -16,6 +17,7 @@ import { WebhookChannel } from './channels/webhook.channel';
   providers: [
     ChannelRegistry,
     WebhookChannel,
+    SlackChannel,
     NotificationConsumer,
     { provide: APP_GUARD, useClass: InternalAuthGuard },
   ],

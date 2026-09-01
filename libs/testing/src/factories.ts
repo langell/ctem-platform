@@ -132,6 +132,22 @@ export async function seedDemoOrg(prisma: PrismaClient) {
     create: { orgId: org.id, userId: user.id, role: 'owner' },
   });
 
+  // One seed rule (not a policy editor): critical → notify. The engine also
+  // falls back to KEV-or-critical when no tenant policy matches so
+  // ctem.policy.violated actually emits for the demo org.
+  await prisma.policy.upsert({
+    where: { orgId_name: { orgId: org.id, name: 'KEV or critical' } },
+    update: {},
+    create: {
+      orgId: org.id,
+      name: 'KEV or critical',
+      description: 'Platform seed: notify on critical severity (engine also covers KEV).',
+      priority: 5,
+      condition: { severityAtLeast: 'critical' },
+      actions: ['notify'],
+    },
+  });
+
   const assets = await Promise.all(
     [
       {
