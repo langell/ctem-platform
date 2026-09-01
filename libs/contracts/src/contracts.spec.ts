@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { EVENT_SCHEMAS, ROLE_PERMISSIONS, SUBJECTS, STREAMS, ScanJob } from './index';
+import {
+  CreatePolicyRequest,
+  UpdatePolicyRequest,
+  EVENT_SCHEMAS,
+  ROLE_PERMISSIONS,
+  SUBJECTS,
+  STREAMS,
+  ScanJob,
+  findTenantWebhookKeys,
+} from './index';
 
 describe('event catalog', () => {
   it('has a payload schema for every subject', () => {
@@ -43,5 +52,41 @@ describe('rbac', () => {
   it('gives the owner everything', () => {
     expect(ROLE_PERMISSIONS.owner).toContain('org:write');
     expect(ROLE_PERMISSIONS.owner).toContain('exception:approve');
+  });
+});
+
+describe('policy editor writes', () => {
+  const notifyRule = {
+    name: 'KEV notify',
+    condition: { kevOnly: true },
+    actions: ['notify'],
+  };
+
+  it('accepts notify-only create and update, persisting priority', () => {
+    expect(CreatePolicyRequest.parse({ ...notifyRule, priority: 10 })).toMatchObject({
+      actions: ['notify'],
+      priority: 10,
+    });
+    expect(UpdatePolicyRequest.parse({ priority: 5 })).toEqual({ priority: 5 });
+  });
+
+  it('refuses ticket / fail_build / block_deploy on create and update', () => {
+    expect(() => CreatePolicyRequest.parse({ ...notifyRule, actions: ['ticket'] })).toThrow();
+    expect(() =>
+      CreatePolicyRequest.parse({ ...notifyRule, actions: ['notify', 'fail_build'] }),
+    ).toThrow();
+    expect(() => UpdatePolicyRequest.parse({ actions: ['block_deploy'] })).toThrow();
+  });
+
+  it('refuses a tenant webhook URL if it appears', () => {
+    expect(findTenantWebhookKeys({ ...notifyRule, webhookUrl: 'https://evil.test/hook' })).toEqual([
+      'webhookUrl',
+    ]);
+    expect(
+      findTenantWebhookKeys({ condition: { webhookUrl: 'https://attacker.test/x' } }),
+    ).toEqual(['condition.webhookUrl']);
+    expect(() =>
+      CreatePolicyRequest.parse({ ...notifyRule, webhookUrl: 'https://evil.test/hook' }),
+    ).toThrow();
   });
 });

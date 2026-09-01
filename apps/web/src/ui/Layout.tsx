@@ -41,6 +41,7 @@ export function Layout() {
           <NavLink to="/assets">Assets</NavLink>
           <NavLink to="/findings">Findings</NavLink>
           <NavLink to="/scans">Scan</NavLink>
+          <NavLink to="/policies">Policies</NavLink>
         </nav>
         <div className="session">
           {session ? (

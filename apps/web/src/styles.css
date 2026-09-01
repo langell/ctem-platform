@@ -155,6 +155,16 @@ th {
   margin-bottom: 0.85rem;
 }
 
+.card label.inline {
+  flex-direction: row;
+  align-items: center;
+}
+
+.card label.inline input[type='checkbox'] {
+  width: auto;
+  padding: 0;
+}
+
 .muted {
   color: var(--muted);
 }

@@ -9,6 +9,7 @@ import { HealthController } from '@ctem/service-kit';
 import { RiskController } from './risk/risk.controller';
 import { RiskScoringService } from './risk/risk-scoring.service';
 import { PolicyEngineService } from './policy/policy-engine.service';
+import { PolicyService } from './policy/policy.service';
 import { RiskConsumer } from './risk/risk.consumer';
 import { SlaMonitorService } from './policy/sla-monitor.service';
 import { FeedStore } from './feed/feed.store';
@@ -22,6 +23,7 @@ import { EnrichmentService } from './feed/enrichment.service';
   providers: [
     RiskScoringService,
     PolicyEngineService,
+    PolicyService,
     RiskConsumer,
     SlaMonitorService,
     FeedStore,

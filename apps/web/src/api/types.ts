@@ -84,3 +84,38 @@ export interface Scan {
 
 export const SCANNER_TYPES = ['sca', 'sast', 'container', 'iac', 'secrets', 'asm', 'cloud_posture'] as const;
 export type ScannerType = (typeof SCANNER_TYPES)[number];
+
+export const SEVERITIES = ['critical', 'high', 'medium', 'low', 'info'] as const;
+export type Severity = (typeof SEVERITIES)[number];
+
+/** Tenant-authored rule. This slice writes notify only. */
+export interface Policy {
+  id: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  priority: number;
+  condition: {
+    severityAtLeast?: string;
+    minRiskScore?: number;
+    kevOnly?: boolean;
+    minEpss?: number;
+    requireFixAvailable?: boolean;
+    scannerTypes?: string[];
+    assetKinds?: string[];
+    exposure?: string[];
+    criticality?: string[];
+  };
+  actions: string[];
+  slaHours: number | null;
+}
+
+export interface PolicyWrite {
+  name: string;
+  description: string;
+  enabled: boolean;
+  priority: number;
+  condition: Policy['condition'];
+  actions: ['notify'];
+  slaHours: number | null;
+}
