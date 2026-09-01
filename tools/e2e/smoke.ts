@@ -72,7 +72,12 @@ async function api(
   base: string,
   method: string,
   path: string,
-  opts: { token?: string; headers?: Record<string, string>; body?: unknown } = {},
+  opts: {
+    token?: string;
+    headers?: Record<string, string>;
+    body?: unknown;
+    timeoutMs?: number;
+  } = {},
 ): Promise<{ status: number; json: Record<string, unknown> | null }> {
   const res = await fetch(`${base}${path}`, {
     method,
@@ -82,7 +87,7 @@ async function api(
       ...opts.headers,
     },
     body: opts.body ? JSON.stringify(opts.body) : undefined,
-    signal: AbortSignal.timeout(10_000),
+    signal: AbortSignal.timeout(opts.timeoutMs ?? 10_000),
   });
   const json = await res.json().catch(() => null);
   return { status: res.status, json };
@@ -325,7 +330,11 @@ async function main(): Promise<void> {
         },
       });
 
-      const res = await api(GATEWAY, 'POST', '/v1/assets/discover', { token: patA });
+      const res = await api(GATEWAY, 'POST', '/v1/assets/discover', {
+        token: patA,
+        // Live GitHub listing regularly exceeds the default 10s client budget.
+        timeoutMs: 30_000,
+      });
       expect(res.status < 300, `discover returned ${res.status}: ${JSON.stringify(res.json)}`);
       const results = res.json as unknown as Array<{ upserted: number; error: string | null }>;
       expect(
