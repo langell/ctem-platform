@@ -50,6 +50,41 @@ describe('gateway client org scoping', () => {
     ).toThrow(/org selector/);
   });
 
+  it('sends policy writes to the gateway without an org selector', () => {
+    const req = buildGatewayRequest('/v1/policies', {
+      method: 'POST',
+      token: 'jwt-for-org-a',
+      body: {
+        name: 'KEV notify',
+        condition: { kevOnly: true },
+        actions: ['notify'],
+        priority: 10,
+      },
+    });
+    expect(req.url).toBe('/v1/policies');
+    expect(req.headers.authorization).toBe('Bearer jwt-for-org-a');
+    expect(req.url).not.toMatch(/org/i);
+    expect(JSON.parse(req.body ?? '{}')).not.toHaveProperty('orgId');
+    expect(JSON.parse(req.body ?? '{}')).not.toHaveProperty('webhookUrl');
+  });
+
+  it('refuses an org field on a policy create or update body', () => {
+    expect(() =>
+      buildGatewayRequest('/v1/policies', {
+        method: 'POST',
+        token: 'jwt',
+        body: { name: 'x', actions: ['notify'], orgId: 'other-org' },
+      }),
+    ).toThrow(/org selector/);
+    expect(() =>
+      buildGatewayRequest('/v1/policies/11111111-1111-4111-8111-111111111111', {
+        method: 'PATCH',
+        token: 'jwt',
+        body: { priority: 1, organization_id: 'other-org' },
+      }),
+    ).toThrow(/org selector/);
+  });
+
   it('does not treat assetId as an org selector', () => {
     const req = buildGatewayRequest('/v1/findings', {
       token: 'jwt',

@@ -6,6 +6,7 @@ import {
   Get,
   NotFoundException,
   Param,
+  Patch,
   type INestApplication,
 } from '@nestjs/common';
 import { APP_GUARD, Reflector } from '@nestjs/core';
@@ -20,6 +21,8 @@ const ORG_A = '4a6f9f4e-1111-4222-8333-444455556666';
 const ORG_B = 'bbbbbbbb-2222-4333-8444-555566667777';
 const FINDING_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const FINDING_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const POLICY_A = '11111111-1111-4111-8111-111111111111';
+const POLICY_B = '22222222-2222-4222-8222-222222222222';
 
 @Controller('v1/findings')
 class FindingsProbeController {
@@ -50,6 +53,32 @@ class FindingsProbeController {
   }
 }
 
+@Controller('v1/policies')
+class PoliciesProbeController {
+  @Get()
+  @RequirePermissions('policy:read')
+  list(@CurrentUser() principal: Principal) {
+    const id = principal.orgId === ORG_A ? POLICY_A : POLICY_B;
+    return [{ id, orgId: principal.orgId, name: `rule-of-${principal.orgId}`, priority: 10 }];
+  }
+
+  @Get(':id')
+  @RequirePermissions('policy:read')
+  get(@CurrentUser() principal: Principal, @Param('id') id: string) {
+    const owned = principal.orgId === ORG_A ? POLICY_A : POLICY_B;
+    if (id !== owned) throw new NotFoundException(`Policy ${id} not found`);
+    return { id, orgId: principal.orgId, name: `rule-of-${principal.orgId}`, priority: 10 };
+  }
+
+  @Patch(':id')
+  @RequirePermissions('policy:write')
+  update(@CurrentUser() principal: Principal, @Param('id') id: string) {
+    const owned = principal.orgId === ORG_A ? POLICY_A : POLICY_B;
+    if (id !== owned) throw new NotFoundException(`Policy ${id} not found`);
+    return { id, orgId: principal.orgId, name: `rule-of-${principal.orgId}`, priority: 5 };
+  }
+}
+
 /**
  * JWT/org scoping + findings isolation at the gateway.
  *
@@ -68,7 +97,7 @@ describe('JWT org scoping and findings tenancy (integration)', () => {
 
     const moduleRef = await Test.createTestingModule({
       imports: [AuthModule],
-      controllers: [SessionController, FindingsProbeController],
+      controllers: [SessionController, FindingsProbeController, PoliciesProbeController],
       providers: [
         {
           provide: APP_GUARD,
@@ -92,10 +121,16 @@ describe('JWT org scoping and findings tenancy (integration)', () => {
   async function call(
     path: string,
     token: string,
-    extra: { headers?: Record<string, string> } = {},
+    extra: { headers?: Record<string, string>; method?: string; body?: unknown } = {},
   ) {
     return fetch(`${base}${path}`, {
-      headers: { authorization: `Bearer ${token}`, ...extra.headers },
+      method: extra.method ?? 'GET',
+      headers: {
+        authorization: `Bearer ${token}`,
+        ...(extra.body !== undefined ? { 'content-type': 'application/json' } : {}),
+        ...extra.headers,
+      },
+      body: extra.body !== undefined ? JSON.stringify(extra.body) : undefined,
     });
   }
 
@@ -156,6 +191,51 @@ describe('JWT org scoping and findings tenancy (integration)', () => {
     expect(items.map((i) => i.id)).toEqual([FINDING_B]);
 
     const crossed = await call(`/v1/findings/${FINDING_A}/risk`, jwtB);
+    expect(crossed.status).toBe(404);
+  });
+
+  it('lists policies for the JWT org, ignoring a client-supplied org selector', async () => {
+    const jwt = await idp.issueToken({ orgId: ORG_A, roles: ['security_analyst'] });
+    const res = await call(`/v1/policies?orgId=${ORG_B}`, jwt, {
+      headers: { 'x-ctem-org': ORG_B },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Array<{ id: string; orgId: string }>;
+    expect(body).toHaveLength(1);
+    expect(body[0]?.orgId).toBe(ORG_A);
+    expect(body[0]?.id).toBe(POLICY_A);
+  });
+
+  it('org B cannot read or update an org A rule (404)', async () => {
+    const jwtB = await idp.issueToken({ orgId: ORG_B, roles: ['admin'] });
+    const read = await call(`/v1/policies/${POLICY_A}`, jwtB, {
+      headers: { 'x-ctem-org': ORG_A },
+    });
+    expect(read.status).toBe(404);
+
+    const write = await call(`/v1/policies/${POLICY_A}`, jwtB, {
+      method: 'PATCH',
+      headers: { 'x-ctem-org': ORG_A },
+      body: { priority: 1 },
+    });
+    expect(write.status).toBe(404);
+  });
+
+  it('returns an org A rule only for an org A JWT', async () => {
+    const jwtA = await idp.issueToken({ orgId: ORG_A, roles: ['admin'] });
+    const jwtB = await idp.issueToken({ orgId: ORG_B, roles: ['admin'] });
+
+    const a = await call(`/v1/policies/${POLICY_A}`, jwtA);
+    expect(a.status).toBe(200);
+    expect(((await a.json()) as { orgId: string }).orgId).toBe(ORG_A);
+
+    const patched = await call(`/v1/policies/${POLICY_A}`, jwtA, {
+      method: 'PATCH',
+      body: { priority: 5 },
+    });
+    expect(patched.status).toBe(200);
+
+    const crossed = await call(`/v1/policies/${POLICY_A}`, jwtB);
     expect(crossed.status).toBe(404);
   });
 });

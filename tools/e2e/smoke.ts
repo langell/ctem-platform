@@ -130,6 +130,8 @@ async function main(): Promise<void> {
             'scan:read',
             'scan:run',
             'finding:read',
+            'policy:read',
+            'policy:write',
             'integration:manage',
           ],
         },
@@ -139,7 +141,10 @@ async function main(): Promise<void> {
 
       const b = await api(IDENTITY, 'POST', '/internal/tokens', {
         headers: principalHeaders(orgB.id),
-        body: { name: 'smoke-b', scopes: ['asset:read', 'scan:read', 'finding:read'] },
+        body: {
+          name: 'smoke-b',
+          scopes: ['asset:read', 'scan:read', 'finding:read', 'policy:read', 'policy:write'],
+        },
       });
       expect(b.status < 300 && b.json?.token, `org B token: HTTP ${b.status}`);
       patB = b.json.token;
@@ -437,6 +442,93 @@ async function main(): Promise<void> {
         !items.some((f) => f.id === orgAFindingId),
         'x-ctem-org / ?orgId= leaked org A findings to an org B token',
       );
+    });
+
+    let orgAPolicyId = '';
+    await step('create ordered notify policies for org A', async () => {
+      const later = await api(GATEWAY, 'POST', '/v1/policies', {
+        token: patA,
+        body: {
+          name: 'smoke-later',
+          condition: { kevOnly: true },
+          actions: ['notify'],
+          priority: 20,
+        },
+      });
+      expect(later.status < 300, `create later: HTTP ${later.status} ${JSON.stringify(later.json)}`);
+      const first = await api(GATEWAY, 'POST', '/v1/policies', {
+        token: patA,
+        body: {
+          name: 'smoke-first',
+          condition: { severityAtLeast: 'critical' },
+          actions: ['notify'],
+          priority: 10,
+        },
+      });
+      expect(first.status < 300, `create first: HTTP ${first.status} ${JSON.stringify(first.json)}`);
+      orgAPolicyId = first.json.id;
+
+      const listed = await api(GATEWAY, 'GET', '/v1/policies', { token: patA });
+      expect(listed.status === 200, `expected 200, got ${listed.status}`);
+      const rows = listed.json as Array<{ id: string; name: string; priority: number }>;
+      const smoke = rows.filter((p) => p.name.startsWith('smoke-'));
+      expect(
+        smoke.map((p) => p.name).join(',') === 'smoke-first,smoke-later',
+        `expected first-then-later order, got ${smoke.map((p) => `${p.name}:${p.priority}`).join(',')}`,
+      );
+    });
+
+    await step('update persists a new priority order', async () => {
+      expect(Boolean(orgAPolicyId), 'missing org A policy id');
+      const patched = await api(GATEWAY, 'PATCH', `/v1/policies/${orgAPolicyId}`, {
+        token: patA,
+        body: { priority: 40 },
+      });
+      expect(patched.status < 300, `update: HTTP ${patched.status} ${JSON.stringify(patched.json)}`);
+      const listed = await api(GATEWAY, 'GET', '/v1/policies', { token: patA });
+      const rows = (listed.json as Array<{ name: string; priority: number }>).filter((p) =>
+        p.name.startsWith('smoke-'),
+      );
+      expect(
+        rows.map((p) => p.name).join(',') === 'smoke-later,smoke-first',
+        `expected later-then-first after update, got ${rows.map((p) => `${p.name}:${p.priority}`).join(',')}`,
+      );
+    });
+
+    await step('org B cannot read or update an org A policy (404)', async () => {
+      expect(Boolean(orgAPolicyId), 'missing org A policy id');
+      const read = await api(GATEWAY, 'GET', `/v1/policies/${orgAPolicyId}`, { token: patB });
+      expect(read.status === 404, `expected 404 on get, got ${read.status}`);
+      const write = await api(GATEWAY, 'PATCH', `/v1/policies/${orgAPolicyId}`, {
+        token: patB,
+        body: { name: 'stolen' },
+      });
+      expect(write.status === 404, `expected 404 on update, got ${write.status}`);
+    });
+
+    await step('refuses notify-only violations and a tenant webhook URL', async () => {
+      const ticket = await api(GATEWAY, 'POST', '/v1/policies', {
+        token: patA,
+        body: {
+          name: 'smoke-ticket',
+          condition: { kevOnly: true },
+          actions: ['ticket'],
+          priority: 99,
+        },
+      });
+      expect(ticket.status === 400, `expected 400 for ticket action, got ${ticket.status}`);
+
+      const webhook = await api(GATEWAY, 'POST', '/v1/policies', {
+        token: patA,
+        body: {
+          name: 'smoke-webhook',
+          condition: { kevOnly: true },
+          actions: ['notify'],
+          priority: 99,
+          webhookUrl: 'https://attacker.test/hooks/tenant',
+        },
+      });
+      expect(webhook.status === 400, `expected 400 for tenant webhook URL, got ${webhook.status}`);
     });
   } finally {
     await deleteOrgCascade(db, orgA.id).catch(() => undefined);

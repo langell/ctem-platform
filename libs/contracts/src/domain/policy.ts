@@ -38,13 +38,54 @@ export const Policy = z
   .merge(AuditMeta);
 export type Policy = z.infer<typeof Policy>;
 
+/**
+ * Tenant-authored writes in this slice: notify only. Ticket / fail-build /
+ * block-deploy stay on the stored Policy shape (seed + engine) but cannot be
+ * created or updated through the editor API.
+ */
+export const NotifyOnlyActions = z.array(z.literal('notify')).min(1);
+export type NotifyOnlyActions = z.infer<typeof NotifyOnlyActions>;
+
+/** Field names a tenant might use to inject a webhook URL. Refused on write. */
+export const TENANT_WEBHOOK_KEYS = [
+  'webhookUrl',
+  'webhook',
+  'url',
+  'target',
+  'hookUrl',
+  'slackWebhook',
+  'webhook_url',
+] as const;
+
+export function findTenantWebhookKeys(input: unknown, path = ''): string[] {
+  if (!input || typeof input !== 'object') return [];
+  if (Array.isArray(input)) {
+    return input.flatMap((value, index) => findTenantWebhookKeys(value, `${path}[${index}]`));
+  }
+  const record = input as Record<string, unknown>;
+  const hits: string[] = [];
+  for (const [key, value] of Object.entries(record)) {
+    const here = path ? `${path}.${key}` : key;
+    if ((TENANT_WEBHOOK_KEYS as readonly string[]).includes(key)) hits.push(here);
+    hits.push(...findTenantWebhookKeys(value, here));
+  }
+  return hits;
+}
+
 export const CreatePolicyRequest = Policy.omit({
   id: true,
   orgId: true,
   createdAt: true,
   updatedAt: true,
-});
+})
+  .extend({
+    actions: NotifyOnlyActions,
+  })
+  .strict();
 export type CreatePolicyRequest = z.infer<typeof CreatePolicyRequest>;
+
+export const UpdatePolicyRequest = CreatePolicyRequest.partial().strict();
+export type UpdatePolicyRequest = z.infer<typeof UpdatePolicyRequest>;
 
 export const ExceptionScope = z.enum(['finding', 'asset', 'vulnerability', 'global']);
 

@@ -1,10 +1,9 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { CurrentOrg, RequirePermissions } from '@ctem/auth';
-import { CreatePolicyRequest } from '@ctem/contracts';
-import { PrismaService } from '@ctem/db';
 import { RiskScoringService } from './risk-scoring.service';
 import { PolicyEngineService } from '../policy/policy-engine.service';
+import { PolicyService } from '../policy/policy.service';
 import { EnrichmentService } from '../feed/enrichment.service';
 
 @ApiTags('risk')
@@ -13,7 +12,7 @@ export class RiskController {
   constructor(
     private readonly scoring: RiskScoringService,
     private readonly policy: PolicyEngineService,
-    private readonly prisma: PrismaService,
+    private readonly policies: PolicyService,
     private readonly enrichment: EnrichmentService,
   ) {}
 
@@ -33,7 +32,13 @@ export class RiskController {
   @Get('policies')
   @RequirePermissions('policy:read')
   listPolicies(@CurrentOrg() orgId: string) {
-    return this.prisma.withOrg(orgId, (tx) => tx.policy.findMany({ orderBy: { priority: 'asc' } }));
+    return this.policies.list(orgId);
+  }
+
+  @Get('policies/:id')
+  @RequirePermissions('policy:read')
+  getPolicy(@CurrentOrg() orgId: string, @Param('id') id: string) {
+    return this.policies.get(orgId, id);
   }
 
   /**
@@ -49,7 +54,13 @@ export class RiskController {
   @Post('policies')
   @RequirePermissions('policy:write')
   createPolicy(@CurrentOrg() orgId: string, @Body() body: unknown) {
-    const policy = CreatePolicyRequest.parse(body);
-    return this.prisma.withOrg(orgId, (tx) => tx.policy.create({ data: { ...policy, orgId } }));
+    // Raw body so a tenant webhook URL is refused before zod strips unknown keys.
+    return this.policies.create(orgId, body);
+  }
+
+  @Patch('policies/:id')
+  @RequirePermissions('policy:write')
+  updatePolicy(@CurrentOrg() orgId: string, @Param('id') id: string, @Body() body: unknown) {
+    return this.policies.update(orgId, id, body);
   }
 }

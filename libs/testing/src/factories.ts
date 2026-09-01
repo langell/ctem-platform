@@ -61,6 +61,25 @@ export async function createAsset(
   });
 }
 
+export async function createPolicy(
+  db: PrismaClient,
+  orgId: string,
+  overrides: Record<string, unknown> = {},
+) {
+  return db.policy.create({
+    data: {
+      orgId,
+      name: uniqueSlug('policy'),
+      description: '',
+      enabled: true,
+      priority: 100,
+      condition: { kevOnly: true },
+      actions: ['notify'],
+      ...overrides,
+    },
+  });
+}
+
 export async function createFinding(
   db: PrismaClient,
   orgId: string,
