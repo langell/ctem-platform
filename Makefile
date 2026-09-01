@@ -1,4 +1,4 @@
-.PHONY: help setup infra infra-down build typecheck lint test test-int e2e db-migrate db-seed dev clean
+.PHONY: help setup infra infra-down build typecheck lint test test-int e2e db-migrate db-seed demo-token dev clean
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -45,6 +45,9 @@ db-migrate: ## Apply Prisma migrations, then the row-level security policies
 
 db-seed: ## Seed a demo org with assets, findings and policies
 	pnpm db:seed
+
+demo-token: ## Print a JWT for the seeded demo org (paste into /login)
+	@./tools/demo-token.sh
 
 dev: ## Build once, then run every service from dist with rebuild-and-restart watch (needs infra up)
 	pnpm build

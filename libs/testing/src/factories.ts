@@ -98,21 +98,32 @@ export async function deleteOrgCascade(
 }
 
 /**
+ * Stable demo tenant. Compose Keycloak hard-codes this org_id on the access
+ * token so `make demo-token` is accepted by JWT-paste login without a lookup.
+ * Must stay in lockstep with deploy/keycloak/ctem-realm.json.
+ */
+export const DEMO_ORG_ID = 'c7e00000-0000-4000-8000-000000000001';
+export const DEMO_ORG_SLUG = 'demo';
+export const DEMO_USER_EMAIL = 'security@demo.test';
+/** IdP `sub` for the demo analyst — Keycloak user id and users.idpSubject. */
+export const DEMO_IDP_SUBJECT = 'demo|analyst';
+
+/**
  * The demo organization: assets across every kind, a completed scan, findings
  * at several severities, and the asset edges the risk service walks. This is
  * what `make db-seed` installs.
  */
 export async function seedDemoOrg(prisma: PrismaClient) {
   const org = await prisma.organization.upsert({
-    where: { slug: 'demo' },
+    where: { slug: DEMO_ORG_SLUG },
     update: {},
-    create: { name: 'Demo Corp', slug: 'demo', plan: 'enterprise' },
+    create: { id: DEMO_ORG_ID, name: 'Demo Corp', slug: DEMO_ORG_SLUG, plan: 'enterprise' },
   });
 
   const user = await prisma.user.upsert({
-    where: { email: 'security@demo.test' },
-    update: {},
-    create: { email: 'security@demo.test', name: 'Demo Analyst', idpSubject: 'demo|analyst' },
+    where: { email: DEMO_USER_EMAIL },
+    update: { idpSubject: DEMO_IDP_SUBJECT },
+    create: { email: DEMO_USER_EMAIL, name: 'Demo Analyst', idpSubject: DEMO_IDP_SUBJECT },
   });
 
   await prisma.membership.upsert({
