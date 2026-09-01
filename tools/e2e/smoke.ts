@@ -98,6 +98,8 @@ async function main(): Promise<void> {
   const orgB = await createOrg(db, { slug: uniqueSlug('smoke-b') });
   let patA = '';
   let patB = '';
+  let orgAAssetId = '';
+  let orgAScanId = '';
   const assetName = uniqueSlug('smoke-asset');
 
   try {
@@ -132,7 +134,7 @@ async function main(): Promise<void> {
 
       const b = await api(IDENTITY, 'POST', '/internal/tokens', {
         headers: principalHeaders(orgB.id),
-        body: { name: 'smoke-b', scopes: ['asset:read', 'finding:read'] },
+        body: { name: 'smoke-b', scopes: ['asset:read', 'scan:read', 'finding:read'] },
       });
       expect(b.status < 300 && b.json?.token, `org B token: HTTP ${b.status}`);
       patB = b.json.token;
@@ -166,11 +168,18 @@ async function main(): Promise<void> {
     await step('org A sees its asset', async () => {
       const res = await api(GATEWAY, 'GET', '/v1/assets', { token: patA });
       expect(res.status === 200, `expected 200, got ${res.status}`);
-      const items = res.json?.items ?? res.json ?? [];
-      expect(
-        items.some((a: { name: string }) => a.name === assetName),
-        'created asset missing from org A listing',
-      );
+      const items = (res.json?.items ?? res.json ?? []) as Array<{ id: string; name: string }>;
+      const created = items.find((a) => a.name === assetName);
+      expect(Boolean(created?.id), 'created asset missing from org A listing');
+      orgAAssetId = created!.id;
+    });
+
+    await step('org B cannot read org A asset detail or graph', async () => {
+      expect(Boolean(orgAAssetId), 'missing org A asset id from the previous step');
+      const detail = await api(GATEWAY, 'GET', `/v1/assets/${orgAAssetId}`, { token: patB });
+      expect(detail.status === 404, `expected 404 on asset detail, got ${detail.status}`);
+      const graph = await api(GATEWAY, 'GET', `/v1/assets/${orgAAssetId}/graph`, { token: patB });
+      expect(graph.status === 404, `expected 404 on asset graph, got ${graph.status}`);
     });
 
     await step('org B cannot see org A data (tenant isolation, full stack)', async () => {
@@ -217,14 +226,26 @@ async function main(): Promise<void> {
         created.status < 300 && Boolean(created.json?.id),
         `expected 2xx with id, got ${created.status}: ${JSON.stringify(created.json)}`,
       );
-      const scan = await awaitScan(String(created.json!.id));
+      orgAScanId = String(created.json!.id);
+      const scan = await awaitScan(orgAScanId);
       // github:smoke/… is not a real repo. Source SCA must throw rather than
       // succeed with zero findings (that would auto-resolve prior hits).
       expect(
         scan.status === 'failed',
         `scan ended as '${scan.status}' — expected failed (source SCA fails closed when checkout cannot run)`,
       );
-      return `scan ${created.json!.id} failed closed`;
+      return `scan ${orgAScanId} failed closed`;
+    });
+
+    await step('org B cannot read org A scan (GET-by-id is 404, not 500)', async () => {
+      expect(Boolean(orgAScanId), 'missing org A scan id from the previous step');
+      const res = await api(GATEWAY, 'GET', `/v1/scans/${orgAScanId}`, { token: patB });
+      expect(res.status === 404, `expected 404 on scan, got ${res.status}`);
+      const spoofed = await api(GATEWAY, 'GET', `/v1/scans/${orgAScanId}?orgId=${orgA.id}`, {
+        token: patB,
+        headers: { 'x-ctem-org': orgA.id },
+      });
+      expect(spoofed.status === 404, `expected 404 when spoofing org, got ${spoofed.status}`);
     });
 
     await step('SBOM ingest produces real findings (queries OSV — needs internet)', async () => {
