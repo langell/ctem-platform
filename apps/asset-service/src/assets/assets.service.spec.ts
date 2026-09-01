@@ -2,7 +2,6 @@ import { NotFoundException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import { AssetsService } from './assets.service';
 
-const ORG_A = '4a6f9f4e-1111-4222-8333-444455556666';
 const ORG_B = 'bbbbbbbb-2222-4333-8444-555566667777';
 const ASSET_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 
