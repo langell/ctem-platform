@@ -46,7 +46,7 @@ db-migrate: ## Apply Prisma migrations, then the row-level security policies
 db-seed: ## Seed a demo org with assets, findings and policies
 	pnpm db:seed
 
-demo-token: ## Print a JWT for the seeded demo org (paste into /login)
+demo-token: ## Print a JWT for the seeded demo org (curl / API; browser login is Keycloak)
 	@./tools/demo-token.sh
 
 dev: ## Build once, then run every service from dist with rebuild-and-restart watch (needs infra up)

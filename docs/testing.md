@@ -7,24 +7,24 @@ enough to run constantly.
 
 ## Tiers
 
-| Tier | Files | Command | Needs | Budget |
-| --- | --- | --- | --- | --- |
-| 1. Unit | `*.spec.ts` | `make test` | nothing | seconds |
-| 2–3. Integration | `*.int.spec.ts` | `make test-int` | `make infra` + `make db-migrate` | < 1 min |
-| 4. E2E smoke | `tools/e2e/smoke.ts` | `make e2e` | `make dev` running | ~1 min |
+| Tier             | Files                | Command         | Needs                            | Budget  |
+| ---------------- | -------------------- | --------------- | -------------------------------- | ------- |
+| 1. Unit          | `*.spec.ts`          | `make test`     | nothing                          | seconds |
+| 2–3. Integration | `*.int.spec.ts`      | `make test-int` | `make infra` + `make db-migrate` | < 1 min |
+| 4. E2E smoke     | `tools/e2e/smoke.ts` | `make e2e`      | `make dev` running               | ~1 min  |
 
 **Unit** — pure logic: normalizers, dedup, scoring, contract schemas,
 permission mappings. Colocated `*.spec.ts`, no infra, `passWithNoTests`.
 
 **Integration** — real Postgres as the real roles. Two kinds live here:
 
-- *Data-layer suites* like [rls.int.spec.ts](../libs/db/src/rls.int.spec.ts):
+- _Data-layer suites_ like [rls.int.spec.ts](../libs/db/src/rls.int.spec.ts):
   fixtures are arranged with the owner (RLS-bypassing) connection, assertions
   run as `ctem_app` — the role services actually connect with. The RLS suite
   also sweeps the catalog: any table with an `orgId` column that lacks a
   forced `tenant_isolation` policy fails the build, so a future migration
   cannot silently add an unprotected tenant table.
-- *Service suites* like the gateway guard test, which boots a minimal Nest app
+- _Service suites_ like the gateway guard test, which boots a minimal Nest app
   against a real JWKS-serving test IdP and talks to it over real HTTP.
 
 Integration files run sequentially (`fileParallelism: false`) because they
@@ -63,7 +63,9 @@ and a valid PAT that cannot POST a failed conclusion.
    the org-scoping/findings-tenancy suite, or the identity token suite.
    PAT verify must keep covering: org from the token record, fail-closed on
    a bad/missing PAT, and ignore a client-supplied org. The web client must
-   never send an org id and must not expose a PAT paste field.
+   never send an org id and must not expose a password field or a PAT in
+   sessionStorage. Browser login must start authorize with PKCE and the
+   callback must store the issued JWT, not a PAT.
 4. Adds a tenant table → nothing to do; the RLS sweep fails until
    `libs/db/prisma/manual/000_rls.sql` covers it. Fix the SQL, not the test.
 5. Changes the golden path (new endpoint in the flow, changed contract) →
@@ -77,7 +79,7 @@ and a valid PAT that cannot POST a failed conclusion.
 - **CI runs all of it on every PR** (`.github/workflows/ci.yml`): lint →
   build → unit → integration (ephemeral docker-compose Postgres with
   migrations + RLS) → the full stack booted from dist → e2e smoke. The
-  pipeline *is* the TEST environment — there is no standing test deployment.
+  pipeline _is_ the TEST environment — there is no standing test deployment.
 
 ## Conventions
 

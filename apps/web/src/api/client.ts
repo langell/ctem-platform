@@ -1,12 +1,20 @@
 /**
  * Gateway HTTP client. The UI talks to /v1 on the api-gateway only.
  *
+ * The browser session is the issued JWT. Machine PATs never go in
+ * sessionStorage — they authenticate as Authorization on the gateway only.
  * Org is never sent: no x-ctem-org, no orgId query, no org field on the body.
  * The gateway reads org_id from the JWT (or the PAT record) and that is the
  * only tenant the request can see.
  */
 
 export const TOKEN_STORAGE_KEY = 'ctem.gateway.token';
+const PAT_PREFIX = 'ctem_pat_';
+
+/** Machine PATs authenticate as Authorization on the gateway — never in the UI. */
+export function isPatToken(token: string): boolean {
+  return token.trim().startsWith(PAT_PREFIX);
+}
 
 /** Names a client must never send as a header, query key, or body field. */
 export const FORBIDDEN_ORG_KEYS = [
@@ -40,7 +48,13 @@ export function tokenStore(storage: Storage | undefined = defaultStorage()): {
 } {
   return {
     get: () => storage?.getItem(TOKEN_STORAGE_KEY) ?? null,
-    set: (token: string) => storage?.setItem(TOKEN_STORAGE_KEY, token.trim()),
+    set: (token: string) => {
+      const value = token.trim();
+      if (isPatToken(value)) {
+        throw new Error('Refusing to store a PAT in the browser session');
+      }
+      storage?.setItem(TOKEN_STORAGE_KEY, value);
+    },
     clear: () => storage?.removeItem(TOKEN_STORAGE_KEY),
   };
 }

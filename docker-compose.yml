@@ -59,7 +59,8 @@ services:
       KC_BOOTSTRAP_ADMIN_PASSWORD: admin
     ports: ['8080:8080']
     volumes:
-      # Local-only realm: issuer http://localhost:8080/realms/ctem, demo analyst, ctem-api audience.
+      # Local-only realm: issuer http://localhost:8080/realms/ctem, demo analyst,
+      # confidential ctem-api (demo-token) + public ctem-web (PKCE browser login).
       - ./deploy/keycloak/ctem-realm.json:/opt/keycloak/data/import/ctem-realm.json:ro
 
 volumes:

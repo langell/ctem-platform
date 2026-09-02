@@ -8,14 +8,14 @@ This repository is a **scaffold**: the architecture, contracts, data model, even
 
 ## Stack
 
-| Concern | Choice |
-| --- | --- |
-| Language | TypeScript, NestJS 11, Node 22 |
-| Repo | Nx monorepo, pnpm workspaces, TS project references |
-| Transport | REST between services, NATS JetStream for the event bus |
-| Data | Postgres 17 (Prisma), Redis, S3-compatible object store |
-| Tenancy | Multi-tenant SaaS, `org_id` everywhere, Postgres row-level security |
-| Auth | OIDC/JWT at the gateway, HMAC-signed principal internally, RBAC |
+| Concern   | Choice                                                              |
+| --------- | ------------------------------------------------------------------- |
+| Language  | TypeScript, NestJS 11, Node 22                                      |
+| Repo      | Nx monorepo, pnpm workspaces, TS project references                 |
+| Transport | REST between services, NATS JetStream for the event bus             |
+| Data      | Postgres 17 (Prisma), Redis, S3-compatible object store             |
+| Tenancy   | Multi-tenant SaaS, `org_id` everywhere, Postgres row-level security |
+| Auth      | OIDC/JWT at the gateway, HMAC-signed principal internally, RBAC     |
 
 ## Quick start
 
@@ -23,10 +23,10 @@ This repository is a **scaffold**: the architecture, contracts, data model, even
 make setup      # install, start infra, migrate, build
 make db-seed    # a demo org with assets and findings
 make dev        # run every service with watch mode
-make demo-token # JWT for the demo org — paste it at /login
+make demo-token # JWT for the demo org (curl / API; browser login is Keycloak)
 ```
 
-Gateway on `http://localhost:3000` (OpenAPI at `/docs`, web UI at `/`). The UI is a thin Nx client of the gateway — org comes from the JWT, never from a header or query. Paste a bearer JWT on `/login` (machine callers present a PAT as `Authorization`, not in the UI). Compose Keycloak imports the `ctem` realm (`OIDC_ISSUER=http://localhost:8080/realms/ctem`) and a demo analyst whose IdP subject is `demo|analyst`, matching the seeded user. Optional Vite HMR: `pnpm dev:web` on port 4200 (proxies `/v1` to the gateway). Tenants list, create, and reorder notify, ticket, or fail-build rules at `/policies`. CI polls `GET /v1/scans/:id` for `conclusion`.
+Gateway on `http://localhost:3000` (OpenAPI at `/docs`, web UI at `/`). The UI is a thin Nx client of the gateway — org comes from the JWT, never from a header or query. `/login` redirects to compose Keycloak (`ctem` realm, public client `ctem-web` with PKCE); the callback stores the issued access-token JWT and sends it as `Authorization` (machine callers present a PAT as `Authorization`, not in the UI). Compose Keycloak imports the `ctem` realm (`OIDC_ISSUER=http://localhost:8080/realms/ctem`) and a demo analyst whose IdP subject is `demo|analyst`, matching the seeded user. Optional Vite HMR: `pnpm dev:web` on port 4200 (proxies `/v1` to the gateway). Tenants list, create, and reorder notify, ticket, or fail-build rules at `/policies`. CI polls `GET /v1/scans/:id` for `conclusion`.
 
 ## Testing
 
@@ -43,25 +43,25 @@ Shared fixtures (factories, a test OIDC issuer, RLS-aware db clients) are in `@c
 
 **Control plane**
 
-| Service | Port | Owns |
-| --- | --- | --- |
-| `api-gateway` | 3000 | Public API, token verification, principal minting, rate limiting |
-| `identity-service` | 3001 | Orgs, users, memberships, roles, machine tokens |
-| `asset-service` | 3002 | Asset inventory, asset graph, discovery connectors |
-| `orchestrator-service` | 3003 | Scan planning, job dispatch, scheduling, scan lifecycle |
-| `findings-service` | 3004 | Normalization, dedup, lifecycle, triage, audit trail |
-| `risk-service` | 3005 | Risk scoring, policy evaluation, SLAs, exceptions |
-| `reporting-service` | 3006 | Dashboards, trends, exports |
-| `notification-service` | 3007 | Slack, email, webhooks, ticketing |
+| Service                | Port | Owns                                                             |
+| ---------------------- | ---- | ---------------------------------------------------------------- |
+| `api-gateway`          | 3000 | Public API, token verification, principal minting, rate limiting |
+| `identity-service`     | 3001 | Orgs, users, memberships, roles, machine tokens                  |
+| `asset-service`        | 3002 | Asset inventory, asset graph, discovery connectors               |
+| `orchestrator-service` | 3003 | Scan planning, job dispatch, scheduling, scan lifecycle          |
+| `findings-service`     | 3004 | Normalization, dedup, lifecycle, triage, audit trail             |
+| `risk-service`         | 3005 | Risk scoring, policy evaluation, SLAs, exceptions                |
+| `reporting-service`    | 3006 | Dashboards, trends, exports                                      |
+| `notification-service` | 3007 | Slack, email, webhooks, ticketing                                |
 
 **Scanner workers** — no HTTP surface, pure JetStream consumers, horizontally scalable.
 
-| Worker | Scanner types |
-| --- | --- |
-| `scanner-sca` | `sca` — dependencies, SBOM ingest, lockfile resolution, advisory matching |
-| `scanner-sast` | `sast` — source code rules and taint analysis |
-| `scanner-container-iac` | `container`, `iac` — image layers, Terraform/K8s misconfig |
-| `scanner-asm` | `asm` — external attack surface, subdomain takeover |
+| Worker                  | Scanner types                                                             |
+| ----------------------- | ------------------------------------------------------------------------- |
+| `scanner-sca`           | `sca` — dependencies, SBOM ingest, lockfile resolution, advisory matching |
+| `scanner-sast`          | `sast` — source code rules and taint analysis                             |
+| `scanner-container-iac` | `container`, `iac` — image layers, Terraform/K8s misconfig                |
+| `scanner-asm`           | `asm` — external attack surface, subdomain takeover                       |
 
 **Shared libraries** — `@ctem/contracts` (zod schemas + event catalog), `@ctem/db` (Prisma + RLS), `@ctem/auth`, `@ctem/events`, `@ctem/storage`, `@ctem/config`, `@ctem/observability`, `@ctem/service-kit`, `@ctem/scanner-sdk`.
 
