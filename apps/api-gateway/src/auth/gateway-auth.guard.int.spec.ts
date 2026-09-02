@@ -11,6 +11,8 @@ import { TestIdp, applyTestEnv } from '@ctem/testing';
 import { GatewayAuthGuard } from './gateway-auth.guard';
 
 const KNOWN_PAT = 'ctem_pat_known-integration-token';
+const PAT_NO_ORG = 'ctem_pat_missing-org-record';
+const PAT_DROP = 'ctem_pat_identity-unreachable';
 
 @Controller('probe')
 class ProbeController {
@@ -48,8 +50,20 @@ describe('GatewayAuthGuard (integration)', () => {
       let body = '';
       req.on('data', (c: Buffer) => (body += c.toString()));
       req.on('end', () => {
+        const presented = (() => {
+          try {
+            return (JSON.parse(body) as { token?: string }).token;
+          } catch {
+            return undefined;
+          }
+        })();
+        // Fail-closed: identity never answers for this PAT.
+        if (presented === PAT_DROP) {
+          req.socket.destroy();
+          return;
+        }
         res.setHeader('content-type', 'application/json');
-        if (req.url === '/internal/tokens/verify' && JSON.parse(body).token === KNOWN_PAT) {
+        if (req.url === '/internal/tokens/verify' && presented === KNOWN_PAT) {
           res.end(
             JSON.stringify({
               orgId,
@@ -58,6 +72,9 @@ describe('GatewayAuthGuard (integration)', () => {
               scopes: ['scan:run', 'finding:read', 'not-a-real-permission'],
             }),
           );
+        } else if (req.url === '/internal/tokens/verify' && presented === PAT_NO_ORG) {
+          // 200 without an org — gateway must not invent a tenant from the client.
+          res.end(JSON.stringify({ tokenId: 'tok-x', name: 'ci-bot', scopes: ['finding:read'] }));
         } else {
           res.statusCode = 401;
           res.end(JSON.stringify({ message: 'Invalid token' }));
@@ -168,8 +185,37 @@ describe('GatewayAuthGuard (integration)', () => {
     expect(principal.permissions.sort()).toEqual(['finding:read', 'scan:run']);
   });
 
+  it('takes PAT org from the token record, ignoring a client-supplied org', async () => {
+    const otherOrg = 'bbbbbbbb-2222-4333-8444-555566667777';
+    const res = await fetch(`${base}/probe/read?orgId=${otherOrg}`, {
+      headers: {
+        authorization: `Bearer ${KNOWN_PAT}`,
+        'x-ctem-org': otherOrg,
+        'x-org-id': otherOrg,
+      },
+    });
+    expect(res.status).toBe(200);
+    const principal = (await res.json()) as Principal;
+    expect(principal.orgId).toBe(orgId);
+    expect(principal.orgId).not.toBe(otherOrg);
+    expect(principal.serviceAccount).toBe('ci-bot');
+  });
+
   it('rejects an unknown PAT', async () => {
     expect((await get('/probe/read', 'ctem_pat_bogus')).status).toBe(401);
+  });
+
+  it('rejects a missing PAT (no bearer) fail-closed', async () => {
+    expect((await get('/probe/read')).status).toBe(401);
+    expect((await get('/probe/read', '')).status).toBe(401);
+  });
+
+  it('rejects a PAT whose identity record has no org', async () => {
+    expect((await get('/probe/read', PAT_NO_ORG)).status).toBe(401);
+  });
+
+  it('fail-closes when identity-service is unreachable for a PAT', async () => {
+    expect((await get('/probe/read', PAT_DROP)).status).toBe(401);
   });
 
   it('denies a PAT whose scopes lack the route permission', async () => {

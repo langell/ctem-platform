@@ -160,6 +160,16 @@ async function main(): Promise<void> {
       expect(res.status === 401, `expected 401, got ${res.status}`);
     });
 
+    await step('session.orgId comes from the PAT, not a client org selector', async () => {
+      const res = await api(GATEWAY, 'GET', `/v1/session?orgId=${orgB.id}`, {
+        token: patA,
+        headers: { 'x-ctem-org': orgB.id, 'x-org-id': orgB.id },
+      });
+      expect(res.status === 200, `expected 200, got ${res.status}: ${JSON.stringify(res.json)}`);
+      expect(res.json?.orgId === orgA.id, `org from PAT, got ${String(res.json?.orgId)}`);
+      expect(res.json?.serviceAccount === 'smoke-a', `expected service-account, got ${String(res.json?.serviceAccount)}`);
+    });
+
     await step('register an asset through the gateway (PAT auth, proxy, RLS write)', async () => {
       const res = await api(GATEWAY, 'POST', '/v1/assets', {
         token: patA,

@@ -26,7 +26,7 @@ make dev        # run every service with watch mode
 make demo-token # JWT for the demo org — paste it at /login
 ```
 
-Gateway on `http://localhost:3000` (OpenAPI at `/docs`, web UI at `/`). The UI is a thin Nx client of the gateway — org comes from the JWT, never from a header or query. Paste a bearer JWT (or PAT) on `/login`. Compose Keycloak imports the `ctem` realm (`OIDC_ISSUER=http://localhost:8080/realms/ctem`) and a demo analyst whose IdP subject is `demo|analyst`, matching the seeded user. Optional Vite HMR: `pnpm dev:web` on port 4200 (proxies `/v1` to the gateway). Tenants list, create, and reorder notify or ticket rules at `/policies`.
+Gateway on `http://localhost:3000` (OpenAPI at `/docs`, web UI at `/`). The UI is a thin Nx client of the gateway — org comes from the JWT, never from a header or query. Paste a bearer JWT on `/login` (machine callers present a PAT as `Authorization`, not in the UI). Compose Keycloak imports the `ctem` realm (`OIDC_ISSUER=http://localhost:8080/realms/ctem`) and a demo analyst whose IdP subject is `demo|analyst`, matching the seeded user. Optional Vite HMR: `pnpm dev:web` on port 4200 (proxies `/v1` to the gateway). Tenants list, create, and reorder notify or ticket rules at `/policies`.
 
 ## Testing
 

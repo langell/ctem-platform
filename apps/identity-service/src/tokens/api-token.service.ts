@@ -23,7 +23,9 @@ export class ApiTokenService {
   }
 
   async verify(presented: string) {
-    if (!presented.startsWith(PREFIX)) throw new UnauthorizedException('Malformed token');
+    if (typeof presented !== 'string' || !presented.startsWith(PREFIX)) {
+      throw new UnauthorizedException('Malformed token');
+    }
 
     // The lookup happens before any org context exists, and RLS fails closed —
     // a plain findUnique returns nothing under the ctem_app role. It goes
