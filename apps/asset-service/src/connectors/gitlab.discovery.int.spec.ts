@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { NotFoundException } from '@nestjs/common';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { EventBus } from '@ctem/events';
 import { PrismaService, type PrismaClient } from '@ctem/db';
