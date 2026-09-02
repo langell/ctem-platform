@@ -14,7 +14,7 @@ seedDemoOrg(prisma)
     if (org.id !== DEMO_ORG_ID) {
       console.warn(
         `demo org id is ${org.id}, not the Keycloak-mapped ${DEMO_ORG_ID}; ` +
-          '`make demo-token` JWTs will not match this database. Reset Postgres and re-seed.',
+          'browser OIDC / `make demo-token` JWTs will not match this database. Reset Postgres and re-seed.',
       );
     }
   })

@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { Layout } from './ui/Layout';
 import { LoginPage } from './pages/LoginPage';
+import { CallbackPage } from './pages/CallbackPage';
 import { AssetsPage } from './pages/AssetsPage';
 import { FindingsPage } from './pages/FindingsPage';
 import { FindingDetailPage } from './pages/FindingDetailPage';
@@ -18,6 +19,7 @@ export function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/login/callback" element={<CallbackPage />} />
       <Route
         element={
           <RequireToken>

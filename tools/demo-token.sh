@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Mint a Keycloak access token for the seeded demo org and print it.
-# Paste the JWT at http://localhost:3000/login — the UI has no password form.
+# For curl / API checks. Browser login is OIDC redirect + PKCE, not JWT paste.
 set -euo pipefail
 
 ISSUER="${OIDC_ISSUER:-http://localhost:8080/realms/ctem}"

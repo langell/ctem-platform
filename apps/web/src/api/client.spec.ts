@@ -4,7 +4,34 @@ import {
   buildGatewayRequest,
   FORBIDDEN_ORG_KEYS,
   isForbiddenOrgKey,
+  isPatToken,
+  TOKEN_STORAGE_KEY,
+  tokenStore,
 } from './client';
+
+function memoryStorage(): Storage {
+  const map = new Map<string, string>();
+  return {
+    get length() {
+      return map.size;
+    },
+    clear() {
+      map.clear();
+    },
+    getItem(key) {
+      return map.has(key) ? (map.get(key) as string) : null;
+    },
+    key(index) {
+      return [...map.keys()][index] ?? null;
+    },
+    removeItem(key) {
+      map.delete(key);
+    },
+    setItem(key, value) {
+      map.set(key, String(value));
+    },
+  };
+}
 
 describe('gateway client org scoping', () => {
   it('sends only Authorization — never an org header or query', () => {
@@ -96,9 +123,9 @@ describe('gateway client org scoping', () => {
 
   it('rejects non-gateway paths so the UI cannot aim at service ports', () => {
     expect(() => buildGatewayRequest('/internal/findings', { token: 'jwt' })).toThrow(/\/v1/);
-    expect(() => buildGatewayRequest('http://localhost:3004/v1/findings', { token: 'jwt' })).toThrow(
-      /\/v1/,
-    );
+    expect(() =>
+      buildGatewayRequest('http://localhost:3004/v1/findings', { token: 'jwt' }),
+    ).toThrow(/\/v1/);
   });
 
   it('assertNoOrgLeak flags the merge-bar headers', () => {
@@ -110,5 +137,16 @@ describe('gateway client org scoping', () => {
     ).toThrow(/header/);
     expect(isForbiddenOrgKey('X-Ctem-Org')).toBe(true);
     expect(isForbiddenOrgKey('limit')).toBe(false);
+  });
+
+  it('sessionStorage holds the issued JWT and refuses a PAT', () => {
+    const storage = memoryStorage();
+    const store = tokenStore(storage);
+    store.set('eyJhbGciOiJub25lIn0.e30.sig');
+    expect(storage.getItem(TOKEN_STORAGE_KEY)).toBe('eyJhbGciOiJub25lIn0.e30.sig');
+    expect(isPatToken(storage.getItem(TOKEN_STORAGE_KEY) ?? '')).toBe(false);
+    expect(() => store.set('ctem_pat_machine-secret')).toThrow(/PAT/);
+    expect(storage.getItem(TOKEN_STORAGE_KEY)).toBe('eyJhbGciOiJub25lIn0.e30.sig');
+    expect(storage.getItem(TOKEN_STORAGE_KEY)).not.toMatch(/ctem_pat_/);
   });
 });
