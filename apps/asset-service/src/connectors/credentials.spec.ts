@@ -1,5 +1,10 @@
+import { generateKeyPairSync } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
-import { requireAwsCredentials, resolveCredential } from './credentials';
+import { requireAwsCredentials, requireGcpCredentials, resolveCredential } from './credentials';
+
+const gcpPem = generateKeyPairSync('rsa', { modulusLength: 2048 })
+  .privateKey.export({ type: 'pkcs8', format: 'pem' })
+  .toString();
 
 afterEach(() => {
   delete process.env.GITHUB_TOKEN;
@@ -9,6 +14,9 @@ afterEach(() => {
   delete process.env.AWS_SECRET_ACCESS_KEY;
   delete process.env.AWS_SESSION_TOKEN;
   delete process.env.AWS_TEST_TOKEN;
+  delete process.env.GCP_CLIENT_EMAIL;
+  delete process.env.GCP_PRIVATE_KEY;
+  delete process.env.GCP_TEST_TOKEN;
 });
 
 describe('resolveCredential', () => {
@@ -29,6 +37,11 @@ describe('resolveCredential', () => {
   it('reads an allowlisted AWS_* env var', () => {
     process.env.AWS_ACCESS_KEY_ID = 'AKIATEST';
     expect(resolveCredential('env:AWS_ACCESS_KEY_ID')).toBe('AKIATEST');
+  });
+
+  it('reads an allowlisted GCP_* env var', () => {
+    process.env.GCP_CLIENT_EMAIL = 'ctem@acme-prod.iam.gserviceaccount.com';
+    expect(resolveCredential('env:GCP_CLIENT_EMAIL')).toBe('ctem@acme-prod.iam.gserviceaccount.com');
   });
 
   it('returns undefined when an allowlisted name is unset (public-listing path)', () => {
@@ -88,6 +101,50 @@ describe('requireAwsCredentials', () => {
     expect(requireAwsCredentials('env:AWS_ACCESS_KEY_ID')).toEqual({
       accessKeyId: 'AKIATEST',
       secretAccessKey: 'secret',
+    });
+  });
+});
+
+describe('requireGcpCredentials', () => {
+  it('fails closed when credentialRef is missing', () => {
+    expect(() => requireGcpCredentials(null)).toThrow(/env:GCP_\*/);
+  });
+
+  it('fails closed when the pointed GCP_* env var is empty', () => {
+    expect(() => requireGcpCredentials('env:GCP_CLIENT_EMAIL')).toThrow(/cannot be used/);
+  });
+
+  it('fails closed when the signing pair is incomplete', () => {
+    process.env.GCP_CLIENT_EMAIL = 'ctem@acme-prod.iam.gserviceaccount.com';
+    expect(() => requireGcpCredentials('env:GCP_CLIENT_EMAIL')).toThrow(
+      /GCP_CLIENT_EMAIL and GCP_PRIVATE_KEY/,
+    );
+  });
+
+  it('fails closed when GCP_PRIVATE_KEY is unusable', () => {
+    process.env.GCP_CLIENT_EMAIL = 'ctem@acme-prod.iam.gserviceaccount.com';
+    process.env.GCP_PRIVATE_KEY = 'not-a-pem';
+    expect(() => requireGcpCredentials('env:GCP_CLIENT_EMAIL')).toThrow(/unusable/);
+  });
+
+  it('refuses an AWS_* ref even when GCP keys are present', () => {
+    process.env.AWS_ACCESS_KEY_ID = 'AKIATEST';
+    process.env.GCP_CLIENT_EMAIL = 'ctem@acme-prod.iam.gserviceaccount.com';
+    process.env.GCP_PRIVATE_KEY = gcpPem;
+    expect(() => requireGcpCredentials('env:AWS_ACCESS_KEY_ID')).toThrow(/env:GCP_\*/);
+  });
+
+  it('refuses env:DATABASE_URL without reading the secret', () => {
+    process.env.DATABASE_URL = 'postgres://should-not-leak';
+    expect(() => requireGcpCredentials('env:DATABASE_URL')).toThrow(/not allowlisted/);
+  });
+
+  it('returns the platform pair when the ref and both keys are set', () => {
+    process.env.GCP_CLIENT_EMAIL = 'ctem@acme-prod.iam.gserviceaccount.com';
+    process.env.GCP_PRIVATE_KEY = gcpPem;
+    expect(requireGcpCredentials('env:GCP_CLIENT_EMAIL')).toEqual({
+      clientEmail: 'ctem@acme-prod.iam.gserviceaccount.com',
+      privateKey: gcpPem,
     });
   });
 });
