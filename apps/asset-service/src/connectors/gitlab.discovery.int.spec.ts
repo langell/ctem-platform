@@ -1,3 +1,4 @@
+import { NotFoundException } from '@nestjs/common';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { EventBus } from '@ctem/events';
 import { PrismaService, type PrismaClient } from '@ctem/db';
@@ -5,7 +6,7 @@ import { createOrg, ownerClient } from '@ctem/testing';
 import { AssetsService } from '../assets/assets.service';
 import { ConnectorRegistry } from './connector.registry';
 import { DiscoverySchedulerService } from './discovery-scheduler.service';
-import { GitLabConnector, type GitLabProject } from './gitlab.connector';
+import { GITLAB_MAX_PAGES, GITLAB_PER_PAGE, GitLabConnector, type GitLabProject } from './gitlab.connector';
 
 /**
  * The discovery loop against the real database: integration → GitLab (stubbed)
@@ -15,6 +16,7 @@ import { GitLabConnector, type GitLabProject } from './gitlab.connector';
 describe('GitLab discovery (integration)', () => {
   let owner: PrismaClient;
   let prisma: PrismaService;
+  let assets: AssetsService;
   let scheduler: DiscoverySchedulerService;
   let orgId: string;
   let orgBId: string;
@@ -58,7 +60,8 @@ describe('GitLab discovery (integration)', () => {
 
     const registry = new ConnectorRegistry();
     registry.register(new GitLabConnector());
-    scheduler = new DiscoverySchedulerService(prisma, registry, new AssetsService(prisma, bus));
+    assets = new AssetsService(prisma, bus);
+    scheduler = new DiscoverySchedulerService(prisma, registry, assets);
 
     vi.stubGlobal(
       'fetch',
@@ -187,6 +190,109 @@ describe('GitLab discovery (integration)', () => {
     const bAfter = await owner.integration.findUnique({ where: { id: other.id } });
     expect(bAfter?.lastSyncAt).toBeNull();
     expect(bAfter?.lastSyncError).toBeNull();
+  });
+
+  it('GET-by-id on an org miss is 404, never 500 or empty-200', async () => {
+    const owned = await owner.asset.findFirst({
+      where: { orgId, source: 'gitlab', archivedAt: null },
+    });
+    expect(owned).toBeTruthy();
+
+    await expect(assets.get(orgBId, owned!.id)).rejects.toBeInstanceOf(NotFoundException);
+
+    const fromB = await prisma.withOrg(orgBId, (tx) => tx.asset.findUnique({ where: { id: owned!.id } }));
+    expect(fromB).toBeNull();
+  });
+
+  it('does not archiveStale when listing is truncated at the page cap', async () => {
+    const first = await owner.integration.findFirst({
+      where: { orgId, displayName: 'discovery-int-test' },
+    });
+    const keep = await owner.asset.create({
+      data: {
+        orgId,
+        kind: 'repository',
+        externalKey: 'gitlab:langell/keep-truncated',
+        name: 'keep-truncated',
+        source: 'gitlab',
+        integrationId: first!.id,
+      },
+    });
+
+    const pages = Array.from({ length: GITLAB_MAX_PAGES }, (_, p) =>
+      Array.from({ length: GITLAB_PER_PAGE }, (_, i) => glProject(`t-${p}-${i}`)),
+    );
+    const fetchFn = vi.fn(async (url: string | URL) => {
+      const page = Number(new URL(String(url)).searchParams.get('page') ?? '1');
+      return new Response(JSON.stringify(pages[page - 1] ?? []), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchFn);
+
+    const result = await scheduler.syncIntegration(first!);
+    expect(result.error).toMatch(/truncated/);
+    expect(result.archived).toBe(0);
+    expect(fetchFn).toHaveBeenCalledTimes(GITLAB_MAX_PAGES);
+
+    const kept = await owner.asset.findUnique({ where: { id: keep.id } });
+    expect(kept?.archivedAt).toBeNull();
+
+    const integration = await owner.integration.findUnique({ where: { id: first!.id } });
+    expect(integration?.lastSyncError).toMatch(/truncated/);
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify(projects), { status: fetchStatus })),
+    );
+  });
+
+  it('inventories a self-hosted baseUrl against that host only', async () => {
+    const selfHosted = await owner.integration.create({
+      data: {
+        orgId,
+        provider: 'gitlab',
+        displayName: 'discovery-int-self-hosted',
+        config: { owner: 'langell', ownerType: 'user', baseUrl: 'https://gitlab.example.com' },
+        credentialRef: 'env:GITLAB_INT_TOKEN',
+      },
+    });
+
+    const fetchFn = vi.fn(async (url: string | URL) => {
+      const href = String(url);
+      if (!href.startsWith('https://gitlab.example.com/api/v4/')) {
+        return new Response('wrong host', { status: 500 });
+      }
+      return new Response(
+        JSON.stringify([
+          {
+            ...glProject('self-hosted-api'),
+            web_url: 'https://evil.example/langell/self-hosted-api',
+            http_url_to_repo: 'https://evil.example/langell/self-hosted-api.git',
+          },
+        ]),
+        { status: 200 },
+      );
+    });
+    vi.stubGlobal('fetch', fetchFn);
+
+    const result = await scheduler.syncIntegration(selfHosted);
+    expect(result).toMatchObject({ provider: 'gitlab', upserted: 1, archived: 0, error: null });
+    expect(String(fetchFn.mock.calls[0][0])).toContain('https://gitlab.example.com/api/v4/projects?owned=true');
+    expect(String(fetchFn.mock.calls[0][0])).not.toContain('/users/');
+    expect(String(fetchFn.mock.calls[0][0])).not.toContain('evil.example');
+
+    const row = await owner.asset.findUnique({
+      where: { orgId_externalKey: { orgId, externalKey: 'gitlab:langell/self-hosted-api' } },
+    });
+    expect(row?.integrationId).toBe(selfHosted.id);
+    expect((row?.attributes as { cloneUrl?: string; gitlabHost?: string }).cloneUrl).toBe(
+      'https://gitlab.example.com/langell/self-hosted-api.git',
+    );
+    expect((row?.attributes as { gitlabHost?: string }).gitlabHost).toBe('gitlab.example.com');
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify(projects), { status: fetchStatus })),
+    );
   });
 
   it('refuses a non-allowlisted env credentialRef without reading the secret or wiping inventory', async () => {

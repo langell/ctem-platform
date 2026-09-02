@@ -42,7 +42,8 @@ export interface ResolvedCheckout {
  * fails closed (a tenant-writable cloneUrl cannot redirect the clone).
  * Tenant-writable `htmlUrl` / `url` / `git@` are refused. Missing or refused
  * sources throw so the job fails closed instead of scanning an empty workDir.
- * Self-hosted GitLab is later explicit config — not any hostname in cloneUrl.
+ * Self-hosted GitLab is the connector `gitlabHost` (from `baseUrl`) — clone
+ * and identity use that host, not an arbitrary hostname in cloneUrl.
  */
 @Injectable()
 export class GitRepoCheckout implements RepoCheckout {
@@ -51,7 +52,11 @@ export class GitRepoCheckout implements RepoCheckout {
   async checkout(ctx: ScanContext): Promise<void> {
     const resolved = resolveCheckout(ctx.job);
     this.log.info({ url: resolved.url, ref: resolveRef(ctx.job), workDir: ctx.workDir }, 'shallow checkout');
-    await shallowClone(resolved.url, resolveRef(ctx.job), ctx.workDir, { token: resolved.token });
+    const allowedHost = new URL(resolved.url).hostname;
+    await shallowClone(resolved.url, resolveRef(ctx.job), ctx.workDir, {
+      token: resolved.token,
+      allowedHost,
+    });
   }
 }
 
@@ -63,13 +68,14 @@ export function resolveCheckout(job: Pick<ScanJob, 'target' | 'credentialRef'>):
 }
 
 export function resolveCloneUrl(target: Record<string, unknown>): string {
+  const gitlabHost = parseTargetGitlabHost(target);
   const hasCloneUrl = typeof target.cloneUrl === 'string' && target.cloneUrl.length > 0;
   const key = typeof target.externalKey === 'string' ? target.externalKey : undefined;
-  const fromKey = key ? httpsFromScmIdentityKey(key) : null;
+  const fromKey = key ? httpsFromScmIdentityKey(key, gitlabHost) : null;
 
   if (hasCloneUrl && fromKey) {
-    const fromClone = allowlistedCloneHttps(target.cloneUrl as string);
-    if (canonicalHostPath(fromClone) !== canonicalHostPath(fromKey)) {
+    const fromClone = allowlistedCloneHttps(target.cloneUrl as string, gitlabHost);
+    if (canonicalHostPath(fromClone, gitlabHost) !== canonicalHostPath(fromKey, gitlabHost)) {
       throw new CheckoutError(
         `cloneUrl does not match asset identity '${key}' — refusing to clone a different repository`,
       );
@@ -77,7 +83,7 @@ export function resolveCloneUrl(target: Record<string, unknown>): string {
     return fromClone;
   }
   if (hasCloneUrl) {
-    return allowlistedCloneHttps(target.cloneUrl as string);
+    return allowlistedCloneHttps(target.cloneUrl as string, gitlabHost);
   }
   if (fromKey) {
     return fromKey;
@@ -93,7 +99,7 @@ export function allowlistedGithubHttps(raw: string): string {
   return allowlistedCloneHttps(raw);
 }
 
-export function allowlistedCloneHttps(raw: string): string {
+export function allowlistedCloneHttps(raw: string, allowedGitlabHost?: string): string {
   if (raw.startsWith('git@') || raw.startsWith('ssh:')) {
     throw new CheckoutError(`Refusing git@ / ssh clone URL: ${raw}`);
   }
@@ -106,10 +112,12 @@ export function allowlistedCloneHttps(raw: string): string {
   if (parsed.protocol !== 'https:') {
     throw new CheckoutError(`Refusing non-https clone URL: ${raw}`);
   }
-  const canonical = canonicalCloneHost(parsed.hostname);
+  const canonical = canonicalCloneHost(parsed.hostname, allowedGitlabHost);
   if (!canonical) {
     throw new CheckoutError(
-      `Refusing clone host '${parsed.hostname}' — only github.com and gitlab.com are allowlisted`,
+      allowedGitlabHost
+        ? `Refusing clone host '${parsed.hostname}' — only github.com, gitlab.com, and the configured GitLab host '${allowedGitlabHost}' are allowlisted`
+        : `Refusing clone host '${parsed.hostname}' — only github.com and gitlab.com are allowlisted`,
     );
   }
   if (parsed.port && parsed.port !== '443') {
@@ -128,7 +136,7 @@ export function allowlistedCloneHttps(raw: string): string {
   if (parts.length < 2 || parts.length > 10 || !parts.every((p) => SCM_SEGMENT.test(p))) {
     throw new CheckoutError(`Refusing clone URL with an unexpected GitLab path: ${raw}`);
   }
-  return `https://gitlab.com/${parts.join('/')}.git`;
+  return `https://${canonical}/${parts.join('/')}.git`;
 }
 
 export function githubKeyToHttps(externalKey: string): string {
@@ -139,7 +147,7 @@ export function githubKeyToHttps(externalKey: string): string {
   return `https://github.com/${m[1]}/${m[2]}.git`;
 }
 
-export function gitlabKeyToHttps(externalKey: string): string {
+export function gitlabKeyToHttps(externalKey: string, host = 'gitlab.com'): string {
   const m = /^gitlab:([\w.-]+(?:\/[\w.-]+)+)$/.exec(externalKey);
   if (!m) {
     throw new CheckoutError(`Refusing malformed gitlab externalKey: ${externalKey}`);
@@ -148,33 +156,75 @@ export function gitlabKeyToHttps(externalKey: string): string {
   if (parts.length > 10) {
     throw new CheckoutError(`Refusing malformed gitlab externalKey: ${externalKey}`);
   }
-  return `https://gitlab.com/${m[1]}.git`;
+  return `https://${host}/${m[1]}.git`;
 }
 
 /** github: / gitlab: keys only — other externalKeys are not clone identities. */
-function httpsFromScmIdentityKey(externalKey: string): string | null {
+function httpsFromScmIdentityKey(externalKey: string, gitlabHost?: string): string | null {
   if (externalKey.startsWith('github:')) return githubKeyToHttps(externalKey);
-  if (externalKey.startsWith('gitlab:')) return gitlabKeyToHttps(externalKey);
+  if (externalKey.startsWith('gitlab:')) return gitlabKeyToHttps(externalKey, gitlabHost ?? 'gitlab.com');
   return null;
 }
 
-/** Compare allowlisted clone origins as host+path (github.com / gitlab.com only). */
-function canonicalHostPath(url: string): string {
+/** Compare allowlisted clone origins as host+path. */
+function canonicalHostPath(url: string, allowedGitlabHost?: string): string {
   const parsed = new URL(url);
-  const host = canonicalCloneHost(parsed.hostname);
+  const host = canonicalCloneHost(parsed.hostname, allowedGitlabHost);
   if (!host) {
     throw new CheckoutError(
-      `Refusing clone host '${parsed.hostname}' — only github.com and gitlab.com are allowlisted`,
+      allowedGitlabHost
+        ? `Refusing clone host '${parsed.hostname}' — only github.com, gitlab.com, and the configured GitLab host '${allowedGitlabHost}' are allowlisted`
+        : `Refusing clone host '${parsed.hostname}' — only github.com and gitlab.com are allowlisted`,
     );
   }
   const path = parsed.pathname.replace(/\.git$/, '').replace(/\/+$/, '');
   return `${host}${path}`.toLowerCase();
 }
 
-function canonicalCloneHost(hostname: string): 'github.com' | 'gitlab.com' | null {
-  if (hostname === 'github.com' || hostname === 'www.github.com') return 'github.com';
-  if (hostname === 'gitlab.com' || hostname === 'www.gitlab.com') return 'gitlab.com';
+function canonicalCloneHost(hostname: string, allowedGitlabHost?: string): string | null {
+  const host = hostname.toLowerCase().replace(/\.$/, '');
+  if (host === 'github.com' || host === 'www.github.com') return 'github.com';
+  if (host === 'gitlab.com' || host === 'www.gitlab.com') return 'gitlab.com';
+  if (allowedGitlabHost && host === allowedGitlabHost) return allowedGitlabHost;
   return null;
+}
+
+/**
+ * Connector-stamped GitLab origin from `baseUrl`. https-only, no userinfo,
+ * no git@. This is the allowlisted clone host — not whatever cloneUrl says.
+ */
+function parseTargetGitlabHost(target: Record<string, unknown>): string | undefined {
+  const raw = target.gitlabHost;
+  if (typeof raw !== 'string' || raw.trim() === '') return undefined;
+  const trimmed = raw.trim();
+  if (trimmed.startsWith('git@') || trimmed.startsWith('ssh:') || trimmed.startsWith('ssh@')) {
+    throw new CheckoutError(`Refusing git@ / ssh gitlabHost: ${trimmed}`);
+  }
+  if (trimmed.includes('@') && !trimmed.includes('://')) {
+    throw new CheckoutError('Refusing gitlabHost that embeds userinfo');
+  }
+  const asUrl = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  let parsed: URL;
+  try {
+    parsed = new URL(asUrl);
+  } catch {
+    throw new CheckoutError(`Refusing unparseable gitlabHost: ${trimmed}`);
+  }
+  if (parsed.protocol !== 'https:') {
+    throw new CheckoutError('Refusing non-https gitlabHost — only https is permitted');
+  }
+  if (parsed.username || parsed.password) {
+    throw new CheckoutError('Refusing gitlabHost that embeds userinfo');
+  }
+  if (parsed.port && parsed.port !== '443') {
+    throw new CheckoutError('Refusing gitlabHost with a non-default port');
+  }
+  const host = parsed.hostname.toLowerCase().replace(/\.$/, '');
+  if (!host || host === 'github.com' || host === 'www.github.com') {
+    throw new CheckoutError(`Refusing gitlabHost '${parsed.hostname}'`);
+  }
+  if (host === 'www.gitlab.com') return 'gitlab.com';
+  return host;
 }
 
 function requireUsableCredential(job: Pick<ScanJob, 'target' | 'credentialRef'>): string | undefined {
@@ -216,8 +266,9 @@ export function gitlabHttpExtraHeader(token: string): string {
 }
 
 export function cloneHttpExtraHeader(url: string, token: string): string {
-  const host = canonicalCloneHost(new URL(url).hostname);
-  return host === 'gitlab.com' ? gitlabHttpExtraHeader(token) : githubHttpExtraHeader(token);
+  const host = new URL(url).hostname.toLowerCase();
+  if (host === 'github.com' || host === 'www.github.com') return githubHttpExtraHeader(token);
+  return gitlabHttpExtraHeader(token);
 }
 
 function basicAuthExtraHeader(user: string, token: string): string {
@@ -246,7 +297,7 @@ export async function shallowClone(
   url: string,
   ref: string,
   dest: string,
-  options: { exec?: typeof execFileAsync; token?: string } = {},
+  options: { exec?: typeof execFileAsync; token?: string; allowedHost?: string } = {},
 ): Promise<void> {
   const exec = options.exec ?? execFileAsync;
   if (!SAFE_REF.test(ref)) {
@@ -254,7 +305,11 @@ export async function shallowClone(
   }
   try {
     const parsed = new URL(url);
-    if (parsed.protocol !== 'https:' || !ALLOWED_CLONE_HOSTS.has(parsed.hostname)) {
+    const host = parsed.hostname.toLowerCase();
+    const allowed =
+      ALLOWED_CLONE_HOSTS.has(parsed.hostname) ||
+      (options.allowedHost != null && host === options.allowedHost.toLowerCase());
+    if (parsed.protocol !== 'https:' || !allowed) {
       throw new CheckoutError(`Refusing to clone URL with unsupported scheme or host`);
     }
     if (parsed.username || parsed.password) {
