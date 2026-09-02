@@ -62,20 +62,30 @@ describe('policy editor writes', () => {
     actions: ['notify'],
   };
 
-  it('accepts notify-only create and update, persisting priority', () => {
+  it('accepts notify or ticket create and update, persisting priority', () => {
     expect(CreatePolicyRequest.parse({ ...notifyRule, priority: 10 })).toMatchObject({
       actions: ['notify'],
       priority: 10,
     });
+    expect(CreatePolicyRequest.parse({ ...notifyRule, actions: ['ticket'] })).toMatchObject({
+      actions: ['ticket'],
+    });
+    expect(
+      CreatePolicyRequest.parse({ ...notifyRule, actions: ['notify', 'ticket'] }),
+    ).toMatchObject({ actions: ['notify', 'ticket'] });
     expect(UpdatePolicyRequest.parse({ priority: 5 })).toEqual({ priority: 5 });
+    expect(UpdatePolicyRequest.parse({ actions: ['ticket'] })).toEqual({ actions: ['ticket'] });
   });
 
-  it('refuses ticket / fail_build / block_deploy on create and update', () => {
-    expect(() => CreatePolicyRequest.parse({ ...notifyRule, actions: ['ticket'] })).toThrow();
+  it('refuses fail_build / block_deploy on create and update', () => {
+    expect(() =>
+      CreatePolicyRequest.parse({ ...notifyRule, actions: ['fail_build'] }),
+    ).toThrow();
     expect(() =>
       CreatePolicyRequest.parse({ ...notifyRule, actions: ['notify', 'fail_build'] }),
     ).toThrow();
     expect(() => UpdatePolicyRequest.parse({ actions: ['block_deploy'] })).toThrow();
+    expect(() => UpdatePolicyRequest.parse({ actions: ['ticket', 'fail_build'] })).toThrow();
   });
 
   it('refuses a tenant webhook URL if it appears', () => {
@@ -88,5 +98,8 @@ describe('policy editor writes', () => {
     expect(() =>
       CreatePolicyRequest.parse({ ...notifyRule, webhookUrl: 'https://evil.test/hook' }),
     ).toThrow();
+    expect(findTenantWebhookKeys({ ...notifyRule, jiraUrl: 'https://evil.test/jira' })).toEqual([
+      'jiraUrl',
+    ]);
   });
 });

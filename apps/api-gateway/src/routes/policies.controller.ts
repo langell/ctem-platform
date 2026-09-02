@@ -7,6 +7,7 @@ import { ServiceProxy } from '../proxy/service-proxy';
 /**
  * Tenant policy editor. Org comes from the JWT (or PAT), never the client.
  * Forwards to risk-service only — no new service, no query-forwarding of org.
+ * CORS / PAT verification stay comments. Notify or ticket; no fail-build.
  */
 @ApiTags('policies')
 @ApiBearerAuth()

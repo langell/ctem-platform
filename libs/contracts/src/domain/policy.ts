@@ -39,14 +39,15 @@ export const Policy = z
 export type Policy = z.infer<typeof Policy>;
 
 /**
- * Tenant-authored writes in this slice: notify only. Ticket / fail-build /
+ * Tenant-authored writes in this slice: notify and/or ticket. fail-build /
  * block-deploy stay on the stored Policy shape (seed + engine) but cannot be
- * created or updated through the editor API.
+ * created or updated through the editor API. Slack still cannot ticket —
+ * ticket fans out to Jira in notification-service.
  */
-export const NotifyOnlyActions = z.array(z.literal('notify')).min(1);
-export type NotifyOnlyActions = z.infer<typeof NotifyOnlyActions>;
+export const EditorActions = z.array(z.enum(['notify', 'ticket'])).min(1);
+export type EditorActions = z.infer<typeof EditorActions>;
 
-/** Field names a tenant might use to inject a webhook URL. Refused on write. */
+/** Field names a tenant might use to inject a webhook or Jira URL. Refused on write. */
 export const TENANT_WEBHOOK_KEYS = [
   'webhookUrl',
   'webhook',
@@ -55,6 +56,12 @@ export const TENANT_WEBHOOK_KEYS = [
   'hookUrl',
   'slackWebhook',
   'webhook_url',
+  'jiraUrl',
+  'jiraBaseUrl',
+  'jiraHost',
+  'atlassianUrl',
+  'issueUrl',
+  'jira_url',
 ] as const;
 
 export function findTenantWebhookKeys(input: unknown, path = ''): string[] {
@@ -79,7 +86,7 @@ export const CreatePolicyRequest = Policy.omit({
   updatedAt: true,
 })
   .extend({
-    actions: NotifyOnlyActions,
+    actions: EditorActions,
   })
   .strict();
 export type CreatePolicyRequest = z.infer<typeof CreatePolicyRequest>;

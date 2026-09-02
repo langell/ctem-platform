@@ -3,9 +3,10 @@ import { EventBus } from '@ctem/events';
 import { SUBJECTS } from '@ctem/contracts';
 import { rootLogger } from '@ctem/observability';
 import { ChannelRegistry } from './channels/channel.registry';
+import { JiraChannel } from './channels/jira.channel';
 import { SlackChannel } from './channels/slack.channel';
 import { WebhookChannel } from './channels/webhook.channel';
-import { notifyPolicyViolated } from './policy-notify';
+import { dispatchPolicyViolated } from './policy-notify';
 
 @Injectable()
 export class NotificationConsumer implements OnApplicationBootstrap {
@@ -16,11 +17,13 @@ export class NotificationConsumer implements OnApplicationBootstrap {
     private readonly registry: ChannelRegistry,
     private readonly webhook: WebhookChannel,
     private readonly slack: SlackChannel,
+    private readonly jira: JiraChannel,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
     this.registry.register(this.webhook);
     this.registry.register(this.slack);
+    this.registry.register(this.jira);
 
     await this.bus.subscribe(
       SUBJECTS.notificationRequested,
@@ -46,8 +49,9 @@ export class NotificationConsumer implements OnApplicationBootstrap {
       },
     );
 
-    // Policy hits become Slack when the action is notify. The hook URL is
-    // platform env:SLACK_* — not tenant config/body/query, not message.target.
+    // Policy hits become Slack on notify and Jira on ticket. Hosts are
+    // platform env:SLACK_* / env:JIRA_* — not tenant config/body/query,
+    // not message.target. CORS / PAT / query-forwarding stay comments.
     await this.bus.subscribe(
       SUBJECTS.policyViolated,
       { durable: 'notification-policy' },
@@ -58,7 +62,7 @@ export class NotificationConsumer implements OnApplicationBootstrap {
           actions: string[];
         };
         this.log.info({ orgId: envelope.orgId, payload: notice }, 'policy violation received');
-        await notifyPolicyViolated(envelope.orgId, notice, this.slack);
+        await dispatchPolicyViolated(envelope.orgId, notice, { slack: this.slack, jira: this.jira });
       },
     );
   }

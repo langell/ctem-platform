@@ -8,8 +8,9 @@ import {
 } from '@ctem/contracts';
 
 /**
- * Tenant-owned ordered notify rules. Evaluation stays in PolicyEngineService;
- * this is list / create / update against the existing Policy rows.
+ * Tenant-owned ordered notify/ticket rules. Evaluation stays in
+ * PolicyEngineService; this is list / create / update against the existing
+ * Policy rows. Slack still cannot ticket — that action is Jira's.
  *
  * Org is always the caller's principal. A miss (including RLS hide) is 404 —
  * never Prisma P2025 500, never empty 200 — so a cross-tenant GET cannot
@@ -76,7 +77,7 @@ export class PolicyService {
     const webhookKeys = findTenantWebhookKeys(body);
     if (webhookKeys.length) {
       throw new BadRequestException(
-        `tenant webhook URL is not allowed (${webhookKeys.join(', ')}) — Slack notify uses platform env:SLACK_* only`,
+        `tenant webhook URL is not allowed (${webhookKeys.join(', ')}) — Slack/Jira use platform env:SLACK_* / env:JIRA_* only`,
       );
     }
     const parsed = schema.safeParse(body);

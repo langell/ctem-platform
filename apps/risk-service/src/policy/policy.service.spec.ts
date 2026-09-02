@@ -89,18 +89,33 @@ describe('PolicyService.create / update', () => {
     expect(prisma.withOrg).toHaveBeenCalledWith(ORG_B, expect.any(Function));
   });
 
-  it('refuses ticket / fail_build / block_deploy on create and update', async () => {
+  it('persists a ticket action from the editor', async () => {
+    const { policies, tx } = service();
+    await policies.create(ORG_A, { ...notifyRule, name: 'KEV ticket', actions: ['ticket'] });
+    expect(tx.policy.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        orgId: ORG_A,
+        name: 'KEV ticket',
+        actions: ['ticket'],
+      }),
+    });
+  });
+
+  it('refuses fail_build / block_deploy on create and update', async () => {
     const { policies } = service({
       existing: { id: POLICY_A, orgId: ORG_A, actions: ['notify'] },
     });
     await expect(
-      policies.create(ORG_A, { ...notifyRule, actions: ['ticket'] }),
+      policies.create(ORG_A, { ...notifyRule, actions: ['fail_build'] }),
     ).rejects.toBeInstanceOf(BadRequestException);
     await expect(
       policies.create(ORG_A, { ...notifyRule, actions: ['notify', 'fail_build'] }),
     ).rejects.toBeInstanceOf(BadRequestException);
     await expect(
       policies.update(ORG_A, POLICY_A, { actions: ['block_deploy'] }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      policies.update(ORG_A, POLICY_A, { actions: ['ticket', 'fail_build'] }),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
@@ -124,6 +139,13 @@ describe('PolicyService.create / update', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
     await expect(
       policies.update(ORG_A, POLICY_A, { hookUrl: 'https://hooks.example/tenant' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      policies.create(ORG_A, {
+        ...notifyRule,
+        actions: ['ticket'],
+        jiraUrl: 'https://evil.example/jira',
+      }),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(tx.policy.create).not.toHaveBeenCalled();
     expect(tx.policy.update).not.toHaveBeenCalled();
