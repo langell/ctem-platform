@@ -115,9 +115,10 @@ export function PoliciesPage() {
     <section>
       <h1>Policies</h1>
       <p className="muted">
-        Ordered notify or ticket rules for the organization on the token. Lower priority runs
-        first; the first match wins. Notify goes to Slack; ticket goes to Jira — both via
-        policy.violated. This client never sends an org id or a webhook/Jira URL.
+        Ordered notify, ticket, or fail-build rules for the organization on the token.
+        Lower priority runs first; the first match wins. Notify goes to Slack; ticket
+        goes to Jira; fail-build is the CI scan conclusion on GET — not a GitHub Check.
+        This client never sends an org id, a webhook/Jira URL, or a scan conclusion.
       </p>
       {error ? <p className="error">{error}</p> : null}
 
@@ -263,12 +264,16 @@ export function PoliciesPage() {
             >
               <option value="notify">Notify (Slack)</option>
               <option value="ticket">Ticket (Jira)</option>
+              <option value="fail_build">Fail build (CI GET)</option>
               <option value="notify,ticket">Notify and ticket</option>
+              <option value="notify,fail_build">Notify and fail build</option>
+              <option value="ticket,fail_build">Ticket and fail build</option>
+              <option value="notify,ticket,fail_build">Notify, ticket, and fail build</option>
             </select>
           </label>
           <p className="muted small">
-            fail-build and tenant webhook/Jira URLs are out of this slice. Slack still cannot
-            ticket.
+            block-deploy and tenant webhook/Jira URLs are out of this slice. Slack still cannot
+            ticket. CI reads conclusion from GET /v1/scans/:id — this form cannot POST it.
           </p>
           {editingId ? (
             <button

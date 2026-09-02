@@ -105,6 +105,7 @@ async function main(): Promise<void> {
   let patB = '';
   let orgAAssetId = '';
   let orgAScanId = '';
+  let orgASbomScanId = '';
   const assetName = uniqueSlug('smoke-asset');
 
   try {
@@ -304,7 +305,8 @@ async function main(): Promise<void> {
         `expected 2xx with id, got ${created.status}: ${JSON.stringify(created.json)}`,
       );
 
-      const scan = await awaitScan(String(created.json!.id));
+      orgASbomScanId = String(created.json!.id);
+      const scan = await awaitScan(orgASbomScanId);
       expect(scan.status === 'succeeded', `SBOM scan ended as '${scan.status}'`);
       const jobs = (scan.jobs ?? []) as Array<{ findingCount: number }>;
       const found = jobs.reduce((n, j) => n + (j.findingCount ?? 0), 0);
@@ -516,7 +518,7 @@ async function main(): Promise<void> {
       expect(write.status === 404, `expected 404 on update, got ${write.status}`);
     });
 
-    await step('editor accepts ticket and refuses fail-build plus a tenant webhook URL', async () => {
+    await step('editor accepts ticket and fail-build; refuses block-deploy plus a tenant webhook URL', async () => {
       const ticket = await api(GATEWAY, 'POST', '/v1/policies', {
         token: patA,
         body: {
@@ -533,12 +535,30 @@ async function main(): Promise<void> {
         token: patA,
         body: {
           name: 'smoke-fail-build',
-          condition: { kevOnly: true },
+          condition: {},
           actions: ['fail_build'],
-          priority: 98,
+          priority: 1,
         },
       });
-      expect(failBuild.status === 400, `expected 400 for fail_build, got ${failBuild.status}`);
+      expect(
+        failBuild.status < 300,
+        `expected fail_build create, got ${failBuild.status} ${JSON.stringify(failBuild.json)}`,
+      );
+      expect(
+        failBuild.json?.actions?.join(',') === 'fail_build',
+        `expected fail_build actions, got ${JSON.stringify(failBuild.json)}`,
+      );
+
+      const blockDeploy = await api(GATEWAY, 'POST', '/v1/policies', {
+        token: patA,
+        body: {
+          name: 'smoke-block-deploy',
+          condition: { kevOnly: true },
+          actions: ['block_deploy'],
+          priority: 2,
+        },
+      });
+      expect(blockDeploy.status === 400, `expected 400 for block_deploy, got ${blockDeploy.status}`);
 
       const webhook = await api(GATEWAY, 'POST', '/v1/policies', {
         token: patA,
@@ -563,6 +583,42 @@ async function main(): Promise<void> {
         },
       });
       expect(jiraUrl.status === 400, `expected 400 for tenant Jira URL, got ${jiraUrl.status}`);
+    });
+
+    await step('CI GET with PAT returns failed after a matching fail_build rule', async () => {
+      expect(Boolean(orgASbomScanId), 'missing org A SBOM scan id');
+      const res = await api(GATEWAY, 'GET', `/v1/scans/${orgASbomScanId}`, { token: patA });
+      expect(res.status === 200, `expected 200, got ${res.status} ${JSON.stringify(res.json)}`);
+      expect(
+        res.json?.conclusion === 'failed',
+        `expected conclusion failed from fail_build, got ${JSON.stringify(res.json)}`,
+      );
+    });
+
+    await step('a valid PAT cannot POST a failed conclusion without a matching fail_build rule', async () => {
+      const forced = await api(GATEWAY, 'POST', '/v1/scans', {
+        token: patA,
+        body: { scannerType: 'sca', conclusion: 'failed' },
+      });
+      expect(
+        forced.status === 400,
+        `expected 400 when posting conclusion, got ${forced.status} ${JSON.stringify(forced.json)}`,
+      );
+
+      const nested = await api(GATEWAY, 'POST', '/v1/scans', {
+        token: patA,
+        body: { scannerType: 'sca', options: { conclusion: 'failed' } },
+      });
+      expect(
+        nested.status === 400,
+        `expected 400 when posting options.conclusion, got ${nested.status} ${JSON.stringify(nested.json)}`,
+      );
+    });
+
+    await step('bad PAT still 401 on the CI scan GET', async () => {
+      expect(Boolean(orgASbomScanId), 'missing org A SBOM scan id');
+      const res = await api(GATEWAY, 'GET', `/v1/scans/${orgASbomScanId}`, { token: 'ctem_pat_bogus' });
+      expect(res.status === 401, `expected 401, got ${res.status}`);
     });
   } finally {
     await deleteOrgCascade(db, orgA.id).catch(() => undefined);

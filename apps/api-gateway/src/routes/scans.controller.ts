@@ -4,6 +4,12 @@ import { RequirePermissions } from '@ctem/auth';
 import type { CreateScanRequest, IngestSbomRequest } from '@ctem/contracts';
 import { ServiceProxy } from '../proxy/service-proxy';
 
+/**
+ * CI polls GET /v1/scans/:id with a PAT. Conclusion is computed upstream from
+ * matching fail_build rules — this proxy has no POST/PATCH for it and does not
+ * call GitHub Checks. Org comes from the token. CORS and unknown query
+ * forwarding stay comments.
+ */
 @ApiTags('scans')
 @ApiBearerAuth()
 @Controller('v1/scans')

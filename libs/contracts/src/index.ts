@@ -5,3 +5,4 @@ export * from './domain/finding';
 export * from './domain/identity';
 export * from './domain/policy';
 export * from './domain/scan';
+export * from './domain/scan-conclusion';

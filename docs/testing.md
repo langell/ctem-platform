@@ -39,7 +39,9 @@ producing real findings for `express@4.17.1` → feed mirror population →
 threat-intel refresh (KEV/EPSS) enriching those findings → GitHub discovery of a live fixture → org-B isolation after discovery → findings listing.
 The SBOM and intel steps query OSV/CISA/FIRST, so they need internet access;
 without it those steps fail with a message saying so. Policy editor steps cover
-ordered notify/ticket create/update, refuse fail-build, and org-B 404 on another tenant's rule.
+ordered notify/ticket/fail-build create/update, refuse block-deploy, org-B 404 on
+another tenant's rule, CI GET conclusion failed from a matching fail_build rule,
+and a valid PAT that cannot POST a failed conclusion.
 
 ## Shared helpers: `@ctem/testing`
 

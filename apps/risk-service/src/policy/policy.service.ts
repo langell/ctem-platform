@@ -8,9 +8,10 @@ import {
 } from '@ctem/contracts';
 
 /**
- * Tenant-owned ordered notify/ticket rules. Evaluation stays in
+ * Tenant-owned ordered notify/ticket/fail-build rules. Evaluation stays in
  * PolicyEngineService; this is list / create / update against the existing
- * Policy rows. Slack still cannot ticket — that action is Jira's.
+ * Policy rows. Slack still cannot ticket — that action is Jira's. fail-build
+ * is the CI scan conclusion (GET), not a GitHub Check and not a client POST.
  *
  * Org is always the caller's principal. A miss (including RLS hide) is 404 —
  * never Prisma P2025 500, never empty 200 — so a cross-tenant GET cannot

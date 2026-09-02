@@ -1,7 +1,13 @@
 import { Body, Controller, Get, NotFoundException, Param, Post, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { CurrentOrg, CurrentUser, RequirePermissions } from '@ctem/auth';
-import { CreateScanRequest, IngestSbomRequest, type Principal } from '@ctem/contracts';
+import {
+  CreateScanRequest,
+  IngestSbomRequest,
+  concludeScan,
+  type Principal,
+  type PolicyCondition,
+} from '@ctem/contracts';
 import { ZodBody } from '@ctem/service-kit';
 import { PrismaService } from '@ctem/db';
 import { ArtifactStore } from '@ctem/storage';
@@ -24,16 +30,96 @@ export class ScansController {
     );
   }
 
+  /**
+   * CI-facing GET. Org comes from the token (JWT or PAT), never the client.
+   * Conclusion is computed from matching fail_build rules — there is no write
+   * path for it. CORS and unknown query forwarding stay comments.
+   */
   @Get(':id')
   @RequirePermissions('scan:read')
   async get(@CurrentOrg() orgId: string, @Param('id') id: string) {
-    const scan = await this.prisma.withOrg(orgId, (tx) =>
-      tx.scan.findUnique({ where: { id }, include: { jobs: true } }),
-    );
-    // RLS fail-closed looks the same as a missing row. Never 500 — that is how
-    // a cross-tenant GET /v1/scans/:id would leak that the id exists (P2025).
-    if (!scan) throw new NotFoundException(`Scan ${id} not found`);
-    return scan;
+    const result = await this.prisma.withOrg(orgId, async (tx) => {
+      const scan = await tx.scan.findUnique({ where: { id }, include: { jobs: true } });
+      // RLS fail-closed looks the same as a missing row. Never 500 — that is how
+      // a cross-tenant GET /v1/scans/:id would leak that the id exists (P2025).
+      if (!scan) return null;
+
+      if (scan.status === 'queued' || scan.status === 'running') {
+        return { ...scan, conclusion: 'pending' as const };
+      }
+
+      const jobs = scan.jobs ?? [];
+      const assetIds = [...new Set(jobs.map((job) => job.assetId))];
+      const expectedFindingCount = jobs.reduce((n, job) => n + (job.findingCount ?? 0), 0);
+
+      const findings = assetIds.length
+        ? await tx.finding.findMany({
+            where: {
+              assetId: { in: assetIds },
+              scannerType: scan.scannerType,
+              state: { in: ['open', 'triaged', 'in_progress'] },
+            },
+            include: { asset: true },
+          })
+        : [];
+
+      const policies = await tx.policy.findMany({
+        where: { enabled: true },
+        orderBy: { priority: 'asc' },
+      });
+
+      const now = new Date();
+      const exceptions = await tx.riskException.findMany({
+        where: {
+          revokedAt: null,
+          approvedAt: { not: null },
+          expiresAt: { gt: now },
+          OR: [
+            { scope: 'global' },
+            { scope: 'finding', targetRef: { in: findings.map((row) => row.id) } },
+          ],
+        },
+      });
+
+      const suppressedFindingIds = new Set<string>();
+      if (exceptions.some((row) => row.scope === 'global')) {
+        for (const row of findings) suppressedFindingIds.add(row.id);
+      } else {
+        for (const row of exceptions) suppressedFindingIds.add(row.targetRef);
+      }
+
+      return {
+        ...scan,
+        conclusion: concludeScan({
+          status: scan.status,
+          findings: findings.map((row) => ({
+            id: row.id,
+            severity: row.severity,
+            riskScore: row.riskScore,
+            kev: row.kev,
+            epssScore: row.epssScore,
+            fixAvailable: row.fixAvailable,
+            scannerType: row.scannerType,
+            asset: {
+              kind: row.asset.kind,
+              exposure: row.asset.exposure,
+              criticality: row.asset.criticality,
+              tags: row.asset.tags,
+            },
+          })),
+          policies: policies.map((policy) => ({
+            enabled: policy.enabled,
+            priority: policy.priority,
+            condition: policy.condition as PolicyCondition,
+            actions: policy.actions,
+          })),
+          suppressedFindingIds,
+          expectedFindingCount,
+        }),
+      };
+    });
+    if (!result) throw new NotFoundException(`Scan ${id} not found`);
+    return result;
   }
 
   @Post()

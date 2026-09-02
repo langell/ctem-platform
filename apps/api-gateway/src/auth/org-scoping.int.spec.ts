@@ -3,17 +3,20 @@ import { createServer, type Server } from 'node:http';
 import { type AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
+  BadRequestException,
+  Body,
   Controller,
   Get,
   NotFoundException,
   Param,
   Patch,
+  Post,
   type INestApplication,
 } from '@nestjs/common';
 import { APP_GUARD, Reflector } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { AuthModule, CurrentUser, JwtVerifier, RequirePermissions } from '@ctem/auth';
-import type { Principal } from '@ctem/contracts';
+import { findClientConclusionKeys, type Principal } from '@ctem/contracts';
 import { TestIdp, applyTestEnv } from '@ctem/testing';
 import { GatewayAuthGuard } from './gateway-auth.guard';
 import { SessionController } from '../routes/session.controller';
@@ -24,6 +27,9 @@ const FINDING_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const FINDING_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const POLICY_A = '11111111-1111-4111-8111-111111111111';
 const POLICY_B = '22222222-2222-4222-8222-222222222222';
+const SCAN_A = '33333333-3333-4333-8333-333333333333';
+const SCAN_B = '44444444-4444-4444-8444-444444444444';
+const SCAN_FAIL = '55555555-5555-4555-8555-555555555555';
 const PAT_A = 'ctem_pat_org-a-token';
 const PAT_B = 'ctem_pat_org-b-token';
 
@@ -82,6 +88,38 @@ class PoliciesProbeController {
   }
 }
 
+@Controller('v1/scans')
+class ScansProbeController {
+  @Get(':id')
+  @RequirePermissions('scan:read')
+  get(@CurrentUser() principal: Principal, @Param('id') id: string) {
+    // Simulated CI GET: only SCAN_FAIL has a matching fail_build rule.
+    if (id === SCAN_FAIL) {
+      if (principal.orgId !== ORG_A) throw new NotFoundException(`Scan ${id} not found`);
+      return { id, orgId: ORG_A, status: 'succeeded', conclusion: 'failed' };
+    }
+    const owned = principal.orgId === ORG_A ? SCAN_A : SCAN_B;
+    if (id !== owned) throw new NotFoundException(`Scan ${id} not found`);
+    return { id, orgId: principal.orgId, status: 'succeeded', conclusion: 'passed' };
+  }
+
+  @Post()
+  @RequirePermissions('scan:run')
+  create(@CurrentUser() principal: Principal, @Body() body: Record<string, unknown>) {
+    if (findClientConclusionKeys(body).length) {
+      throw new BadRequestException(
+        'scan conclusion is not client-writable — only a matching fail_build policy can fail the build',
+      );
+    }
+    return {
+      id: principal.orgId === ORG_A ? SCAN_A : SCAN_B,
+      orgId: principal.orgId,
+      status: 'queued',
+      conclusion: 'pending',
+    };
+  }
+}
+
 /**
  * JWT/PAT org scoping + findings isolation at the gateway.
  *
@@ -117,14 +155,14 @@ describe('JWT org scoping and findings tenancy (integration)', () => {
                 orgId: ORG_A,
                 tokenId: 'tok-a',
                 name: 'ci-a',
-                scopes: ['finding:read', 'policy:read', 'policy:write'],
+                scopes: ['finding:read', 'policy:read', 'policy:write', 'scan:read', 'scan:run'],
               }
             : presented === PAT_B
               ? {
                   orgId: ORG_B,
                   tokenId: 'tok-b',
                   name: 'ci-b',
-                  scopes: ['finding:read', 'policy:read', 'policy:write'],
+                  scopes: ['finding:read', 'policy:read', 'policy:write', 'scan:read', 'scan:run'],
                 }
               : null;
         if (req.url === '/internal/tokens/verify' && record) {
@@ -145,7 +183,7 @@ describe('JWT org scoping and findings tenancy (integration)', () => {
 
     const moduleRef = await Test.createTestingModule({
       imports: [AuthModule],
-      controllers: [SessionController, FindingsProbeController, PoliciesProbeController],
+      controllers: [SessionController, FindingsProbeController, PoliciesProbeController, ScansProbeController],
       providers: [
         {
           provide: APP_GUARD,
@@ -329,5 +367,55 @@ describe('JWT org scoping and findings tenancy (integration)', () => {
 
     const crossed = await call(`/v1/findings/${FINDING_A}`, PAT_B);
     expect(crossed.status).toBe(404);
+  });
+
+  it('CI GET with a PAT returns failed when a fail_build rule matched', async () => {
+    const res = await call(`/v1/scans/${SCAN_FAIL}`, PAT_A);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      id: SCAN_FAIL,
+      orgId: ORG_A,
+      conclusion: 'failed',
+    });
+  });
+
+  it('does not leak an org-A scan to an org-B PAT (GET-by-id is 404)', async () => {
+    const res = await call(`/v1/scans/${SCAN_A}`, PAT_B, {
+      headers: { 'x-ctem-org': ORG_A },
+    });
+    expect(res.status).toBe(404);
+    const failBuild = await call(`/v1/scans/${SCAN_FAIL}?orgId=${ORG_A}`, PAT_B);
+    expect(failBuild.status).toBe(404);
+  });
+
+  it('rejects a bad PAT on the CI scan GET (401)', async () => {
+    expect((await call(`/v1/scans/${SCAN_FAIL}`, 'ctem_pat_bogus')).status).toBe(401);
+    expect((await call(`/v1/scans/${SCAN_A}`, '')).status).toBe(401);
+  });
+
+  it('cannot force a failed conclusion with a valid PAT or JWT — only a matching fail_build rule', async () => {
+    const patPost = await call('/v1/scans', PAT_A, {
+      method: 'POST',
+      body: { scannerType: 'sca', conclusion: 'failed' },
+    });
+    expect(patPost.status).toBe(400);
+
+    const jwt = await idp.issueToken({ orgId: ORG_A, roles: ['owner'] });
+    const jwtPost = await call('/v1/scans', jwt, {
+      method: 'POST',
+      body: { scannerType: 'sca', options: { conclusion: 'failed' } },
+    });
+    expect(jwtPost.status).toBe(400);
+
+    const created = await call('/v1/scans', PAT_A, {
+      method: 'POST',
+      body: { scannerType: 'sca' },
+    });
+    expect(created.status).toBe(201);
+    expect(((await created.json()) as { conclusion: string }).conclusion).not.toBe('failed');
+
+    const noMatch = await call(`/v1/scans/${SCAN_A}`, PAT_A);
+    expect(noMatch.status).toBe(200);
+    expect(((await noMatch.json()) as { conclusion: string }).conclusion).toBe('passed');
   });
 });

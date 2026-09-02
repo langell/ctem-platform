@@ -79,6 +79,7 @@ export interface Scan {
   trigger: string;
   jobsTotal: number;
   jobsCompleted: number;
+  conclusion?: string;
   createdAt?: string;
 }
 
@@ -88,10 +89,10 @@ export type ScannerType = (typeof SCANNER_TYPES)[number];
 export const SEVERITIES = ['critical', 'high', 'medium', 'low', 'info'] as const;
 export type Severity = (typeof SEVERITIES)[number];
 
-export const EDITOR_ACTIONS = ['notify', 'ticket'] as const;
+export const EDITOR_ACTIONS = ['notify', 'ticket', 'fail_build'] as const;
 export type EditorAction = (typeof EDITOR_ACTIONS)[number];
 
-/** Tenant-authored rule. This slice writes notify and/or ticket. */
+/** Tenant-authored rule. This slice writes notify, ticket, and/or fail-build. */
 export interface Policy {
   id: string;
   name: string;

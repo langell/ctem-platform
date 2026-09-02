@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@ctem/db';
 import { EventBus } from '@ctem/events';
-import { SEVERITY_ORDER, SUBJECTS, type PolicyCondition, type Severity } from '@ctem/contracts';
+import { SUBJECTS, type PolicyCondition, matchesPolicyCondition } from '@ctem/contracts';
 import { rootLogger } from '@ctem/observability';
 import {
   SEED_KEV_OR_CRITICAL_POLICY_ID,
@@ -91,30 +91,7 @@ export class PolicyEngineService {
   }
 
   private matches(condition: PolicyCondition, finding: EvaluableFinding): boolean {
-    if (
-      condition.severityAtLeast &&
-      SEVERITY_ORDER[finding.severity as Severity] < SEVERITY_ORDER[condition.severityAtLeast]
-    ) {
-      return false;
-    }
-    if (condition.minRiskScore !== undefined && finding.riskScore < condition.minRiskScore) return false;
-    if (condition.kevOnly && !finding.kev) return false;
-    if (condition.minEpss !== undefined && (finding.epssScore ?? 0) < condition.minEpss) return false;
-    // "Only fail the build for things the team can actually fix" is the single
-    // most requested policy knob in every tool of this class.
-    if (condition.requireFixAvailable && !finding.fixAvailable) return false;
-    if (condition.scannerTypes?.length && !condition.scannerTypes.includes(finding.scannerType)) return false;
-    if (condition.assetKinds?.length && !condition.assetKinds.includes(finding.asset.kind)) return false;
-    if (condition.exposure?.length && !condition.exposure.includes(finding.asset.exposure)) return false;
-    if (condition.criticality?.length && !condition.criticality.includes(finding.asset.criticality)) return false;
-
-    if (condition.assetTags) {
-      const tags = (finding.asset.tags ?? {}) as Record<string, string>;
-      for (const [k, v] of Object.entries(condition.assetTags)) {
-        if (tags[k] !== v) return false;
-      }
-    }
-    return true;
+    return matchesPolicyCondition(condition, finding);
   }
 
   private async hasActiveException(orgId: string, finding: EvaluableFinding): Promise<boolean> {
