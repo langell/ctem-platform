@@ -45,15 +45,15 @@ describe('PolicyService (integration)', () => {
       enabled: true,
       priority: 10,
       condition: { severityAtLeast: 'critical' },
-      actions: ['ticket'],
+      actions: ['fail_build'],
       slaHours: null,
     });
 
-    expect(first.actions).toEqual(['ticket']);
+    expect(first.actions).toEqual(['fail_build']);
     const listed = await service.list(orgA);
     expect(listed.map((p) => p.id)).toEqual([first.id, later.id]);
     expect(listed.map((p) => p.priority)).toEqual([10, 20]);
-    expect(listed.find((p) => p.id === first.id)?.actions).toEqual(['ticket']);
+    expect(listed.find((p) => p.id === first.id)?.actions).toEqual(['fail_build']);
     expect(listed.find((p) => p.id === later.id)?.actions).toEqual(['notify']);
 
     await service.update(orgA, first.id, { priority: 30 });

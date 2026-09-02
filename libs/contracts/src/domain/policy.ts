@@ -39,12 +39,12 @@ export const Policy = z
 export type Policy = z.infer<typeof Policy>;
 
 /**
- * Tenant-authored writes in this slice: notify and/or ticket. fail-build /
- * block-deploy stay on the stored Policy shape (seed + engine) but cannot be
- * created or updated through the editor API. Slack still cannot ticket —
- * ticket fans out to Jira in notification-service.
+ * Tenant-authored writes: notify, ticket, and/or fail-build. block-deploy stays
+ * on the stored Policy shape (seed + engine) but cannot be created or updated
+ * through the editor API. Slack still cannot ticket — ticket fans out to Jira
+ * in notification-service. fail-build is the CI scan conclusion, not GitHub Checks.
  */
-export const EditorActions = z.array(z.enum(['notify', 'ticket'])).min(1);
+export const EditorActions = z.array(z.enum(['notify', 'ticket', 'fail_build'])).min(1);
 export type EditorActions = z.infer<typeof EditorActions>;
 
 /** Field names a tenant might use to inject a webhook or Jira URL. Refused on write. */

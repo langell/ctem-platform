@@ -89,7 +89,7 @@ describe('PolicyService.create / update', () => {
     expect(prisma.withOrg).toHaveBeenCalledWith(ORG_B, expect.any(Function));
   });
 
-  it('persists a ticket action from the editor', async () => {
+  it('persists a ticket or fail_build action from the editor', async () => {
     const { policies, tx } = service();
     await policies.create(ORG_A, { ...notifyRule, name: 'KEV ticket', actions: ['ticket'] });
     expect(tx.policy.create).toHaveBeenCalledWith({
@@ -99,23 +99,31 @@ describe('PolicyService.create / update', () => {
         actions: ['ticket'],
       }),
     });
+    await policies.create(ORG_A, { ...notifyRule, name: 'CI fail', actions: ['fail_build'] });
+    expect(tx.policy.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        orgId: ORG_A,
+        name: 'CI fail',
+        actions: ['fail_build'],
+      }),
+    });
   });
 
-  it('refuses fail_build / block_deploy on create and update', async () => {
+  it('refuses block_deploy on create and update', async () => {
     const { policies } = service({
       existing: { id: POLICY_A, orgId: ORG_A, actions: ['notify'] },
     });
     await expect(
-      policies.create(ORG_A, { ...notifyRule, actions: ['fail_build'] }),
+      policies.create(ORG_A, { ...notifyRule, actions: ['block_deploy'] }),
     ).rejects.toBeInstanceOf(BadRequestException);
     await expect(
-      policies.create(ORG_A, { ...notifyRule, actions: ['notify', 'fail_build'] }),
+      policies.create(ORG_A, { ...notifyRule, actions: ['notify', 'block_deploy'] }),
     ).rejects.toBeInstanceOf(BadRequestException);
     await expect(
       policies.update(ORG_A, POLICY_A, { actions: ['block_deploy'] }),
     ).rejects.toBeInstanceOf(BadRequestException);
     await expect(
-      policies.update(ORG_A, POLICY_A, { actions: ['ticket', 'fail_build'] }),
+      policies.update(ORG_A, POLICY_A, { actions: ['ticket', 'block_deploy'] }),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 

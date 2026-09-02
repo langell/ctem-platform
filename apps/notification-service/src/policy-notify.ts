@@ -8,7 +8,8 @@ export interface PolicyViolatedNotice {
 
 /**
  * Closes `ctem.policy.violated` → Slack (notify) and Jira (ticket).
- * fail_build / block_deploy stay out of this slice.
+ * fail_build is the CI scan conclusion on GET, not a notification channel.
+ * block_deploy stays out of this slice.
  */
 export function shouldNotify(actions: string[]): boolean {
   return actions.includes('notify');

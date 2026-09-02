@@ -93,4 +93,20 @@ describe('PolicyEngineService seed KEV-or-critical rule', () => {
       actions: ['notify', 'ticket'],
     });
   });
+
+  it('returns fail_build when a matching tenant rule wins', async () => {
+    const { service, published } = engine(finding({ kev: true, severity: 'critical' }), [
+      {
+        id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+        condition: { kevOnly: true },
+        actions: ['fail_build'],
+        slaHours: null,
+      },
+    ]);
+    await expect(service.evaluate(orgId, findingId)).resolves.toEqual(['fail_build']);
+    expect(published[0]?.payload).toMatchObject({
+      policyId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+      actions: ['fail_build'],
+    });
+  });
 });

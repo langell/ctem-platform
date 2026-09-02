@@ -119,6 +119,9 @@ describe('ScanDispatcherService credentialRef wiring', () => {
 
     await dispatcher.createScan(orgId, null, { scannerType: 'sca', assetSelector: {}, options: {} });
 
+    expect(tx.scan.create).toHaveBeenCalledWith({
+      data: expect.not.objectContaining({ conclusion: expect.anything() }),
+    });
     expect(published).toHaveLength(1);
     expect(published[0].subject).toBe(SUBJECTS.scanJobDispatched);
     expect(published[0].payload.credentialRef).toBe('env:GITLAB_TOKEN');
