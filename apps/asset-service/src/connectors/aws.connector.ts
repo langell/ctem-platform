@@ -376,10 +376,10 @@ export class AwsConnector implements AssetConnector {
       const assets = mapPage(xml);
       for (const asset of assets) yield asset;
       token = xmlNextToken(xml);
-      // Same class as the GitHub 2000-repo cap: a short page is complete; a
-      // full page at the cap (or a leftover NextToken) is truncated — do not
-      // archiveStale on a partial listing.
-      if (!token && assets.length < AWS_PER_PAGE) break;
+      // AWS is done when NextToken is absent. A full page without a token is
+      // complete — do not re-query the same page. A leftover NextToken at the
+      // cap is truncated; do not archiveStale on a partial listing.
+      if (!token) break;
       if (page === AWS_MAX_PAGES) this.failTruncated(label);
     }
   }

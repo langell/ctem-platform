@@ -222,9 +222,28 @@ describe('AwsConnector.discover', () => {
     ).rejects.toThrow(/region/);
   });
 
+  it('succeeds on a complete page of AWS_PER_PAGE with no NextToken', async () => {
+    setAwsCreds();
+    const ids = Array.from({ length: AWS_PER_PAGE }, (_, i) => `i-full-${i}`);
+    const fetchFn = stubAws({ instances: [ids], buckets: [] });
+    const assets = (await collect(
+      new AwsConnector().discover(ctx({ region: REGION, resourceTypes: ['ec2_instance'] })),
+    )) as Array<{ externalKey: string }>;
+    expect(assets).toHaveLength(AWS_PER_PAGE);
+    expect(assets.map((a) => a.externalKey)).toEqual(
+      ids.map((id) => `aws:${ACCOUNT}:ec2:${REGION}:${id}`),
+    );
+    const ec2Calls = fetchFn.mock.calls.filter(
+      ([url, init]) =>
+        String(url).includes('ec2.') && String(init?.body ?? '').includes('DescribeInstances'),
+    );
+    expect(ec2Calls).toHaveLength(1);
+  });
+
   it('fails when an EC2 listing is truncated at the page cap', async () => {
     setAwsCreds();
-    const pages = Array.from({ length: AWS_MAX_PAGES }, (_, p) =>
+    // One extra full page so the last fetched page still carries NextToken.
+    const pages = Array.from({ length: AWS_MAX_PAGES + 1 }, (_, p) =>
       Array.from({ length: AWS_PER_PAGE }, (_, i) => `i-${p}-${i}`),
     );
     const fetchFn = stubAws({ instances: pages, buckets: [] });
