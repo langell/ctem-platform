@@ -87,19 +87,60 @@ export interface CompleteAuthorizationOptions {
   fetch?: typeof fetch;
 }
 
+/** One in-flight exchange so React Strict Mode cannot POST the same code twice. */
+let inflightExchange: Promise<string> | undefined;
+
+export function readStoredAccessJwt(
+  storage: Storage | undefined = defaultStorage(),
+): string | null {
+  const value = tokenStore(storage).get();
+  if (!value || !isJwtAccessToken(value) || isPatToken(value)) return null;
+  return value;
+}
+
+/** A later token 400 (Strict Mode remount) must not wipe a JWT already stored. */
+export function keepSessionAfterCallbackError(
+  storage: Storage | undefined = defaultStorage(),
+): boolean {
+  return readStoredAccessJwt(storage) !== null;
+}
+
 /**
  * Exchange the Keycloak authorization code for the issued access-token JWT
  * and persist that JWT as the gateway session. Refuses a PAT in every case.
+ *
+ * The authorization code is single-use. Vite/React Strict Mode remounts the
+ * callback and would otherwise POST it twice; the second call is 400 and must
+ * not log the user out.
  */
 export async function completeAuthorization(
   options: CompleteAuthorizationOptions,
 ): Promise<string> {
   const storage = requireStorage(options.storage);
+  const existing = readStoredAccessJwt(storage);
+  if (existing) return existing;
+  if (inflightExchange) return inflightExchange;
+
+  inflightExchange = exchangeAuthorizationCode(options, storage).finally(() => {
+    inflightExchange = undefined;
+  });
+  return inflightExchange;
+}
+
+async function exchangeAuthorizationCode(
+  options: CompleteAuthorizationOptions,
+  storage: Storage,
+): Promise<string> {
+  const existing = readStoredAccessJwt(storage);
+  if (existing) return existing;
+
   const params = new URLSearchParams(
     options.search.startsWith('?') ? options.search.slice(1) : options.search,
   );
   const idpError = params.get('error');
   if (idpError) {
+    const kept = readStoredAccessJwt(storage);
+    if (kept) return kept;
     clearPkce(storage);
     throw new Error(params.get('error_description') || `Keycloak returned ${idpError}`);
   }
@@ -109,6 +150,8 @@ export async function completeAuthorization(
   const expectedState = storage.getItem(PKCE_STATE_KEY);
   const verifier = storage.getItem(PKCE_VERIFIER_KEY);
   if (!code || !returnedState || !expectedState || returnedState !== expectedState || !verifier) {
+    const kept = readStoredAccessJwt(storage);
+    if (kept) return kept;
     clearPkce(storage);
     throw new Error('Login callback is missing a valid authorization code.');
   }
@@ -134,6 +177,8 @@ export async function completeAuthorization(
   } | null;
   clearPkce(storage);
   if (!res.ok || !payload?.access_token) {
+    const kept = readStoredAccessJwt(storage);
+    if (kept) return kept;
     throw new Error(
       payload?.error_description || payload?.error || 'Keycloak did not issue an access token.',
     );

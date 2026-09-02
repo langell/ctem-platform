@@ -2,11 +2,15 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { gatewayFetch, GatewayError, tokenStore } from '../api/client';
 import type { Session } from '../api/types';
-import { completeAuthorization } from '../auth/oidc';
+import { completeAuthorization, keepSessionAfterCallbackError } from '../auth/oidc';
 
 /**
  * OIDC redirect target. Stores the issued access-token JWT and confirms the
  * gateway session. Org still comes from that JWT.
+ *
+ * React Strict Mode remounts this page. The authorization code is taken once
+ * (and stripped from the URL) so the second mount cannot POST it again or
+ * wipe a JWT the first mount already stored.
  */
 export function CallbackPage() {
   const navigate = useNavigate();
@@ -14,18 +18,29 @@ export function CallbackPage() {
 
   useEffect(() => {
     let cancelled = false;
+    const search = window.location.search;
     (async () => {
       try {
-        const jwt = await completeAuthorization({
-          search: window.location.search,
+        // Claim the one-shot exchange before stripping the code so a Strict Mode
+        // remount joins inflight (or sees the stored JWT) instead of POSTing again.
+        const jwtPromise = completeAuthorization({
+          search,
           origin: window.location.origin,
         });
+        if (search) {
+          window.history.replaceState(window.history.state, '', window.location.pathname);
+        }
+        const jwt = await jwtPromise;
         // Session is minted from the bearer JWT. This callback has no org field.
         await gatewayFetch<Session>('/v1/session', { token: jwt });
         if (!cancelled) navigate('/findings', { replace: true });
       } catch (err) {
-        tokenStore().clear();
         if (cancelled) return;
+        if (keepSessionAfterCallbackError()) {
+          navigate('/findings', { replace: true });
+          return;
+        }
+        tokenStore().clear();
         setError(
           err instanceof GatewayError
             ? err.message
