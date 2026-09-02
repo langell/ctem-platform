@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { createServer, type Server } from 'node:http';
 import { type AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -23,6 +24,8 @@ const FINDING_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const FINDING_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const POLICY_A = '11111111-1111-4111-8111-111111111111';
 const POLICY_B = '22222222-2222-4222-8222-222222222222';
+const PAT_A = 'ctem_pat_org-a-token';
+const PAT_B = 'ctem_pat_org-b-token';
 
 @Controller('v1/findings')
 class FindingsProbeController {
@@ -80,20 +83,65 @@ class PoliciesProbeController {
 }
 
 /**
- * JWT/org scoping + findings isolation at the gateway.
+ * JWT/PAT org scoping + findings isolation at the gateway.
  *
  * The UI is a client of these endpoints. A client-supplied org id (header or
- * query) must not change the tenant, and a JWT for org A must not see org B
- * findings — even when the caller asks for them by id.
+ * query) must not change the tenant, and a token for org A must not see org B
+ * findings — even when the caller asks for them by id. GET-by-id on an org
+ * miss is 404.
  */
 describe('JWT org scoping and findings tenancy (integration)', () => {
   let idp: TestIdp;
+  let identityStub: Server;
   let app: INestApplication;
   let base: string;
 
   beforeAll(async () => {
     idp = await TestIdp.start();
-    applyTestEnv({ OIDC_ISSUER: idp.issuer });
+
+    identityStub = createServer((req, res) => {
+      let body = '';
+      req.on('data', (c: Buffer) => (body += c.toString()));
+      req.on('end', () => {
+        res.setHeader('content-type', 'application/json');
+        const presented = (() => {
+          try {
+            return (JSON.parse(body) as { token?: string }).token;
+          } catch {
+            return undefined;
+          }
+        })();
+        const record =
+          presented === PAT_A
+            ? {
+                orgId: ORG_A,
+                tokenId: 'tok-a',
+                name: 'ci-a',
+                scopes: ['finding:read', 'policy:read', 'policy:write'],
+              }
+            : presented === PAT_B
+              ? {
+                  orgId: ORG_B,
+                  tokenId: 'tok-b',
+                  name: 'ci-b',
+                  scopes: ['finding:read', 'policy:read', 'policy:write'],
+                }
+              : null;
+        if (req.url === '/internal/tokens/verify' && record) {
+          res.end(JSON.stringify(record));
+        } else {
+          res.statusCode = 401;
+          res.end(JSON.stringify({ message: 'Invalid token' }));
+        }
+      });
+    });
+    await new Promise<void>((resolve) => identityStub.listen(0, '127.0.0.1', resolve));
+    const stubPort = (identityStub.address() as AddressInfo).port;
+
+    applyTestEnv({
+      OIDC_ISSUER: idp.issuer,
+      IDENTITY_SERVICE_URL: `http://127.0.0.1:${stubPort}`,
+    });
 
     const moduleRef = await Test.createTestingModule({
       imports: [AuthModule],
@@ -116,6 +164,7 @@ describe('JWT org scoping and findings tenancy (integration)', () => {
   afterAll(async () => {
     await app?.close();
     await idp?.stop();
+    await new Promise<void>((resolve) => identityStub.close(() => resolve()));
   });
 
   async function call(
@@ -236,6 +285,49 @@ describe('JWT org scoping and findings tenancy (integration)', () => {
     expect(patched.status).toBe(200);
 
     const crossed = await call(`/v1/policies/${POLICY_A}`, jwtB);
+    expect(crossed.status).toBe(404);
+  });
+
+  it('session.orgId comes from the PAT record, not x-ctem-org or ?orgId=', async () => {
+    const res = await call(`/v1/session?orgId=${ORG_B}`, PAT_A, {
+      headers: { 'x-ctem-org': ORG_B, 'x-org-id': ORG_B },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { orgId: string; userId: string; serviceAccount: string | null };
+    expect(body.orgId).toBe(ORG_A);
+    expect(body.userId).toBe('tok-a');
+    expect(body.serviceAccount).toBe('ci-a');
+  });
+
+  it('lists only findings for the PAT org when the client sends another org', async () => {
+    const res = await call(`/v1/findings?orgId=${ORG_B}&limit=50`, PAT_A, {
+      headers: { 'x-ctem-org': ORG_B },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { items: Array<{ id: string; orgId: string }> };
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0]?.orgId).toBe(ORG_A);
+    expect(body.items[0]?.id).toBe(FINDING_A);
+  });
+
+  it('does not leak an org-B finding to an org-A PAT (GET-by-id is 404)', async () => {
+    const detail = await call(`/v1/findings/${FINDING_B}`, PAT_A, {
+      headers: { 'x-ctem-org': ORG_B },
+    });
+    expect(detail.status).toBe(404);
+
+    const risk = await call(`/v1/findings/${FINDING_B}/risk`, PAT_A, {
+      headers: { 'x-ctem-org': ORG_B },
+    });
+    expect(risk.status).toBe(404);
+  });
+
+  it('returns org-A finding detail only for an org-A PAT', async () => {
+    const a = await call(`/v1/findings/${FINDING_A}`, PAT_A);
+    expect(a.status).toBe(200);
+    expect(((await a.json()) as { orgId: string }).orgId).toBe(ORG_A);
+
+    const crossed = await call(`/v1/findings/${FINDING_A}`, PAT_B);
     expect(crossed.status).toBe(404);
   });
 });

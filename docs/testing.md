@@ -59,7 +59,9 @@ ordered notify/ticket create/update, refuse fail-build, and org-B 404 on another
    `ctem_app`**, not as the owner.
 3. Touches auth, tokens, or the principal → extend the gateway guard suite,
    the org-scoping/findings-tenancy suite, or the identity token suite.
-   The web client must keep covering that it never sends an org id.
+   PAT verify must keep covering: org from the token record, fail-closed on
+   a bad/missing PAT, and ignore a client-supplied org. The web client must
+   never send an org id and must not expose a PAT paste field.
 4. Adds a tenant table → nothing to do; the RLS sweep fails until
    `libs/db/prisma/manual/000_rls.sql` covers it. Fix the SQL, not the test.
 5. Changes the golden path (new endpoint in the flow, changed contract) →

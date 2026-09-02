@@ -17,7 +17,7 @@ export function LoginPage() {
     setError(null);
     const value = token.trim();
     if (!value) {
-      setError('Paste a JWT (or PAT) issued for your organization.');
+      setError('Paste a JWT issued for your organization.');
       return;
     }
     setBusy(true);

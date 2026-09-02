@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { UnauthorizedException } from '@nestjs/common';
+import { createHash } from 'node:crypto';
 import { PrismaService, type PrismaClient } from '@ctem/db';
 import { createOrg, deleteOrgCascade, ownerClient } from '@ctem/testing';
 import { ApiTokenService } from './api-token.service';
@@ -33,6 +34,7 @@ describe('ApiTokenService (integration)', () => {
     const row = await owner.apiToken.findUnique({ where: { id: issued.id } });
     expect(row).not.toBeNull();
     expect(row!.tokenHash).not.toContain(issued.token);
+    expect(row!.tokenHash).toBe(createHash('sha256').update(issued.token).digest('hex'));
   });
 
   it('verifies a valid token and returns its org and scopes', async () => {
@@ -43,6 +45,8 @@ describe('ApiTokenService (integration)', () => {
 
   it('rejects a malformed token', async () => {
     await expect(service.verify('not-a-pat')).rejects.toThrow(UnauthorizedException);
+    await expect(service.verify('')).rejects.toThrow(UnauthorizedException);
+    await expect(service.verify(undefined as unknown as string)).rejects.toThrow(UnauthorizedException);
   });
 
   it('rejects an unknown token', async () => {

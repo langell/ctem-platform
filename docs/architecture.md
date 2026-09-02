@@ -60,13 +60,13 @@ Vulnerability intelligence (`vulnerabilities`) is deliberately **not** tenant-sc
 
 ## Auth
 
-1. User authenticates with the IdP and presents a bearer JWT.
-2. The gateway verifies it against the issuer's JWKS (`jose`, cached and auto-rotating).
-3. The gateway resolves the active org, maps the role to a permission set, and builds a `Principal`.
+1. Humans authenticate with the IdP and present a bearer JWT. Machine callers present a `ctem_pat_…` token.
+2. The gateway verifies a JWT against the issuer's JWKS (`jose`, cached and auto-rotating), or POSTs a PAT to identity-service `/internal/tokens/verify`.
+3. Org comes from the verified JWT `org_id` claim or the PAT record — never from the client. The gateway maps the role (JWT) or scopes (PAT) to a permission set and builds a `Principal`.
 4. The principal is base64url-encoded and HMAC-signed into `x-ctem-principal` + `-signature`.
 5. Downstream services verify the signature with `timingSafeEqual` and check route permissions.
 
-In production this rides on mTLS inside the mesh, so the header cannot be injected from outside. Machine callers (CI, connectors) present `ctem_pat_…` tokens verified against a SHA-256 hash by the identity service — the gateway's fallback path for these is marked `TODO` and is the first thing to wire up before a CI integration ships.
+In production this rides on mTLS inside the mesh, so the header cannot be injected from outside. Machine callers (CI, connectors) present `ctem_pat_…` tokens. The gateway POSTs the plaintext to identity-service `/internal/tokens/verify`; identity looks up the SHA-256 hash (via `verify_api_token`, because RLS has no org yet) and returns `{ orgId, tokenId, scopes, name }`. The gateway mints a service-account `Principal` from that record — org never comes from a client header, query, or body. A bad, missing, or unverifiable PAT fail-closes as 401.
 
 ## Risk model
 
@@ -98,7 +98,7 @@ The mitigation is that `@ctem/contracts` is the single source of truth for every
 1. **Vulnerability feed mirror.** OSV (demand-driven) + NVD + GHSA ingest into `vulnerabilities`, with paged EPSS and KEV enrichment. SCA matches locally once a package has a sync row; live OSV is only the first-seen hop. A full bulk dump (to drop that hop) is optional later work.
 2. **SCA depth.** Lockfile resolvers per ecosystem, real dependency paths, then reachability. Reachability is the single largest reduction in noise available.
 3. **Cloud connectors.** GitHub and GitLab.com repository discovery is live; AWS inventory (EC2, S3, security groups, Elastic IPs → `cloud_resource`) is live via the same AssetConnector + scheduler. GCP/Azure are later. Self-hosted GitLab is later explicit connector config.
-4. **Web UI.** Thin Nx app at `apps/web`, served by the gateway. Login, assets, findings, finding risk + reachability, kick a scan, tenant policy editor (ordered notify or ticket rules). Notify is Slack; ticket is Jira in notification-service. Org is taken from the JWT only.
+4. **Web UI.** Thin Nx app at `apps/web`, served by the gateway. Login, assets, findings, finding risk + reachability, kick a scan, tenant policy editor (ordered notify or ticket rules). Notify is Slack; ticket is Jira in notification-service. Org is taken from the JWT (humans) or the PAT record (machines), never from the client. The login form pastes a JWT only — no PAT field.
 5. **Distributed scheduling.** The discovery and scan schedulers use naive intervals; they need leader election or a JetStream-backed work queue before a second replica of either runs.
 6. **Container layer scanning**, then IaC parsing, then ASM probing depth.
 7. **Reachability + exploit validation.** This is what separates a CTEM platform from a vulnerability scanner with a dashboard.
@@ -108,7 +108,6 @@ The mitigation is that `@ctem/contracts` is the single source of truth for every
 - Scanner internals beyond SCA SBOM ingest and lockfile resolution are stubbed: image layer walking, IaC parsing, port scanning. Remaining discovery connectors (Azure/GCP) are not built yet. AWS is inventory only — not a CSPM scanner.
 - SCA source clone is allowlisted to `https://github.com/owner/repo` or `https://gitlab.com/owner/repo` from `cloneUrl` or a `github:` / `gitlab:` externalKey. A refused/missing checkout, a private repo without a usable `env:GITHUB_*` / `env:GITLAB_*` credentialRef, or every lockfile parser failing throws — the job must not succeed with zero findings. `pom.xml` / `*.csproj` / `requirements.txt` are pinned-manifest fallbacks, not graphs.
 - Policy `ticket` fans out to Jira Cloud (`{site}.atlassian.net`) via platform `env:JIRA_*` in notification-service. Slack still cannot ticket. Self-hosted Jira is later. Tenant config cannot set the host.
-- Gateway PAT verification path is a `TODO`; JWT works.
 - Rate limiting is in-memory — correct for one replica only.
 - SLA breach de-duplication is in-memory and resets on restart.
 - No circuit breaker or retry budget on inter-service calls.

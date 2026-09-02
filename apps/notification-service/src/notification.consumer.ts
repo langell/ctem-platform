@@ -51,7 +51,7 @@ export class NotificationConsumer implements OnApplicationBootstrap {
 
     // Policy hits become Slack on notify and Jira on ticket. Hosts are
     // platform env:SLACK_* / env:JIRA_* — not tenant config/body/query,
-    // not message.target. CORS / PAT / query-forwarding stay comments.
+    // not message.target. CORS and unknown query forwarding stay comments.
     await this.bus.subscribe(
       SUBJECTS.policyViolated,
       { durable: 'notification-policy' },

@@ -112,9 +112,9 @@ export class GatewayAuthGuard implements CanActivate {
   // ---------------------------------------------------------------------------
 
   /**
-   * PATs are verified by the identity-service, which stores only the SHA-256
-   * hash. The response gives us (orgId, scopes, name). We map scopes to the
-   * closest role's permission set, and mark the principal as a service account.
+   * PATs are verified by identity-service, which stores only the SHA-256 hash.
+   * The gateway never hashes, never trusts a client org, and fail-closes if
+   * identity is unreachable or the record has no org.
    */
   private async verifyPat(token: string): Promise<Principal> {
     const env = loadEnv();
@@ -133,21 +133,23 @@ export class GatewayAuthGuard implements CanActivate {
       throw new UnauthorizedException('Token verification failed');
     }
 
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new UnauthorizedException((body as { message?: string }).message ?? 'Invalid token');
+    // Any non-success is unauthenticated. Do not leak identity's error body.
+    if (!res.ok) throw new UnauthorizedException('Invalid token');
+
+    let verified: { orgId?: string; tokenId?: string; scopes?: string[]; name?: string };
+    try {
+      verified = (await res.json()) as typeof verified;
+    } catch {
+      throw new UnauthorizedException('Invalid token');
     }
 
-    const verified = (await res.json()) as {
-      orgId: string;
-      tokenId: string;
-      scopes: string[];
-      name: string;
-    };
+    // Tenant is taken from the PAT record only. A client-supplied org id
+    // (x-ctem-org, query, body) must never select the organization.
+    if (!verified?.orgId || !verified.tokenId) throw new UnauthorizedException('Invalid token');
 
     // Map token scopes directly to permissions. Scopes are issued using the
     // same Permission enum values (e.g. "scan:run", "finding:read").
-    const permissions = verified.scopes.filter((s): s is Permission =>
+    const permissions = (verified.scopes ?? []).filter((s): s is Permission =>
       Permission.options.includes(s as Permission),
     );
 
@@ -156,7 +158,7 @@ export class GatewayAuthGuard implements CanActivate {
       orgId: verified.orgId,
       role: 'developer', // PATs have no concept of role; permissions are explicit.
       permissions,
-      serviceAccount: verified.name,
+      serviceAccount: verified.name ?? null,
       traceId: currentTraceId(),
     };
   }
