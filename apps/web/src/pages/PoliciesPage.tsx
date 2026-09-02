@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { gatewayFetch, GatewayError } from '../api/client';
 import { SEVERITIES, type Policy, type PolicyWrite, type Session } from '../api/types';
+import { actionSelectValue, actionsFromSelect, editorActionsFromPolicy } from './policy-actions';
 
 const emptyDraft = (): PolicyWrite => ({
   name: '',
@@ -30,7 +31,7 @@ function toDraft(policy: Policy): PolicyWrite {
     enabled: policy.enabled,
     priority: policy.priority,
     condition: { ...policy.condition },
-    actions: ['notify'],
+    actions: editorActionsFromPolicy(policy.actions),
     slaHours: policy.slaHours,
   };
 }
@@ -114,9 +115,9 @@ export function PoliciesPage() {
     <section>
       <h1>Policies</h1>
       <p className="muted">
-        Ordered notify rules for the organization on the token. Lower priority runs first; the
-        first match wins. Action is notify (Slack via the existing policy.violated path). This
-        client never sends an org id or a webhook URL.
+        Ordered notify or ticket rules for the organization on the token. Lower priority runs
+        first; the first match wins. Notify goes to Slack; ticket goes to Jira — both via
+        policy.violated. This client never sends an org id or a webhook/Jira URL.
       </p>
       {error ? <p className="error">{error}</p> : null}
 
@@ -254,7 +255,21 @@ export function PoliciesPage() {
             />
             KEV only
           </label>
-          <p className="muted small">Action: notify (ticket, fail-build, and tenant webhooks are out of this slice)</p>
+          <label>
+            Action
+            <select
+              value={actionSelectValue(draft.actions)}
+              onChange={(e) => setDraft((c) => ({ ...c, actions: actionsFromSelect(e.target.value) }))}
+            >
+              <option value="notify">Notify (Slack)</option>
+              <option value="ticket">Ticket (Jira)</option>
+              <option value="notify,ticket">Notify and ticket</option>
+            </select>
+          </label>
+          <p className="muted small">
+            fail-build and tenant webhook/Jira URLs are out of this slice. Slack still cannot
+            ticket.
+          </p>
           {editingId ? (
             <button
               type="button"

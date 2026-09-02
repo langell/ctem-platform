@@ -57,7 +57,7 @@ describe('gateway client org scoping', () => {
       body: {
         name: 'KEV notify',
         condition: { kevOnly: true },
-        actions: ['notify'],
+        actions: ['ticket'],
         priority: 10,
       },
     });
@@ -66,6 +66,7 @@ describe('gateway client org scoping', () => {
     expect(req.url).not.toMatch(/org/i);
     expect(JSON.parse(req.body ?? '{}')).not.toHaveProperty('orgId');
     expect(JSON.parse(req.body ?? '{}')).not.toHaveProperty('webhookUrl');
+    expect(JSON.parse(req.body ?? '{}').actions).toEqual(['ticket']);
   });
 
   it('refuses an org field on a policy create or update body', () => {

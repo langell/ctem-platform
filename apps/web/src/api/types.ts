@@ -88,7 +88,10 @@ export type ScannerType = (typeof SCANNER_TYPES)[number];
 export const SEVERITIES = ['critical', 'high', 'medium', 'low', 'info'] as const;
 export type Severity = (typeof SEVERITIES)[number];
 
-/** Tenant-authored rule. This slice writes notify only. */
+export const EDITOR_ACTIONS = ['notify', 'ticket'] as const;
+export type EditorAction = (typeof EDITOR_ACTIONS)[number];
+
+/** Tenant-authored rule. This slice writes notify and/or ticket. */
 export interface Policy {
   id: string;
   name: string;
@@ -116,6 +119,6 @@ export interface PolicyWrite {
   enabled: boolean;
   priority: number;
   condition: Policy['condition'];
-  actions: ['notify'];
+  actions: EditorAction[];
   slaHours: number | null;
 }

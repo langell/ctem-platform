@@ -506,7 +506,7 @@ async function main(): Promise<void> {
       expect(write.status === 404, `expected 404 on update, got ${write.status}`);
     });
 
-    await step('refuses notify-only violations and a tenant webhook URL', async () => {
+    await step('editor accepts ticket and refuses fail-build plus a tenant webhook URL', async () => {
       const ticket = await api(GATEWAY, 'POST', '/v1/policies', {
         token: patA,
         body: {
@@ -516,7 +516,19 @@ async function main(): Promise<void> {
           priority: 99,
         },
       });
-      expect(ticket.status === 400, `expected 400 for ticket action, got ${ticket.status}`);
+      expect(ticket.status < 300, `expected ticket create, got ${ticket.status} ${JSON.stringify(ticket.json)}`);
+      expect(ticket.json?.actions?.join(',') === 'ticket', `expected ticket actions, got ${JSON.stringify(ticket.json)}`);
+
+      const failBuild = await api(GATEWAY, 'POST', '/v1/policies', {
+        token: patA,
+        body: {
+          name: 'smoke-fail-build',
+          condition: { kevOnly: true },
+          actions: ['fail_build'],
+          priority: 98,
+        },
+      });
+      expect(failBuild.status === 400, `expected 400 for fail_build, got ${failBuild.status}`);
 
       const webhook = await api(GATEWAY, 'POST', '/v1/policies', {
         token: patA,
@@ -529,6 +541,18 @@ async function main(): Promise<void> {
         },
       });
       expect(webhook.status === 400, `expected 400 for tenant webhook URL, got ${webhook.status}`);
+
+      const jiraUrl = await api(GATEWAY, 'POST', '/v1/policies', {
+        token: patA,
+        body: {
+          name: 'smoke-jira-url',
+          condition: { kevOnly: true },
+          actions: ['ticket'],
+          priority: 99,
+          jiraUrl: 'https://evil.example/jira',
+        },
+      });
+      expect(jiraUrl.status === 400, `expected 400 for tenant Jira URL, got ${jiraUrl.status}`);
     });
   } finally {
     await deleteOrgCascade(db, orgA.id).catch(() => undefined);
