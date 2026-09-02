@@ -259,18 +259,18 @@ export function parseAggregatedAddresses(json: unknown): GcpExternalIp[] {
 export function parseBuckets(json: unknown): GcpBucket[] {
   const items = json && typeof json === 'object' ? (json as { items?: unknown }).items : undefined;
   if (!Array.isArray(items)) return [];
-  return items
-    .map((raw) => {
-      if (!raw || typeof raw !== 'object') return undefined;
-      const b = raw as { name?: unknown; location?: unknown; timeCreated?: unknown };
-      if (typeof b.name !== 'string' || b.name.length === 0) return undefined;
-      return {
-        name: b.name,
-        location: typeof b.location === 'string' ? b.location : undefined,
-        timeCreated: typeof b.timeCreated === 'string' ? b.timeCreated : undefined,
-      };
-    })
-    .filter((b): b is GcpBucket => b !== undefined);
+  const buckets: GcpBucket[] = [];
+  for (const raw of items) {
+    if (!raw || typeof raw !== 'object') continue;
+    const b = raw as { name?: unknown; location?: unknown; timeCreated?: unknown };
+    if (typeof b.name !== 'string' || b.name.length === 0) continue;
+    buckets.push({
+      name: b.name,
+      location: typeof b.location === 'string' ? b.location : undefined,
+      timeCreated: typeof b.timeCreated === 'string' ? b.timeCreated : undefined,
+    });
+  }
+  return buckets;
 }
 
 /**
