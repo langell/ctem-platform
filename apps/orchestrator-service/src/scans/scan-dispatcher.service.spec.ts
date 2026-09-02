@@ -14,17 +14,19 @@ describe('scanJobTarget', () => {
         externalKey: 'gitlab:acme/api',
         kind: 'repository',
         attributes: {
-          cloneUrl: 'https://gitlab.com/acme/api.git',
+          cloneUrl: 'https://gitlab.example.com/acme/api.git',
+          gitlabHost: 'gitlab.example.com',
           private: true,
-          htmlUrl: 'https://gitlab.com/acme/api',
+          htmlUrl: 'https://gitlab.example.com/acme/api',
         },
       }),
     ).toEqual({
       externalKey: 'gitlab:acme/api',
       kind: 'repository',
-      cloneUrl: 'https://gitlab.com/acme/api.git',
+      cloneUrl: 'https://gitlab.example.com/acme/api.git',
+      gitlabHost: 'gitlab.example.com',
       private: true,
-      htmlUrl: 'https://gitlab.com/acme/api',
+      htmlUrl: 'https://gitlab.example.com/acme/api',
     });
   });
 

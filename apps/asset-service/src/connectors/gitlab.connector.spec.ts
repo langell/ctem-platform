@@ -73,6 +73,7 @@ describe('projectToAsset', () => {
         defaultBranch: 'main',
         archived: false,
         cloneUrl: 'https://gitlab.com/langell/ctem-scan-target.git',
+        gitlabHost: 'gitlab.com',
         private: true,
         visibility: 'private',
       },
@@ -88,11 +89,34 @@ describe('projectToAsset', () => {
       project({
         path_with_namespace: 'acme/platform/api',
         web_url: 'https://evil.example/acme/platform/api',
+        http_url_to_repo: 'https://evil.example/acme/platform/api.git',
+        ssh_url_to_repo: 'git@evil.example:acme/platform/api.git',
       }),
     );
     expect(asset.externalKey).toBe('gitlab:acme/platform/api');
     expect(asset.attributes?.cloneUrl).toBe('https://gitlab.com/acme/platform/api.git');
+    expect(asset.attributes?.gitlabHost).toBe('gitlab.com');
     expect(String(asset.attributes?.cloneUrl)).not.toContain('evil.example');
+  });
+
+  it('synthesizes cloneUrl from the configured baseUrl host, not http_url_to_repo', () => {
+    const origin = {
+      host: 'gitlab.example.com',
+      origin: 'https://gitlab.example.com',
+      apiUrl: 'https://gitlab.example.com/api/v4',
+    };
+    const asset = projectToAsset(
+      project({
+        path_with_namespace: 'acme/platform/api',
+        web_url: 'https://evil.example/acme/platform/api',
+        http_url_to_repo: 'https://evil.example/acme/platform/api.git',
+      }),
+      origin,
+    );
+    expect(asset.attributes?.cloneUrl).toBe('https://gitlab.example.com/acme/platform/api.git');
+    expect(asset.attributes?.gitlabHost).toBe('gitlab.example.com');
+    expect(String(asset.attributes?.cloneUrl)).not.toContain('evil.example');
+    expect(String(asset.attributes?.cloneUrl)).not.toContain('gitlab.com/');
   });
 });
 
@@ -148,21 +172,104 @@ describe('GitLabConnector.discover', () => {
     expect((fetchFn.mock.calls[0][1] as RequestInit).headers).not.toHaveProperty('authorization');
   });
 
-  it('does not take a tenant-supplied host — API is hardcoded to gitlab.com', async () => {
+  it('defaults API and clone to gitlab.com when baseUrl is omitted', async () => {
+    const fetchFn = stubPages([[project()]]);
+    const assets = (await collect(new GitLabConnector().discover(ctx(userCfg())))) as Array<{
+      attributes?: { cloneUrl?: string; gitlabHost?: string };
+    }>;
+    expect(String(fetchFn.mock.calls[0][0]).startsWith('https://gitlab.com/api/v4/')).toBe(true);
+    expect(assets[0]?.attributes?.cloneUrl).toBe('https://gitlab.com/langell/ctem-scan-target.git');
+    expect(assets[0]?.attributes?.gitlabHost).toBe('gitlab.com');
+  });
+
+  it('lists and clones only the configured baseUrl host, not http_url_to_repo', async () => {
+    const fetchFn = stubPages([
+      [
+        project({
+          web_url: 'https://evil.example/langell/ctem-scan-target',
+          http_url_to_repo: 'https://evil.example/langell/ctem-scan-target.git',
+          ssh_url_to_repo: 'git@evil.example:langell/ctem-scan-target.git',
+        }),
+      ],
+    ]);
+    const assets = (await collect(
+      new GitLabConnector().discover(
+        ctx(userCfg({ baseUrl: 'https://gitlab.example.com' })),
+      ),
+    )) as Array<{ attributes?: { cloneUrl?: string; gitlabHost?: string } }>;
+    const url = String(fetchFn.mock.calls[0][0]);
+    expect(url.startsWith('https://gitlab.example.com/api/v4/')).toBe(true);
+    expect(url).toContain('/users/langell/projects');
+    expect(url).not.toContain('evil.example');
+    expect(url).not.toContain('gitlab.com/');
+    expect(assets[0]?.attributes?.cloneUrl).toBe(
+      'https://gitlab.example.com/langell/ctem-scan-target.git',
+    );
+    expect(assets[0]?.attributes?.gitlabHost).toBe('gitlab.example.com');
+  });
+
+  it('is https-only for baseUrl', async () => {
+    const fetchFn = stubPages([[]]);
+    await expect(
+      collect(new GitLabConnector().discover(ctx(userCfg({ baseUrl: 'http://gitlab.example.com' })))),
+    ).rejects.toThrow(/non-https/);
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it('rejects userinfo and git@ in baseUrl', async () => {
+    const fetchFn = stubPages([[]]);
+    await expect(
+      collect(
+        new GitLabConnector().discover(
+          ctx(userCfg({ baseUrl: 'https://user:pass@gitlab.example.com' })),
+        ),
+      ),
+    ).rejects.toThrow(/userinfo/);
+    await expect(
+      collect(
+        new GitLabConnector().discover(ctx(userCfg({ baseUrl: 'git@gitlab.example.com:acme/api.git' }))),
+      ),
+    ).rejects.toThrow(/git@/);
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it('refuses extra tenant-writable hosts — only connector baseUrl may set the host', async () => {
+    const fetchFn = stubPages([[]]);
+    await expect(
+      collect(
+        new GitLabConnector().discover(
+          ctx({
+            owner: 'langell',
+            ownerType: 'user',
+            host: 'evil.example',
+            apiUrl: 'https://evil.example/api/v4',
+          }),
+        ),
+      ),
+    ).rejects.toThrow(/tenant-writable GitLab host/);
+    await expect(
+      collect(
+        new GitLabConnector().discover(
+          ctx(userCfg({ baseUrl: 'https://gitlab.example.com', hosts: ['evil.example'] })),
+        ),
+      ),
+    ).rejects.toThrow(/tenant-writable GitLab host/);
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it('still uses the authenticated owned listing on a self-hosted host when a credential is present', async () => {
+    process.env.GITLAB_TEST_TOKEN = 'glpat-token';
     const fetchFn = stubPages([[]]);
     await collect(
       new GitLabConnector().discover(
-        ctx({
-          owner: 'langell',
-          ownerType: 'user',
-          host: 'evil.example',
-          apiUrl: 'https://evil.example/api/v4',
-        }),
+        ctx(userCfg({ baseUrl: 'https://gitlab.example.com' }), 'env:GITLAB_TEST_TOKEN'),
       ),
     );
     const url = String(fetchFn.mock.calls[0][0]);
-    expect(url.startsWith('https://gitlab.com/api/v4/')).toBe(true);
-    expect(url).not.toContain('evil.example');
+    expect(url).toBe(
+      `https://gitlab.example.com/api/v4/projects?owned=true&per_page=${GITLAB_PER_PAGE}&page=1`,
+    );
+    expect(url).not.toContain('/users/');
   });
 
   it('lists group projects (including subgroups) when ownerType is group', async () => {
@@ -282,6 +389,13 @@ describe('GitLabConnector.discover', () => {
   it('fails closed when credentialRef is set but the env var is empty', async () => {
     await expect(
       collect(new GitLabConnector().discover(ctx(userCfg(), 'env:GITLAB_TEST_TOKEN'))),
+    ).rejects.toThrow(/cannot be used/);
+    await expect(
+      collect(
+        new GitLabConnector().discover(
+          ctx(userCfg({ baseUrl: 'https://gitlab.example.com' }), 'env:GITLAB_TEST_TOKEN'),
+        ),
+      ),
     ).rejects.toThrow(/cannot be used/);
   });
 

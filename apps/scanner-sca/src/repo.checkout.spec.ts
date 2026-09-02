@@ -109,6 +109,64 @@ describe('resolveCloneUrl', () => {
     );
   });
 
+  it('clones a self-hosted GitLab origin only when gitlabHost (baseUrl) allowlists that host', () => {
+    expect(
+      resolveCloneUrl({
+        kind: 'repository',
+        externalKey: 'gitlab:acme/platform/api',
+        gitlabHost: 'gitlab.example.com',
+        cloneUrl: 'https://gitlab.example.com/acme/platform/api.git',
+      }),
+    ).toBe('https://gitlab.example.com/acme/platform/api.git');
+    expect(
+      resolveCloneUrl({
+        kind: 'repository',
+        externalKey: 'gitlab:acme/api',
+        gitlabHost: 'gitlab.example.com',
+      }),
+    ).toBe('https://gitlab.example.com/acme/api.git');
+  });
+
+  it('refuses cloneUrl on a host other than the configured gitlabHost', () => {
+    expect(() =>
+      resolveCloneUrl({
+        kind: 'repository',
+        externalKey: 'gitlab:acme/api',
+        gitlabHost: 'gitlab.example.com',
+        cloneUrl: 'https://evil.example/acme/api.git',
+      }),
+    ).toThrow(/configured GitLab host 'gitlab\.example\.com'/);
+    expect(() =>
+      resolveCloneUrl({
+        kind: 'repository',
+        externalKey: 'gitlab:acme/api',
+        gitlabHost: 'gitlab.example.com',
+        cloneUrl: 'https://gitlab.com/acme/api.git',
+      }),
+    ).toThrow(/does not match asset identity/);
+  });
+
+  it('rejects userinfo and git@ on gitlabHost', () => {
+    expect(() =>
+      resolveCloneUrl({
+        externalKey: 'gitlab:acme/api',
+        gitlabHost: 'git@gitlab.example.com:acme/api.git',
+      }),
+    ).toThrow(/git@/);
+    expect(() =>
+      resolveCloneUrl({
+        externalKey: 'gitlab:acme/api',
+        gitlabHost: 'user:pass@gitlab.example.com',
+      }),
+    ).toThrow(/userinfo/);
+    expect(() =>
+      resolveCloneUrl({
+        externalKey: 'gitlab:acme/api',
+        gitlabHost: 'http://gitlab.example.com',
+      }),
+    ).toThrow(/non-https/);
+  });
+
   it('refuses git@ GitLab URLs and tenant-writable htmlUrl', () => {
     expect(() => resolveCloneUrl({ cloneUrl: 'git@gitlab.com:acme/api.git' })).toThrow(/git@/);
     expect(() =>
@@ -187,6 +245,24 @@ describe('resolveCheckout credentials', () => {
       }),
     ).toEqual({
       url: 'https://gitlab.com/acme/api.git',
+      token: 'glpat_test',
+    });
+  });
+
+  it('uses an allowlisted GITLAB_* token for a self-hosted GitLab target', () => {
+    process.env.GITLAB_TOKEN = 'glpat_test';
+    expect(
+      resolveCheckout({
+        target: {
+          kind: 'repository',
+          externalKey: 'gitlab:acme/api',
+          gitlabHost: 'gitlab.example.com',
+          cloneUrl: 'https://gitlab.example.com/acme/api.git',
+        },
+        credentialRef: 'env:GITLAB_TOKEN',
+      }),
+    ).toEqual({
+      url: 'https://gitlab.example.com/acme/api.git',
       token: 'glpat_test',
     });
   });
@@ -271,6 +347,21 @@ describe('shallowClone', () => {
     await expect(shallowClone('https://gitlab.example.com/acme/api.git', 'main', '/tmp/w')).rejects.toThrow(
       /unsupported scheme or host/,
     );
+  });
+
+  it('clones a self-hosted GitLab origin only when that host is allowlisted', async () => {
+    const exec = vi.fn(async () => ({ stdout: '', stderr: '' }));
+    await shallowClone('https://gitlab.example.com/acme/api.git', 'main', '/tmp/work', {
+      exec: exec as never,
+      allowedHost: 'gitlab.example.com',
+    });
+    expect(exec).toHaveBeenCalled();
+    await expect(
+      shallowClone('https://evil.example/acme/api.git', 'main', '/tmp/w', {
+        exec: exec as never,
+        allowedHost: 'gitlab.example.com',
+      }),
+    ).rejects.toThrow(/unsupported scheme or host/);
   });
 
   it('refuses flag-like refs', async () => {
