@@ -17,7 +17,7 @@ describe('login has no password or PAT paste field', () => {
     expect(callback).toMatch(/completeAuthorization/);
     expect(callback).toMatch(/issued access-token JWT/);
     expect(callback).toMatch(/history\.replaceState/);
-    expect(callback).toMatch(/readStoredAccessJwt/);
+    expect(callback).toMatch(/keepSessionAfterCallbackError/);
     expect(callback).not.toMatch(/catch \(err\) \{\s*tokenStore\(\)\.clear\(\)/);
     for (const source of [login, callback]) {
       expect(source).not.toMatch(/type=["']password["']/);

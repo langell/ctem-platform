@@ -7,6 +7,7 @@ import {
   callbackUri,
   completeAuthorization,
   isJwtAccessToken,
+  keepSessionAfterCallbackError,
   OIDC_CLIENT_ID,
   OIDC_ISSUER,
   PKCE_STATE_KEY,
@@ -183,21 +184,39 @@ describe('browser OIDC login (public client + PKCE)', () => {
       }),
     ).toThrow(/org selector/);
   });
+});
+
+describe('human OIDC login path (not gateway PAT smoke)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  async function startPkce(storage: Storage): Promise<string> {
+    const href = await beginAuthorization({ origin: 'http://localhost:3000', storage });
+    const state = new URL(href).searchParams.get('state');
+    return `?code=kc-auth-code&state=${state}`;
+  }
+
+  function tokenFetch(
+    impl: (call: number) => Response | Promise<Response>,
+  ): ReturnType<typeof vi.fn<typeof fetch>> {
+    let calls = 0;
+    return vi.fn<typeof fetch>(async () => {
+      calls += 1;
+      return impl(calls);
+    });
+  }
 
   it('two completeAuthorization calls with the same code do not leave the user logged out', async () => {
     const storage = memoryStorage();
-    const href = await beginAuthorization({ origin: 'http://localhost:3000', storage });
-    const state = new URL(href).searchParams.get('state');
-    const search = `?code=kc-auth-code&state=${state}`;
+    const search = await startPkce(storage);
 
-    let tokenCalls = 0;
     let releaseFirst: ((res: Response) => void) | undefined;
     const firstToken = new Promise<Response>((resolve) => {
       releaseFirst = resolve;
     });
-    const fetchImpl = vi.fn<typeof fetch>(async () => {
-      tokenCalls += 1;
-      if (tokenCalls === 1) return firstToken;
+    const fetchImpl = tokenFetch((call) => {
+      if (call === 1) return firstToken;
       return new Response(
         JSON.stringify({ error: 'invalid_grant', error_description: 'Code not valid' }),
         { status: 400, headers: { 'content-type': 'application/json' } },
@@ -216,14 +235,6 @@ describe('browser OIDC login (public client + PKCE)', () => {
       storage,
       fetch: fetchImpl,
     });
-    // Callback also strips `code` from the URL; a remount with empty search
-    // must join the in-flight exchange instead of POSTing again.
-    const stripped = completeAuthorization({
-      search: '',
-      origin: 'http://localhost:3000',
-      storage,
-      fetch: fetchImpl,
-    });
     releaseFirst!(
       new Response(JSON.stringify({ access_token: ISSUED_JWT }), {
         status: 200,
@@ -231,26 +242,86 @@ describe('browser OIDC login (public client + PKCE)', () => {
       }),
     );
 
-    await expect(Promise.all([first, second, stripped])).resolves.toEqual([
-      ISSUED_JWT,
-      ISSUED_JWT,
-      ISSUED_JWT,
-    ]);
-    expect(readStoredAccessJwt(storage)).toBe(ISSUED_JWT);
+    await expect(Promise.all([first, second])).resolves.toEqual([ISSUED_JWT, ISSUED_JWT]);
     expect(tokenStore(storage).get()).toBe(ISSUED_JWT);
+    expect(readStoredAccessJwt(storage)).toBe(ISSUED_JWT);
+    expect(isJwtAccessToken(tokenStore(storage).get() as string)).toBe(true);
+    expect(keepSessionAfterCallbackError(storage)).toBe(true);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
 
-    // Sequential remount: PKCE is gone, a later token 400 must not log the user out.
-    const replay = await completeAuthorization({
+  it('skips a second exchange when a JWT is already stored', async () => {
+    const storage = memoryStorage();
+    const search = await startPkce(storage);
+    const fetchImpl = tokenFetch(
+      () =>
+        new Response(JSON.stringify({ access_token: ISSUED_JWT }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    );
+
+    await completeAuthorization({
       search,
       origin: 'http://localhost:3000',
       storage,
       fetch: fetchImpl,
     });
-    expect(replay).toBe(ISSUED_JWT);
-    expect(tokenStore(storage).get()).toBe(ISSUED_JWT);
-    expect(isJwtAccessToken(tokenStore(storage).get() as string)).toBe(true);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(tokenStore(storage).get()).toBe(ISSUED_JWT);
+
+    const skipped = await completeAuthorization({
+      search,
+      origin: 'http://localhost:3000',
+      storage,
+      fetch: fetchImpl,
+    });
+    expect(skipped).toBe(ISSUED_JWT);
+    expect(tokenStore(storage).get()).toBe(ISSUED_JWT);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not clear a valid JWT on a later token 400', async () => {
+    const storage = memoryStorage();
+    const search = await startPkce(storage);
+    await completeAuthorization({
+      search,
+      origin: 'http://localhost:3000',
+      storage,
+      fetch: tokenFetch(
+        () =>
+          new Response(JSON.stringify({ access_token: ISSUED_JWT }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          }),
+      ),
+    });
+    expect(tokenStore(storage).get()).toBe(ISSUED_JWT);
+
+    const replay = await startPkce(storage);
+    const fetch400 = tokenFetch(
+      () =>
+        new Response(
+          JSON.stringify({ error: 'invalid_grant', error_description: 'Code not valid' }),
+          { status: 400, headers: { 'content-type': 'application/json' } },
+        ),
+    );
+
+    await expect(
+      completeAuthorization({
+        search: replay,
+        origin: 'http://localhost:3000',
+        storage,
+        fetch: fetch400,
+      }),
+    ).resolves.toBe(ISSUED_JWT);
+    expect(fetch400).not.toHaveBeenCalled();
+    expect(tokenStore(storage).get()).toBe(ISSUED_JWT);
+
+    expect(keepSessionAfterCallbackError(storage)).toBe(true);
+    if (!keepSessionAfterCallbackError(storage)) tokenStore(storage).clear();
+    expect(tokenStore(storage).get()).toBe(ISSUED_JWT);
+    expect(isPatToken(tokenStore(storage).get() as string)).toBe(false);
   });
 });
 
@@ -276,7 +347,7 @@ describe('login UI has no password field and no PAT in sessionStorage', () => {
     expect(callback).toMatch(/completeAuthorization/);
     expect(callback).toMatch(/issued access-token JWT/);
     expect(callback).toMatch(/history\.replaceState/);
-    expect(callback).toMatch(/readStoredAccessJwt/);
+    expect(callback).toMatch(/keepSessionAfterCallbackError/);
     expect(callback).not.toMatch(/catch \(err\) \{\s*tokenStore\(\)\.clear\(\)/);
     expect(app).toMatch(/path="\/login\/callback"/);
   });

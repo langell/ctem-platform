@@ -98,6 +98,13 @@ export function readStoredAccessJwt(
   return value;
 }
 
+/** A later token 400 (Strict Mode remount) must not wipe a JWT already stored. */
+export function keepSessionAfterCallbackError(
+  storage: Storage | undefined = defaultStorage(),
+): boolean {
+  return readStoredAccessJwt(storage) !== null;
+}
+
 /**
  * Exchange the Keycloak authorization code for the issued access-token JWT
  * and persist that JWT as the gateway session. Refuses a PAT in every case.

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { gatewayFetch, GatewayError, tokenStore } from '../api/client';
 import type { Session } from '../api/types';
-import { completeAuthorization, readStoredAccessJwt } from '../auth/oidc';
+import { completeAuthorization, keepSessionAfterCallbackError } from '../auth/oidc';
 
 /**
  * OIDC redirect target. Stores the issued access-token JWT and confirms the
@@ -36,8 +36,7 @@ export function CallbackPage() {
         if (!cancelled) navigate('/findings', { replace: true });
       } catch (err) {
         if (cancelled) return;
-        const kept = readStoredAccessJwt();
-        if (kept) {
+        if (keepSessionAfterCallbackError()) {
           navigate('/findings', { replace: true });
           return;
         }
