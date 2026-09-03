@@ -27,6 +27,17 @@ export class FindingNormalizer {
    * key — a monorepo must not mint two tickets for the same CVE.
    */
   fingerprint(assetId: string, finding: RawFinding): string {
+    // IaC identity is (asset, iac, rule, path, resource address). Two buckets
+    // in one file must not collapse, and this key must not collide with SCA
+    // (asset, sca, vuln, purl) or SAST (asset, sast, id, path).
+    if (finding.scannerType === 'iac') {
+      const ruleId =
+        finding.identifiers.find((i) => i.system.toLowerCase() === 'rule')?.value ?? finding.externalId;
+      return createHash('sha256')
+        .update([assetId, 'iac', ruleId, finding.location.path ?? '', finding.location.resource ?? ''].join('|'))
+        .digest('hex');
+    }
+
     const parts: string[] = [assetId, finding.scannerType];
 
     const cve = finding.identifiers.find((i) => /^(cve|ghsa|osv)$/i.test(i.system));
@@ -42,7 +53,6 @@ export class FindingNormalizer {
         parts.push(finding.location.purl ?? `${finding.location.packageName}@${finding.location.packageVersion}`);
         break;
       case 'sast':
-      case 'iac':
       case 'secrets':
         parts.push(finding.location.path ?? '');
         break;

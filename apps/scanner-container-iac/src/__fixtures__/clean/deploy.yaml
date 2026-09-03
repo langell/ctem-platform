@@ -1,0 +1,16 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+spec:
+  template:
+    spec:
+      containers:
+        - name: app
+          image: nginx
+          resources:
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          securityContext:
+            privileged: false

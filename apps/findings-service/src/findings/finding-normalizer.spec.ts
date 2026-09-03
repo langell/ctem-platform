@@ -85,6 +85,63 @@ describe('FindingNormalizer.fingerprint', () => {
     expect(sastFp).not.toBe(scaFp);
   });
 
+  it('keeps two IaC resources in one file as distinct fingerprints (rule + path + address)', () => {
+    const bucketA = raw({
+      scannerType: 'iac',
+      scannerName: 'ctem-iac',
+      externalId: 'ctem.iac.s3-public:s3.tf:aws_s3_bucket.logs',
+      identifiers: [{ system: 'rule', value: 'ctem.iac.s3-public' }],
+      location: { path: 's3.tf', resource: 'aws_s3_bucket.logs' },
+    });
+    const bucketB = raw({
+      scannerType: 'iac',
+      scannerName: 'ctem-iac',
+      externalId: 'ctem.iac.s3-public:s3.tf:aws_s3_bucket.assets',
+      identifiers: [{ system: 'rule', value: 'ctem.iac.s3-public' }],
+      location: { path: 's3.tf', resource: 'aws_s3_bucket.assets' },
+    });
+    const fpA = normalizer.fingerprint('asset-1', bucketA);
+    const fpB = normalizer.fingerprint('asset-1', bucketB);
+    expect(fpA).toBe(
+      createHash('sha256')
+        .update(['asset-1', 'iac', 'ctem.iac.s3-public', 's3.tf', 'aws_s3_bucket.logs'].join('|'))
+        .digest('hex'),
+    );
+    expect(fpA).not.toBe(fpB);
+    expect(normalizer.collapseScan('asset-1', [bucketA, bucketB])).toHaveLength(2);
+  });
+
+  it('does not collide an IaC fingerprint with SCA (asset, sca, vuln, purl) or SAST', () => {
+    const sca = raw({
+      scannerType: 'sca',
+      identifiers: [{ system: 'CVE', value: 'CVE-2024-0001' }],
+      location: { purl: 'pkg:npm/express@4.17.1' },
+    });
+    const sast = raw({
+      scannerType: 'sast',
+      externalId: 'ctem.iac.s3-public',
+      identifiers: [{ system: 'rule', value: 'ctem.iac.s3-public' }],
+      location: { path: 's3.tf', resource: 'aws_s3_bucket.logs' },
+    });
+    const iac = raw({
+      scannerType: 'iac',
+      externalId: 'ctem.iac.s3-public',
+      identifiers: [{ system: 'rule', value: 'ctem.iac.s3-public' }],
+      location: { path: 's3.tf', resource: 'aws_s3_bucket.logs', purl: 'pkg:npm/express@4.17.1' },
+    });
+    const scaFp = normalizer.fingerprint('asset-1', sca);
+    const sastFp = normalizer.fingerprint('asset-1', sast);
+    const iacFp = normalizer.fingerprint('asset-1', iac);
+    expect(scaFp).toBe(
+      createHash('sha256')
+        .update(['asset-1', 'sca', 'CVE-2024-0001', 'pkg:npm/express@4.17.1'].join('|'))
+        .digest('hex'),
+    );
+    expect(iacFp).not.toBe(scaFp);
+    expect(iacFp).not.toBe(sastFp);
+    expect(sastFp).not.toBe(scaFp);
+  });
+
   it('ignores line numbers for code findings so a diff above the match is not a new finding', () => {
     const base = raw({
       scannerType: 'sast',
