@@ -4,6 +4,7 @@ import {
   requireAwsCredentials,
   requireAzureCredentials,
   requireGcpCredentials,
+  requireGithubToken,
   resolveCredential,
 } from './credentials';
 
@@ -78,6 +79,32 @@ describe('resolveCredential', () => {
 
   it('rejects an unsupported scheme', () => {
     expect(() => resolveCredential('vault:gh')).toThrow(/Unsupported credentialRef scheme/);
+  });
+});
+
+describe('requireGithubToken', () => {
+  it('fails closed when credentialRef is missing', () => {
+    expect(() => requireGithubToken(null)).toThrow(/env:GITHUB_\*/);
+  });
+
+  it('fails closed when the pointed GITHUB_* env var is empty', () => {
+    expect(() => requireGithubToken('env:GITHUB_TOKEN')).toThrow(/cannot be used/);
+  });
+
+  it('refuses an AWS_* ref even when a GITHUB_TOKEN is present', () => {
+    process.env.GITHUB_TOKEN = 'ghp_test';
+    process.env.AWS_ACCESS_KEY_ID = 'AKIATEST';
+    expect(() => requireGithubToken('env:AWS_ACCESS_KEY_ID')).toThrow(/env:GITHUB_\*/);
+  });
+
+  it('refuses env:DATABASE_URL without reading the secret', () => {
+    process.env.DATABASE_URL = 'postgres://should-not-leak';
+    expect(() => requireGithubToken('env:DATABASE_URL')).toThrow(/not allowlisted/);
+  });
+
+  it('returns the token when the ref points at a usable GITHUB_* name', () => {
+    process.env.GITHUB_TOKEN = 'ghp_test';
+    expect(requireGithubToken('env:GITHUB_TOKEN')).toBe('ghp_test');
   });
 });
 

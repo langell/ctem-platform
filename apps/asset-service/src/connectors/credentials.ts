@@ -40,6 +40,43 @@ export function resolveCredential(ref: string | null): string | undefined {
   );
 }
 
+const GITHUB_ENV_NAME = /^GITHUB_[A-Z0-9_]+$/;
+
+/**
+ * GHCR discovery has no unauthenticated public path. The integration pointer
+ * must be `env:GITHUB_*` (reuse the existing allowlist — not `GHCR_*`), and
+ * the pointed token must be usable. A missing token must not list public
+ * packages and report empty success (that would archiveStale unseen digests).
+ */
+export function requireGithubToken(credentialRef: string | null): string {
+  if (!credentialRef) {
+    throw new Error(
+      'GHCR discovery requires a usable credentialRef (env:GITHUB_*) — refusing unauthenticated listing',
+    );
+  }
+
+  const sep = credentialRef.indexOf(':');
+  const scheme = sep === -1 ? credentialRef : credentialRef.slice(0, sep);
+  const key = sep === -1 ? '' : credentialRef.slice(sep + 1);
+  if (scheme !== 'env' || !key || !GITHUB_ENV_NAME.test(key)) {
+    // Non-allowlisted names throw here without reading the secret (DATABASE_URL).
+    // Allowlisted-but-not-GITHUB names (AWS_*, GITLAB_*) are refused after that check.
+    resolveCredential(credentialRef);
+    throw new Error(
+      `credentialRef '${credentialRef}' is not an env:GITHUB_* pointer — GHCR discovery only accepts platform-operated GITHUB_* names`,
+    );
+  }
+
+  const token = resolveCredential(credentialRef);
+  if (!token || !token.trim()) {
+    throw new Error(
+      `credentialRef '${credentialRef}' is set but cannot be used — refusing to list without usable GITHUB_* credentials`,
+    );
+  }
+
+  return token.trim();
+}
+
 export interface AwsCredentials {
   accessKeyId: string;
   secretAccessKey: string;
