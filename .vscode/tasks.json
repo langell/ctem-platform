@@ -1,0 +1,16 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      // Keeps dist/ fresh while debugging. Skip this if dev.sh is already
+      // running — it starts the same watcher, and two of them race on
+      // .tsbuildinfo.
+      "label": "tsc: watch (workspace)",
+      "type": "shell",
+      "command": "pnpm exec tsc -b tsconfig.build.json --watch --preserveWatchOutput",
+      "isBackground": true,
+      "problemMatcher": "$tsc-watch",
+      "presentation": { "reveal": "silent", "panel": "dedicated" }
+    }
+  ]
+}

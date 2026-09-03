@@ -1,0 +1,222 @@
+{
+  // Debug configs for the CTEM Nest services. Each launches the compiled
+  // dist/main.js under the debugger with --watch, so js-debug re-attaches
+  // automatically when tsc rebuilds and node restarts the process.
+  //
+  // Keep `tsc -b tsconfig.build.json --watch` running (dev.sh does this, or
+  // run the "tsc: watch (workspace)" task) so dist/ stays fresh.
+  //
+  // Do NOT add a PORT env var here — bootstrapService lets PORT override the
+  // per-service port, so a shared PORT would make every service bind the same one.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "API Gateway (3000)",
+      "program": "${workspaceFolder}/apps/api-gateway/dist/main.js",
+      "cwd": "${workspaceFolder}/apps/api-gateway",
+      "runtimeArgs": ["--enable-source-maps", "--watch"],
+      "envFile": "${workspaceFolder}/.env",
+      "outFiles": [
+        "${workspaceFolder}/apps/*/dist/**/*.js",
+        "${workspaceFolder}/libs/*/dist/**/*.js"
+      ],
+      "console": "integratedTerminal",
+      "presentation": { "group": "1-core", "order": 1 }
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Identity Service (3001)",
+      "program": "${workspaceFolder}/apps/identity-service/dist/main.js",
+      "cwd": "${workspaceFolder}/apps/identity-service",
+      "runtimeArgs": ["--enable-source-maps", "--watch"],
+      "envFile": "${workspaceFolder}/.env",
+      "outFiles": [
+        "${workspaceFolder}/apps/*/dist/**/*.js",
+        "${workspaceFolder}/libs/*/dist/**/*.js"
+      ],
+      "console": "integratedTerminal",
+      "presentation": { "group": "1-core", "order": 2 }
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Asset Service (3002)",
+      "program": "${workspaceFolder}/apps/asset-service/dist/main.js",
+      "cwd": "${workspaceFolder}/apps/asset-service",
+      "runtimeArgs": ["--enable-source-maps", "--watch"],
+      "envFile": "${workspaceFolder}/.env",
+      "outFiles": [
+        "${workspaceFolder}/apps/*/dist/**/*.js",
+        "${workspaceFolder}/libs/*/dist/**/*.js"
+      ],
+      "console": "integratedTerminal",
+      "presentation": { "group": "1-core", "order": 3 }
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Orchestrator Service (3003)",
+      "program": "${workspaceFolder}/apps/orchestrator-service/dist/main.js",
+      "cwd": "${workspaceFolder}/apps/orchestrator-service",
+      "runtimeArgs": ["--enable-source-maps", "--watch"],
+      "envFile": "${workspaceFolder}/.env",
+      "outFiles": [
+        "${workspaceFolder}/apps/*/dist/**/*.js",
+        "${workspaceFolder}/libs/*/dist/**/*.js"
+      ],
+      "console": "integratedTerminal",
+      "presentation": { "group": "1-core", "order": 4 }
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Findings Service (3004)",
+      "program": "${workspaceFolder}/apps/findings-service/dist/main.js",
+      "cwd": "${workspaceFolder}/apps/findings-service",
+      "runtimeArgs": ["--enable-source-maps", "--watch"],
+      "envFile": "${workspaceFolder}/.env",
+      "outFiles": [
+        "${workspaceFolder}/apps/*/dist/**/*.js",
+        "${workspaceFolder}/libs/*/dist/**/*.js"
+      ],
+      "console": "integratedTerminal",
+      "presentation": { "group": "1-core", "order": 5 }
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Risk Service (3005)",
+      "program": "${workspaceFolder}/apps/risk-service/dist/main.js",
+      "cwd": "${workspaceFolder}/apps/risk-service",
+      "runtimeArgs": ["--enable-source-maps", "--watch"],
+      "envFile": "${workspaceFolder}/.env",
+      "outFiles": [
+        "${workspaceFolder}/apps/*/dist/**/*.js",
+        "${workspaceFolder}/libs/*/dist/**/*.js"
+      ],
+      "console": "integratedTerminal",
+      "presentation": { "group": "1-core", "order": 6 }
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Reporting Service (3006)",
+      "program": "${workspaceFolder}/apps/reporting-service/dist/main.js",
+      "cwd": "${workspaceFolder}/apps/reporting-service",
+      "runtimeArgs": ["--enable-source-maps", "--watch"],
+      "envFile": "${workspaceFolder}/.env",
+      "outFiles": [
+        "${workspaceFolder}/apps/*/dist/**/*.js",
+        "${workspaceFolder}/libs/*/dist/**/*.js"
+      ],
+      "console": "integratedTerminal",
+      "presentation": { "group": "1-core", "order": 7 }
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Notification Service (3007)",
+      "program": "${workspaceFolder}/apps/notification-service/dist/main.js",
+      "cwd": "${workspaceFolder}/apps/notification-service",
+      "runtimeArgs": ["--enable-source-maps", "--watch"],
+      "envFile": "${workspaceFolder}/.env",
+      "outFiles": [
+        "${workspaceFolder}/apps/*/dist/**/*.js",
+        "${workspaceFolder}/libs/*/dist/**/*.js"
+      ],
+      "console": "integratedTerminal",
+      "presentation": { "group": "1-core", "order": 8 }
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Scanner: SCA (3100)",
+      "program": "${workspaceFolder}/apps/scanner-sca/dist/main.js",
+      "cwd": "${workspaceFolder}/apps/scanner-sca",
+      "runtimeArgs": ["--enable-source-maps", "--watch"],
+      "envFile": "${workspaceFolder}/.env",
+      "outFiles": [
+        "${workspaceFolder}/apps/*/dist/**/*.js",
+        "${workspaceFolder}/libs/*/dist/**/*.js"
+      ],
+      "console": "integratedTerminal",
+      "presentation": { "group": "2-scanners", "order": 1 }
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Scanner: SAST (3101)",
+      "program": "${workspaceFolder}/apps/scanner-sast/dist/main.js",
+      "cwd": "${workspaceFolder}/apps/scanner-sast",
+      "runtimeArgs": ["--enable-source-maps", "--watch"],
+      "envFile": "${workspaceFolder}/.env",
+      "outFiles": [
+        "${workspaceFolder}/apps/*/dist/**/*.js",
+        "${workspaceFolder}/libs/*/dist/**/*.js"
+      ],
+      "console": "integratedTerminal",
+      "presentation": { "group": "2-scanners", "order": 2 }
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Scanner: Container/IaC (3102)",
+      "program": "${workspaceFolder}/apps/scanner-container-iac/dist/main.js",
+      "cwd": "${workspaceFolder}/apps/scanner-container-iac",
+      "runtimeArgs": ["--enable-source-maps", "--watch"],
+      "envFile": "${workspaceFolder}/.env",
+      "outFiles": [
+        "${workspaceFolder}/apps/*/dist/**/*.js",
+        "${workspaceFolder}/libs/*/dist/**/*.js"
+      ],
+      "console": "integratedTerminal",
+      "presentation": { "group": "2-scanners", "order": 3 }
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Scanner: ASM (3103)",
+      "program": "${workspaceFolder}/apps/scanner-asm/dist/main.js",
+      "cwd": "${workspaceFolder}/apps/scanner-asm",
+      "runtimeArgs": ["--enable-source-maps", "--watch"],
+      "envFile": "${workspaceFolder}/.env",
+      "outFiles": [
+        "${workspaceFolder}/apps/*/dist/**/*.js",
+        "${workspaceFolder}/libs/*/dist/**/*.js"
+      ],
+      "console": "integratedTerminal",
+      "presentation": { "group": "2-scanners", "order": 4 }
+    }
+  ],
+  "compounds": [
+    {
+      "name": "All core services (3000–3007)",
+      "configurations": [
+        "API Gateway (3000)",
+        "Identity Service (3001)",
+        "Asset Service (3002)",
+        "Orchestrator Service (3003)",
+        "Findings Service (3004)",
+        "Risk Service (3005)",
+        "Reporting Service (3006)",
+        "Notification Service (3007)"
+      ],
+      "stopAll": true,
+      "presentation": { "group": "0-compound", "order": 1 }
+    },
+    {
+      "name": "All scanners (3100–3103)",
+      "configurations": [
+        "Scanner: SCA (3100)",
+        "Scanner: SAST (3101)",
+        "Scanner: Container/IaC (3102)",
+        "Scanner: ASM (3103)"
+      ],
+      "stopAll": true,
+      "presentation": { "group": "0-compound", "order": 2 }
+    }
+  ]
+}
