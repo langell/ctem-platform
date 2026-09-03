@@ -13,6 +13,7 @@
     "port": 3102
   },
   "dependencies": {
+    "yaml": "^2.8.1",
     "@nestjs/common": "^11.0.0",
     "@types/express": "^5.0.0",
     "zod": "^3.24.1",

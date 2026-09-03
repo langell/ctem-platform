@@ -13,6 +13,9 @@ export interface MisconfigRule {
 /**
  * Starter rule pack for infrastructure misconfiguration. These are the findings
  * that show up in every cloud breach post-mortem, which is why they lead.
+ *
+ * Built-in only: tenant-supplied scripts, YAML packs, Checkov/tfsec configs, or
+ * terraform/helm/kubectl/docker CLI invocations are never loaded or executed.
  */
 @Injectable()
 export class MisconfigRules {
