@@ -66,16 +66,12 @@ describe('IacAnalyzer', () => {
     await expect(analyzer.analyze(CLEAN, () => false)).rejects.toThrow(/deadline/);
   });
 
-  it('marks leftover truncated on a per-file parse failure next to a parsed file', async () => {
+  it('fails the job when any detected IaC file is unparsed, even if another *.tf parsed', async () => {
     const workDir = await repo({
       'ok.tf': 'resource "aws_s3_bucket" "ok" {\n  bucket = "ok"\n  acl = "private"\n  server_side_encryption_configuration {\n    rule {\n      apply_server_side_encryption_by_default {\n        sse_algorithm = "aws:kms"\n      }\n    }\n  }\n}\n',
       'bad.tf': 'resource "aws_s3_bucket" "x" {\n  acl =\n',
     });
-    const analysis = await analyzer.analyze(workDir);
-    expect(analysis.parsed).toBe(1);
-    expect(analysis.detected).toBe(2);
-    expect(analysis.truncated).toBe(true);
-    expect(analysis.files).toEqual(['ok.tf']);
+    await expect(analyzer.analyze(workDir)).rejects.toThrow(/failed to parse 'bad\.tf'/);
   });
 });
 

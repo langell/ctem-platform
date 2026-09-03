@@ -42,9 +42,10 @@ export interface IacAnalyzerPort {
 
 /**
  * Walks a checked-out workDir, parses IaC files in-process, and evaluates the
- * built-in MisconfigRules pack. Crash, timeout, empty workDir, or every
- * detected IaC file unparsed must throw — never `{ findings: [] }` as success.
- * A repo with no IaC files is a legitimate empty success after the walk.
+ * built-in MisconfigRules pack. Crash, timeout, empty workDir, or any
+ * detected IaC file that fails to parse must throw — never a partial success
+ * that findings-service could auto-resolve from. A repo with no IaC files is
+ * a legitimate empty success after the walk.
  */
 @Injectable()
 export class IacAnalyzer implements IacAnalyzerPort {
@@ -58,9 +59,10 @@ export class IacAnalyzer implements IacAnalyzerPort {
 
     const files = await listRepoFiles(workDir);
     const chartRoots = helmChartRoots(files);
-    let truncated = files.length >= MAX_WALK_FILES;
+    const truncated = files.length >= MAX_WALK_FILES;
     const matches: IacMatch[] = [];
     const parsedFiles: string[] = [];
+    const parseFailures: string[] = [];
     let detected = 0;
     let parsed = 0;
 
@@ -77,18 +79,19 @@ export class IacAnalyzer implements IacAnalyzerPort {
         const size = (await stat(file.absPath)).size;
         if (size > MAX_IAC_BYTES) {
           if (namedKind) {
-            detected += 1;
-            truncated = true;
-            log.warn({ file: file.relPath, size }, 'skipping oversized IaC file');
+            throw new IacAnalysisError(
+              `IaC analyzer failed to parse '${file.relPath}' (${size} bytes over cap) — refusing incomplete success`,
+            );
           }
           continue;
         }
         content = await readFile(file.absPath, 'utf8');
       } catch (err) {
+        if (err instanceof IacAnalysisError) throw err;
         if (namedKind) {
-          detected += 1;
-          truncated = true;
-          log.warn({ err, file: file.relPath }, 'IaC file unreadable');
+          throw new IacAnalysisError(
+            `IaC analyzer failed to parse '${file.relPath}': ${err instanceof Error ? err.message : String(err)} — refusing incomplete success`,
+          );
         }
         continue;
       }
@@ -97,8 +100,8 @@ export class IacAnalyzer implements IacAnalyzerPort {
       if (!result) continue;
       detected += 1;
       if (!result.ok) {
-        truncated = true;
         log.warn({ file: file.relPath, error: result.error }, 'IaC parse failed');
+        parseFailures.push(file.relPath);
         continue;
       }
       parsed += 1;
@@ -108,9 +111,14 @@ export class IacAnalyzer implements IacAnalyzerPort {
       }
     }
 
-    if (detected > 0 && parsed === 0) {
+    if (parseFailures.length) {
+      if (parsed === 0) {
+        throw new IacAnalysisError(
+          `IaC analyzer parsed none of ${detected} detected IaC files (${parseFailures.join(', ')}) — refusing empty success`,
+        );
+      }
       throw new IacAnalysisError(
-        `IaC analyzer parsed none of ${detected} detected IaC files — refusing empty success`,
+        `IaC analyzer failed to parse ${parseFailures.map((p) => `'${p}'`).join(', ')} after ${parsed} parsed file(s) — refusing incomplete success`,
       );
     }
 

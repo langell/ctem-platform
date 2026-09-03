@@ -31,9 +31,10 @@ export const TENANT_IAC_OPTION_KEYS = [
  *
  * Checkout uses the shared fail-closed allowlist. Analysis is in-process over
  * workDir files only (Terraform HCL, CloudFormation, k8s manifests, Helm
- * templates, Dockerfiles) with the built-in MisconfigRules pack. Findings hang
- * on the scanned repository / iac_stack — this scanner does not mint or link
- * cloud_resource assets from HCL.
+ * templates, Dockerfiles) with the built-in MisconfigRules pack. Any detected
+ * file that fails to parse fails the job — a partial inventory must not
+ * complete. Findings hang on the scanned repository / iac_stack — this scanner
+ * does not mint or link cloud_resource assets from HCL.
  */
 @Injectable()
 export class IacScanner extends BaseScanner {

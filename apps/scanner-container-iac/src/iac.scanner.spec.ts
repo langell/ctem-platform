@@ -174,6 +174,20 @@ describe('IacScanner.execute', () => {
     ).rejects.toThrow(/parsed none/);
   });
 
+  it('fails the job on a mixed repo (one valid *.tf + one unparsed *.tf) and does not return partial findings', async () => {
+    const workDir = await mkdtemp(join(tmpdir(), 'ctem-iac-mixed-'));
+    await writeFile(
+      join(workDir, 'ok.tf'),
+      'resource "aws_s3_bucket" "ok" {\n  bucket = "ok"\n  acl = "public-read"\n}\n',
+    );
+    await writeFile(join(workDir, 'bad.tf'), 'resource "aws_s3_bucket" "x" {\n  acl =\n');
+    const checkout = { checkout: vi.fn(async () => undefined) };
+    await expect(
+      scanner(checkout).execute(ctx({ target: { kind: 'repository', externalKey: 'github:acme/app' } }, workDir)),
+    ).rejects.toThrow(/failed to parse 'bad\.tf'/);
+    expect(checkout.checkout).toHaveBeenCalledOnce();
+  });
+
   it('fails the job when analysis crashes instead of succeeding with findings:[]', async () => {
     const checkout = { checkout: vi.fn(async () => undefined) };
     const analyzer = {
