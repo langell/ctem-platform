@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { gatewayFetch, GatewayError } from '../api/client';
 import type { Asset, Page } from '../api/types';
-import { exposureBadgeClass, humanize } from '../ui/display';
+import { exposureBadgeClass, humanize, severityBadgeClass } from '../ui/display';
 import { SkeletonRows } from '../ui/SkeletonRows';
 
 export function AssetsPage() {
@@ -21,6 +21,7 @@ export function AssetsPage() {
   return (
     <section>
       <h1>Assets</h1>
+      {!loading && !error ? <p className="muted count">{items.length} assets</p> : null}
       {error ? <p className="banner error">{error}</p> : null}
       <table>
         <thead>
@@ -46,21 +47,22 @@ export function AssetsPage() {
                 <td>{humanize(a.kind)}</td>
                 <td>{humanize(a.source)}</td>
                 <td>
-                  {a.exposure === 'internet_facing' ? (
-                    <span className={exposureBadgeClass(a.exposure)}>{humanize(a.exposure)}</span>
-                  ) : (
-                    humanize(a.exposure)
-                  )}
+                  <span className={exposureBadgeClass(a.exposure)}>{humanize(a.exposure)}</span>
                 </td>
-                <td>{humanize(a.criticality)}</td>
+                <td>
+                  <span className={severityBadgeClass(a.criticality)}>
+                    {humanize(a.criticality)}
+                  </span>
+                </td>
                 <td>{a.ownerTeam ?? '—'}</td>
               </tr>
             ))
           )}
           {!loading && !error && items.length === 0 ? (
             <tr>
-              <td colSpan={6} className="muted">
-                No assets in this organization.
+              <td colSpan={6}>
+                <div className="empty-title">No assets in this organization</div>
+                <p className="muted empty-copy">Discovery connectors fill this list.</p>
               </td>
             </tr>
           ) : null}

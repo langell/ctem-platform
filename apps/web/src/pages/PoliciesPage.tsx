@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { gatewayFetch, GatewayError } from '../api/client';
 import { SEVERITIES, type Policy, type PolicyWrite, type Session } from '../api/types';
+import { humanize } from '../ui/display';
 import { SkeletonRows } from '../ui/SkeletonRows';
 import { actionSelectValue, actionsFromSelect, editorActionsFromPolicy } from './policy-actions';
 
@@ -118,12 +119,8 @@ export function PoliciesPage() {
   return (
     <section>
       <h1>Policies</h1>
-      <p className="muted">
-        Ordered notify, ticket, or fail-build rules for the organization on the token.
-        Lower priority runs first; the first match wins. Notify goes to Slack; ticket
-        goes to Jira; fail-build is the CI scan conclusion on GET — not a GitHub Check.
-        This client never sends an org id, a webhook/Jira URL, or a scan conclusion.
-      </p>
+      <p className="lede">Ordered rules. Lower priority runs first; the first match wins.</p>
+      {!loading && !error ? <p className="muted count">{items.length} rules</p> : null}
       {error ? <p className="banner error">{error}</p> : null}
 
       <table>
@@ -142,18 +139,27 @@ export function PoliciesPage() {
             <SkeletonRows columns={canWrite ? 6 : 5} />
           ) : (
             items.map((p, index) => (
-              <tr key={p.id}>
+              <tr key={p.id} className={editingId === p.id ? 'editing' : undefined}>
                 <td>{p.priority}</td>
                 <td>
                   <strong>{p.name}</strong>
                   {p.description ? <div className="muted small">{p.description}</div> : null}
                 </td>
                 <td>{conditionSummary(p.condition)}</td>
-                <td>{p.enabled ? 'yes' : 'no'}</td>
-                <td>{p.actions.join(', ')}</td>
+                <td>
+                  <span className={p.enabled ? 'badge badge-ok' : 'badge badge-muted'}>
+                    {p.enabled ? 'Enabled' : 'Disabled'}
+                  </span>
+                </td>
+                <td>{p.actions.map(humanize).join(', ')}</td>
                 {canWrite ? (
                   <td>
-                    <button type="button" className="link" disabled={busy || index === 0} onClick={() => void move(p, -1)}>
+                    <button
+                      type="button"
+                      className="link"
+                      disabled={busy || index === 0}
+                      onClick={() => void move(p, -1)}
+                    >
                       Up
                     </button>{' '}
                     <button
@@ -181,8 +187,11 @@ export function PoliciesPage() {
           )}
           {!loading && items.length === 0 && !error ? (
             <tr>
-              <td colSpan={canWrite ? 6 : 5} className="muted">
-                No policies in this organization.
+              <td colSpan={canWrite ? 6 : 5}>
+                <div className="empty-title">No rules yet</div>
+                <p className="muted empty-copy">
+                  Create a rule to notify, ticket, or fail a build.
+                </p>
               </td>
             </tr>
           ) : null}
@@ -230,7 +239,8 @@ export function PoliciesPage() {
               value={draft.condition.severityAtLeast ?? ''}
               onChange={(e) =>
                 setCondition({
-                  severityAtLeast: (e.target.value || undefined) as Policy['condition']['severityAtLeast'],
+                  severityAtLeast: (e.target.value ||
+                    undefined) as Policy['condition']['severityAtLeast'],
                 })
               }
             >
@@ -268,7 +278,9 @@ export function PoliciesPage() {
             Action
             <select
               value={actionSelectValue(draft.actions)}
-              onChange={(e) => setDraft((c) => ({ ...c, actions: actionsFromSelect(e.target.value) }))}
+              onChange={(e) =>
+                setDraft((c) => ({ ...c, actions: actionsFromSelect(e.target.value) }))
+              }
             >
               <option value="notify">Notify (Slack)</option>
               <option value="ticket">Ticket (Jira)</option>
@@ -283,21 +295,23 @@ export function PoliciesPage() {
             block-deploy and tenant webhook/Jira URLs are out of this slice. Slack still cannot
             ticket. CI reads conclusion from GET /v1/scans/:id — this form cannot POST it.
           </p>
-          {editingId ? (
-            <button
-              type="button"
-              className="link"
-              onClick={() => {
-                setEditingId(null);
-                setDraft(emptyDraft());
-              }}
-            >
-              Cancel edit
+          <div className="form-actions">
+            {editingId ? (
+              <button
+                type="button"
+                className="link"
+                onClick={() => {
+                  setEditingId(null);
+                  setDraft(emptyDraft());
+                }}
+              >
+                Cancel edit
+              </button>
+            ) : null}
+            <button type="submit" disabled={busy}>
+              {busy ? 'Saving…' : editingId ? 'Update rule' : 'Create rule'}
             </button>
-          ) : null}
-          <button type="submit" disabled={busy}>
-            {busy ? 'Saving…' : editingId ? 'Update rule' : 'Create rule'}
-          </button>
+          </div>
         </form>
       ) : (
         <p className="muted">This role can read policies. Writing requires policy:write.</p>

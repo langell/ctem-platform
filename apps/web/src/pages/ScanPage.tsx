@@ -1,6 +1,7 @@
 import { FormEvent, useState } from 'react';
 import { gatewayFetch, GatewayError } from '../api/client';
 import { SCANNER_TYPES, type Scan, type ScannerType } from '../api/types';
+import { humanize } from '../ui/display';
 
 export function ScanPage() {
   const [scannerType, setScannerType] = useState<ScannerType>('sca');
@@ -37,10 +38,9 @@ export function ScanPage() {
 
   return (
     <section>
-      <h1>Kick a scan</h1>
-      <p className="muted">
-        Dispatches <code>POST /v1/scans</code> for the organization on the token. An empty
-        selector means every in-scope asset.
+      <h1>Scan</h1>
+      <p className="lede">
+        Start a scan for this organization. Leave asset IDs empty to include every in-scope asset.
       </p>
       <form className="card" onSubmit={onSubmit}>
         <label>
@@ -51,7 +51,7 @@ export function ScanPage() {
           >
             {SCANNER_TYPES.map((t) => (
               <option key={t} value={t}>
-                {t}
+                {humanize(t)}
               </option>
             ))}
           </select>
@@ -64,16 +64,20 @@ export function ScanPage() {
             placeholder="uuid, uuid"
           />
         </label>
-        {error ? <p className="error">{error}</p> : null}
+        {error ? <p className="banner error">{error}</p> : null}
         <button type="submit" disabled={busy}>
           {busy ? 'Starting…' : 'Start scan'}
         </button>
       </form>
       {result ? (
         <article className="card">
-          <h2>Scan queued</h2>
+          <h2>{humanize(result.status)}</h2>
           <p>
-            <code>{result.id}</code> · {result.scannerType} · {result.status}
+            <span className="badge badge-muted">{humanize(result.scannerType)}</span>{' '}
+            <span className="badge badge-muted">{humanize(result.status)}</span>
+          </p>
+          <p className="small muted">
+            <code>{result.id}</code>
           </p>
         </article>
       ) : null}

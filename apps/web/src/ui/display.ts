@@ -1,7 +1,10 @@
-/** Presentational helpers for the Designer's first-pass UI spec. No scoring. */
+/** Presentational helpers for the Designer UI spec. No scoring. */
 
+/** Title-case a snake_case token: not_validated -> Not validated. */
 export function humanize(value: string): string {
-  return value.replace(/_/g, ' ');
+  const spaced = value.replace(/_/g, ' ');
+  if (!spaced) return spaced;
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
 export type ScoreBand = 'high' | 'mid' | 'low';

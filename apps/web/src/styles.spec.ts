@@ -37,6 +37,10 @@ describe("Designer's first-pass UI tokens", () => {
     expect(css).toMatch(/font-size:\s*14px/);
     expect(css).toMatch(/font-size:\s*13px/);
     expect(css).toMatch(/font-size:\s*11px/);
+    expect(css).toMatch(/\.badge-ok\s*\{/);
+    expect(css).toMatch(/\.form-actions\s*\{/);
+    expect(css).toMatch(/tr\.editing/);
+    expect(css).toMatch(/inset 2px 0 0 var\(--accent\)/);
   });
 
   it('loads IBM Plex Sans instead of naming a missing font', () => {
