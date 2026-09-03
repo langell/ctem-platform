@@ -44,14 +44,7 @@ export function Layout() {
           <NavLink to="/policies">Policies</NavLink>
         </nav>
         <div className="session">
-          {session ? (
-            <span title="Organization is taken from the JWT, not from this client">
-              {session.role}
-              <span className="muted"> · org {session.orgId.slice(0, 8)}</span>
-            </span>
-          ) : (
-            <span className="muted">…</span>
-          )}
+          {session ? <span title={session.orgId}>{session.role}</span> : <span className="muted">…</span>}
           <button type="button" className="link" onClick={logout}>
             Sign out
           </button>

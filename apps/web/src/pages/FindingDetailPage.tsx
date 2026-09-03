@@ -2,6 +2,15 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { gatewayFetch, GatewayError } from '../api/client';
 import type { AssetGraph, Finding, RiskExplanation } from '../api/types';
+import {
+  contributionBarWidth,
+  exposureBadgeClass,
+  formatContribution,
+  humanize,
+  scoreClass,
+  severityBadgeClass,
+  validationBadgeClass,
+} from '../ui/display';
 
 export function FindingDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -19,7 +28,6 @@ export function FindingDetailPage() {
       try {
         const detail = await gatewayFetch<Finding>(`/v1/findings/${id}`);
         if (cancelled) return;
-        setFinding(detail);
         const [riskBody, graphBody] = await Promise.all([
           gatewayFetch<RiskExplanation>(`/v1/findings/${id}/risk`),
           detail.assetId
@@ -29,6 +37,7 @@ export function FindingDetailPage() {
             : Promise.resolve(null),
         ]);
         if (cancelled) return;
+        setFinding(detail);
         setRisk(riskBody);
         setGraph(graphBody);
       } catch (err) {
@@ -47,14 +56,27 @@ export function FindingDetailPage() {
     return (
       <section>
         <p>
-          <Link to="/findings">← Findings</Link>
+          <Link to="/findings">Findings</Link>
         </p>
-        <p className="error">{error}</p>
+        <p className="banner error">{error}</p>
       </section>
     );
   }
 
-  if (!finding) return <p className="muted">Loading…</p>;
+  if (!finding) {
+    return (
+      <section>
+        <p>
+          <Link to="/findings">Findings</Link>
+        </p>
+        <div className="skeleton skeleton-title" />
+        <div className="grid">
+          <article className="card skeleton skeleton-card" />
+          <article className="card skeleton skeleton-card" />
+        </div>
+      </section>
+    );
+  }
 
   const reachability =
     (finding.evidence?.reachability as string | undefined) ?? finding.validation ?? 'unknown';
@@ -64,42 +86,27 @@ export function FindingDetailPage() {
   return (
     <section>
       <p>
-        <Link to="/findings">← Findings</Link>
+        <Link to="/findings">Findings</Link>
       </p>
       <h1>{finding.title}</h1>
-      <p className="muted">{finding.description}</p>
+      <p className="lede">{finding.description}</p>
 
-      <dl className="meta">
-        <div>
-          <dt>Severity</dt>
-          <dd>{finding.severity}</dd>
-        </div>
-        <div>
-          <dt>State</dt>
-          <dd>{finding.state}</dd>
-        </div>
-        <div>
-          <dt>Validation</dt>
-          <dd>{finding.validation}</dd>
-        </div>
-        <div>
-          <dt>Scanner</dt>
-          <dd>{finding.scannerType}</dd>
-        </div>
-        {finding.fixedVersion ? (
-          <div>
-            <dt>Fix</dt>
-            <dd>{finding.fixedVersion}</dd>
-          </div>
-        ) : null}
-      </dl>
+      <div className="chips">
+        <span className={severityBadgeClass(finding.severity)}>{humanize(finding.severity)}</span>
+        <span className={finding.state === 'resolved' || finding.state === 'healthy' ? 'badge badge-ok' : 'badge badge-muted'}>
+          {humanize(finding.state)}
+        </span>
+        <span className={validationBadgeClass(finding.validation)}>{humanize(finding.validation)}</span>
+        <span className="badge badge-muted">{humanize(finding.scannerType)}</span>
+        {finding.fixedVersion ? <span className="badge badge-muted">Fix {finding.fixedVersion}</span> : null}
+      </div>
 
       <div className="grid">
         <article className="card">
           <h2>Risk</h2>
           {risk ? (
             <>
-              <p className="score">{risk.score}</p>
+              <p className={`score ${scoreClass(risk.score)}`}>{risk.score}</p>
               <table>
                 <thead>
                   <tr>
@@ -113,11 +120,18 @@ export function FindingDetailPage() {
                 <tbody>
                   {risk.factors.map((f) => (
                     <tr key={f.name}>
-                      <td>{f.name}</td>
+                      <td>{humanize(f.name)}</td>
                       <td>{f.weight}</td>
                       <td>{f.rawValue}</td>
-                      <td>{f.contribution.toFixed(3)}</td>
-                      <td className="muted">{f.note ?? ''}</td>
+                      <td>
+                        <div className="contrib">
+                          <div className="contrib-track">
+                            <span className="contrib-bar" style={{ width: contributionBarWidth(f.contribution) }} />
+                          </div>
+                          <span className="muted">{formatContribution(f.contribution)}</span>
+                        </div>
+                      </td>
+                      <td className="muted">{f.note ? humanize(f.note) : ''}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -133,38 +147,43 @@ export function FindingDetailPage() {
 
         <article className="card">
           <h2>Reachability</h2>
-          <p>
-            Code: <strong>{reachability}</strong>
-          </p>
-          {dependencyPath.length ? (
-            <p>
-              Dependency path: <code>{dependencyPath.join(' → ')}</code>
-            </p>
-          ) : null}
-          {finding.asset ? (
-            <p className="muted">
-              Asset {finding.asset.name} · {finding.asset.exposure} · {finding.asset.criticality}
-            </p>
-          ) : null}
-          {graph ? (
-            <>
-              <h3>Asset graph</h3>
-              <ul className="plain">
-                {graph.nodes.map((n) => (
+          <ul className="plain">
+            <li>
+              Code: <strong>{humanize(String(reachability))}</strong>
+            </li>
+            {dependencyPath.length ? (
+              <li>
+                Dependency path: <code>{dependencyPath.join(' → ')}</code>
+              </li>
+            ) : null}
+            {finding.asset ? (
+              <li className="muted">
+                Asset {finding.asset.name} · {humanize(finding.asset.exposure)} ·{' '}
+                {humanize(finding.asset.criticality)}
+              </li>
+            ) : null}
+            {graph
+              ? graph.nodes.map((n) => (
                   <li key={n.id}>
-                    {n.name}{' '}
-                    <span className="muted">
-                      {n.kind} · {n.exposure}
-                    </span>
+                    {n.name} <span className="muted">{humanize(n.kind)}</span>
+                    {n.exposure === 'internet_facing' ? (
+                      <>
+                        {' '}
+                        <span className={exposureBadgeClass(n.exposure)}>{humanize(n.exposure)}</span>
+                      </>
+                    ) : (
+                      <span className="muted"> · {humanize(n.exposure)}</span>
+                    )}
                   </li>
-                ))}
-              </ul>
-              <p className="muted">
-                {internetFacing.length
-                  ? `${internetFacing.length} internet-facing node(s) in the neighborhood.`
-                  : 'No internet-facing node in the neighborhood.'}
-              </p>
-            </>
+                ))
+              : null}
+          </ul>
+          {graph ? (
+            <p className="muted">
+              {internetFacing.length
+                ? `${internetFacing.length} internet-facing node(s) in the neighborhood.`
+                : 'No internet-facing node in the neighborhood.'}
+            </p>
           ) : null}
         </article>
       </div>

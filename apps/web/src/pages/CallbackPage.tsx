@@ -58,14 +58,17 @@ export function CallbackPage() {
   return (
     <div className="login">
       <div className="card login-card">
-        <h1>Sign in</h1>
         {error ? (
           <>
+            <p>Could not complete sign-in.</p>
             <p className="error">{error}</p>
             <Link to="/login">Try again</Link>
           </>
         ) : (
-          <p className="muted">Completing Keycloak login…</p>
+          <>
+            <p className="muted">Completing sign-in…</p>
+            <div className="progress" />
+          </>
         )}
       </div>
     </div>

@@ -31,11 +31,8 @@ export function LoginPage() {
   return (
     <div className="login">
       <div className="card login-card">
-        <h1>Sign in</h1>
-        <p className="muted">
-          Redirects to the compose Keycloak <code>ctem</code> realm. The organization is read from
-          the issued JWT — this client never sends an org id, header, or query.
-        </p>
+        <h1>CTEM</h1>
+        <p className="muted">Sign in to continue</p>
         {error ? <p className="error">{error}</p> : null}
         <button type="button" onClick={onSignIn} disabled={busy}>
           {busy ? 'Redirecting…' : 'Sign in with Keycloak'}

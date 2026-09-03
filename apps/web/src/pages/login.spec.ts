@@ -11,13 +11,19 @@ describe('login has no password or PAT paste field', () => {
   const callback = readFileSync(resolve('apps/web/src/pages/CallbackPage.tsx'), 'utf8');
 
   it('starts Keycloak authorize and never prompts for a password, JWT paste, or PAT', () => {
+    expect(login).toMatch(/<h1>CTEM<\/h1>/);
+    expect(login).toMatch(/Sign in to continue/);
     expect(login).toMatch(/Sign in with Keycloak/);
+    expect(login.match(/Sign in with Keycloak/g)?.length).toBe(1);
+    expect(login.match(/<button/g)?.length).toBe(1);
     expect(login).toMatch(/beginAuthorization/);
     expect(login).toMatch(/compose Keycloak/);
     expect(callback).toMatch(/completeAuthorization/);
     expect(callback).toMatch(/issued access-token JWT/);
     expect(callback).toMatch(/history\.replaceState/);
     expect(callback).toMatch(/keepSessionAfterCallbackError/);
+    expect(callback).toMatch(/Completing sign-in/);
+    expect(callback).toMatch(/Could not complete sign-in/);
     expect(callback).not.toMatch(/catch \(err\) \{\s*tokenStore\(\)\.clear\(\)/);
     for (const source of [login, callback]) {
       expect(source).not.toMatch(/type=["']password["']/);
