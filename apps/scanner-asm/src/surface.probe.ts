@@ -238,8 +238,6 @@ const HTTP_SECURITY_HEADER_REQUIREMENTS = [
   'cross-origin-resource-policy',
 ] as const;
 
-const EXPIRING_WITHIN_DAYS = 30;
-
 function normalizeHostTarget(kind: string, externalKey: string): { host: string; isIpLiteral: boolean } {
   const s = externalKey.trim();
   if (!s) throw new Error('ASM missing externalKey');

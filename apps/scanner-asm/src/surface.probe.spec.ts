@@ -220,7 +220,7 @@ describe('SurfaceProbe.probe SSRF + completeness bars', () => {
     resolve6Mock.mockResolvedValue([]);
     resolveCnameMock.mockResolvedValue([]);
 
-    netConnectMock.mockImplementation(({ host, port }: any) => {
+    netConnectMock.mockImplementation(({ port }: any) => {
       const sock = makeSocket();
       if (port === OPEN_PORT) process.nextTick(() => sock.emit('connect'));
       else process.nextTick(() => sock.emit('error', new Error('refused')));
