@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { gatewayFetch, GatewayError } from '../api/client';
 import { SEVERITIES, type Policy, type PolicyWrite, type Session } from '../api/types';
+import { SkeletonRows } from '../ui/SkeletonRows';
 import { actionSelectValue, actionsFromSelect, editorActionsFromPolicy } from './policy-actions';
 
 const emptyDraft = (): PolicyWrite => ({
@@ -40,6 +41,7 @@ export function PoliciesPage() {
   const [items, setItems] = useState<Policy[]>([]);
   const [session, setSession] = useState<Session | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<PolicyWrite>(emptyDraft);
   const [busy, setBusy] = useState(false);
@@ -56,9 +58,11 @@ export function PoliciesPage() {
   };
 
   useEffect(() => {
-    reload().catch((err: unknown) =>
-      setError(err instanceof GatewayError ? err.message : 'Failed to load policies'),
-    );
+    reload()
+      .catch((err: unknown) =>
+        setError(err instanceof GatewayError ? err.message : 'Failed to load policies'),
+      )
+      .finally(() => setLoading(false));
   }, []);
 
   const onSubmit = async (event: FormEvent) => {
@@ -120,7 +124,7 @@ export function PoliciesPage() {
         goes to Jira; fail-build is the CI scan conclusion on GET — not a GitHub Check.
         This client never sends an org id, a webhook/Jira URL, or a scan conclusion.
       </p>
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <p className="banner error">{error}</p> : null}
 
       <table>
         <thead>
@@ -134,44 +138,48 @@ export function PoliciesPage() {
           </tr>
         </thead>
         <tbody>
-          {items.map((p, index) => (
-            <tr key={p.id}>
-              <td>{p.priority}</td>
-              <td>
-                <strong>{p.name}</strong>
-                {p.description ? <div className="muted small">{p.description}</div> : null}
-              </td>
-              <td>{conditionSummary(p.condition)}</td>
-              <td>{p.enabled ? 'yes' : 'no'}</td>
-              <td>{p.actions.join(', ')}</td>
-              {canWrite ? (
+          {loading ? (
+            <SkeletonRows columns={canWrite ? 6 : 5} />
+          ) : (
+            items.map((p, index) => (
+              <tr key={p.id}>
+                <td>{p.priority}</td>
                 <td>
-                  <button type="button" className="link" disabled={busy || index === 0} onClick={() => void move(p, -1)}>
-                    Up
-                  </button>{' '}
-                  <button
-                    type="button"
-                    className="link"
-                    disabled={busy || index === items.length - 1}
-                    onClick={() => void move(p, 1)}
-                  >
-                    Down
-                  </button>{' '}
-                  <button
-                    type="button"
-                    className="link"
-                    onClick={() => {
-                      setEditingId(p.id);
-                      setDraft(toDraft(p));
-                    }}
-                  >
-                    Edit
-                  </button>
+                  <strong>{p.name}</strong>
+                  {p.description ? <div className="muted small">{p.description}</div> : null}
                 </td>
-              ) : null}
-            </tr>
-          ))}
-          {items.length === 0 && !error ? (
+                <td>{conditionSummary(p.condition)}</td>
+                <td>{p.enabled ? 'yes' : 'no'}</td>
+                <td>{p.actions.join(', ')}</td>
+                {canWrite ? (
+                  <td>
+                    <button type="button" className="link" disabled={busy || index === 0} onClick={() => void move(p, -1)}>
+                      Up
+                    </button>{' '}
+                    <button
+                      type="button"
+                      className="link"
+                      disabled={busy || index === items.length - 1}
+                      onClick={() => void move(p, 1)}
+                    >
+                      Down
+                    </button>{' '}
+                    <button
+                      type="button"
+                      className="link"
+                      onClick={() => {
+                        setEditingId(p.id);
+                        setDraft(toDraft(p));
+                      }}
+                    >
+                      Edit
+                    </button>
+                  </td>
+                ) : null}
+              </tr>
+            ))
+          )}
+          {!loading && items.length === 0 && !error ? (
             <tr>
               <td colSpan={canWrite ? 6 : 5} className="muted">
                 No policies in this organization.
