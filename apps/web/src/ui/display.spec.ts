@@ -25,10 +25,12 @@ describe('score bands', () => {
 });
 
 describe('badges and labels', () => {
-  it('humanizes snake_case without inventing copy', () => {
-    expect(humanize('not_validated')).toBe('not validated');
-    expect(humanize('internet_facing')).toBe('internet facing');
-    expect(humanize('cloud_posture')).toBe('cloud posture');
+  it('title-cases snake_case without inventing copy', () => {
+    expect(humanize('not_validated')).toBe('Not validated');
+    expect(humanize('internet_facing')).toBe('Internet facing');
+    expect(humanize('cloud_posture')).toBe('Cloud posture');
+    expect(humanize('fail_build')).toBe('Fail build');
+    expect(humanize('queued')).toBe('Queued');
   });
 
   it('maps severity and validation to the spec tints', () => {
