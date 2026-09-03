@@ -23,7 +23,7 @@ export function FindingsPage() {
   return (
     <section>
       <h1>Findings</h1>
-      {!loading ? <p className="muted count">{items.length} findings</p> : null}
+      {!loading && !error ? <p className="muted count">{items.length} findings</p> : null}
       {error ? <p className="banner error">{error}</p> : null}
       <table>
         <thead>

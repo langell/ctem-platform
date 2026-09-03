@@ -35,7 +35,9 @@ describe('findings list human path', () => {
   });
 
   it('omits the findings count while loading', () => {
-    expect(findings).toMatch(/\{!loading \? <p className="muted count">\{items\.length\} findings<\/p> : null\}/);
+    expect(findings).toMatch(
+      /\{!loading && !error \? <p className="muted count">\{items\.length\} findings<\/p> : null\}/,
+    );
   });
 
   it('whole row clicks through to detail', () => {
