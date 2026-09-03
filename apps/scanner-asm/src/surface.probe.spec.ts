@@ -282,6 +282,61 @@ describe('SurfaceProbe.probe SSRF + completeness bars', () => {
     expect(calls.map((c) => c.method)).toEqual(['HEAD', 'GET']);
   });
 
+  it('parses TLS cert metadata (issuer, expiry, self-signed) from mocked handshake', async () => {
+    const HOST = 'example.com';
+    const IP = '93.184.216.34';
+    const OPEN_PORT = 443;
+
+    resolve4Mock.mockResolvedValue([IP]);
+    resolve6Mock.mockResolvedValue([]);
+    resolveCnameMock.mockResolvedValue([]);
+
+    netConnectMock.mockImplementation(({ port }: any) => {
+      const sock = makeSocket();
+      if (port === OPEN_PORT) process.nextTick(() => sock.emit('connect'));
+      else process.nextTick(() => sock.emit('error', new Error('refused')));
+      return sock;
+    });
+
+    tlsConnectMock.mockImplementation((_options: any) => {
+      const sock = makeSocket();
+      (sock as any).getPeerCertificate = () => ({
+        valid_to: '2000-01-01T00:00:00.000Z',
+        issuer: { CN: 'Test CA' },
+        subject: { CN: 'Test CA' }, // issuer==subject => self-signed by our heuristic
+      });
+      process.nextTick(() => sock.emit('secureConnect'));
+      return sock;
+    });
+
+    httpsRequestMock.mockImplementation((options: any, cb: any) => {
+      const res = new EventEmitter() as any;
+      res.statusCode = 200;
+      res.headers = {};
+      res.setEncoding = () => undefined;
+      process.nextTick(() => {
+        cb(res);
+        process.nextTick(() => res.emit('end'));
+      });
+      const req = new EventEmitter() as any;
+      req.setTimeout = () => undefined;
+      req.destroy = () => undefined;
+      req.end = () => undefined;
+      return req;
+    });
+
+    const s = new SurfaceProbe();
+    const out = await s.probe(ctx(() => true), { kind: 'domain', externalKey: `domain:${HOST}` });
+
+    expect(out.openPorts).toContain(OPEN_PORT);
+    expect(out.tls).not.toBeNull();
+    expect(out.tls?.[OPEN_PORT]).toEqual({
+      expiresAt: '2000-01-01T00:00:00.000Z',
+      issuer: 'CN=Test CA',
+      selfSigned: true,
+    });
+  });
+
   it('tenant-supplied scheme/port/path does not drive probing (fixed common ports only)', async () => {
     const HOST = 'example.com';
     const IP = '93.184.216.34';

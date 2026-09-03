@@ -149,5 +149,38 @@ describe('AsmScanner.execute findings + completeness', () => {
     expect(ports).toContain(80);
     expect(ports).not.toContain(443);
   });
+
+  it('creates tls-expired and tls-expiring findings (deterministic time)', async () => {
+    const now = new Date('2026-09-03T00:00:00.000Z');
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+
+    const mockProbe = {
+      probe: vi.fn(async () =>
+        ({
+          host: 'example.com',
+          addresses: ['93.184.216.34'],
+          cnames: [],
+          danglingCname: false,
+          openPorts: [443, 8443],
+          tls: {
+            443: { expiresAt: new Date(now.getTime() - 24 * 3_600_000).toISOString(), issuer: 'CN=CA', selfSigned: false },
+            8443: { expiresAt: new Date(now.getTime() + 5 * 3_600_000).toISOString(), issuer: 'CN=CA', selfSigned: false },
+          },
+          httpRoot: null,
+          headers: {},
+        }) satisfies ProbeResult,
+      ),
+    };
+
+    const scanner = new AsmScanner(mockProbe as any);
+    const outcome = await scanner.execute(ctx({ target: { kind: 'domain', externalKey: 'domain:example.com' } }));
+
+    expect(outcome.findings.map((f) => f.externalId)).toEqual(
+      expect.arrayContaining(['asm.tls-expired:example.com:443', 'asm.tls-expiring:example.com:8443']),
+    );
+
+    vi.useRealTimers();
+  });
 });
 
