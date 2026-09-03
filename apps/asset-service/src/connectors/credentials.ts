@@ -6,7 +6,7 @@ import { createPrivateKey } from 'node:crypto';
  *
  *   env:<VAR>  — platform-operated only. Reads a process environment variable
  *                whose name is allowlisted (`GITHUB_*`, `GITLAB_*`, `AWS_*`,
- *                or `GCP_*`). This is not a tenant-writable secret store: a
+ *                `GCP_*`, or `AZURE_*`). This is not a tenant-writable secret store: a
  *                tenant-supplied credentialRef cannot read DATABASE_URL, PATH,
  *                INTERNAL_TOKEN_SECRET, or other replica secrets. Every
  *                integration that points at the same env name shares that
@@ -17,7 +17,7 @@ import { createPrivateKey } from 'node:crypto';
  */
 
 /** Platform-controlled names only — not an open read of process.env. */
-const ENV_ALLOWLIST = /^(GITHUB|GITLAB|AWS|GCP)_[A-Z0-9_]+$/;
+const ENV_ALLOWLIST = /^(GITHUB|GITLAB|AWS|GCP|AZURE)_[A-Z0-9_]+$/;
 
 export function resolveCredential(ref: string | null): string | undefined {
   if (!ref) return undefined;
@@ -29,7 +29,7 @@ export function resolveCredential(ref: string | null): string | undefined {
   if (scheme === 'env') {
     if (!key || !ENV_ALLOWLIST.test(key)) {
       throw new Error(
-        `credentialRef 'env:${key || '<empty>'}' is not allowlisted — env: is platform-operated and only GITHUB_* / GITLAB_* / AWS_* / GCP_* names are permitted`,
+        `credentialRef 'env:${key || '<empty>'}' is not allowlisted — env: is platform-operated and only GITHUB_* / GITLAB_* / AWS_* / GCP_* / AZURE_* names are permitted`,
       );
     }
     return process.env[key] || undefined;
@@ -155,4 +155,73 @@ export function requireGcpCredentials(credentialRef: string | null): GcpCredenti
   assertUsableGcpPrivateKey(privateKey);
 
   return { clientEmail, privateKey };
+}
+
+export interface AzureCredentials {
+  tenantId: string;
+  clientId: string;
+  clientSecret: string;
+}
+
+const AZURE_ENV_NAME = /^AZURE_[A-Z0-9_]+$/;
+
+/** Entra tenant / app ids are GUIDs — identifiers, never hosts. */
+const AZURE_GUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function assertUsableAzureGuid(value: string, envName: string): string {
+  const trimmed = value.trim();
+  if (!AZURE_GUID_RE.test(trimmed) || /^https?:\/\//i.test(trimmed)) {
+    throw new Error(`Azure discovery fails closed — ${envName} is unusable`);
+  }
+  return trimmed.toLowerCase();
+}
+
+/**
+ * Azure discovery has no unauthenticated public path. The integration pointer
+ * must be `env:AZURE_*`, and the platform-operated client-credentials triple
+ * `AZURE_TENANT_ID` + `AZURE_CLIENT_ID` + `AZURE_CLIENT_SECRET` must all be
+ * usable.
+ */
+export function requireAzureCredentials(credentialRef: string | null): AzureCredentials {
+  if (!credentialRef) {
+    throw new Error(
+      'Azure discovery requires a usable credentialRef (env:AZURE_*) — refusing unauthenticated listing',
+    );
+  }
+
+  const sep = credentialRef.indexOf(':');
+  const scheme = sep === -1 ? credentialRef : credentialRef.slice(0, sep);
+  const key = sep === -1 ? '' : credentialRef.slice(sep + 1);
+  if (scheme !== 'env' || !key || !AZURE_ENV_NAME.test(key)) {
+    // Non-allowlisted names throw here without reading the secret (DATABASE_URL).
+    // Allowlisted-but-not-Azure names (GITHUB_*, AWS_*, GCP_*) are refused after that check.
+    resolveCredential(credentialRef);
+    throw new Error(
+      `credentialRef '${credentialRef}' is not an env:AZURE_* pointer — Azure discovery only accepts platform-operated AZURE_* names`,
+    );
+  }
+
+  const pointed = resolveCredential(credentialRef);
+  if (!pointed) {
+    throw new Error(
+      `credentialRef '${credentialRef}' is set but cannot be used — refusing to list without usable AZURE_* credentials`,
+    );
+  }
+
+  const tenantId = resolveCredential('env:AZURE_TENANT_ID');
+  const clientId = resolveCredential('env:AZURE_CLIENT_ID');
+  const clientSecret = resolveCredential('env:AZURE_CLIENT_SECRET');
+  const secret = clientSecret?.trim();
+  if (!tenantId || !clientId || !secret) {
+    throw new Error(
+      'Azure discovery fails closed without usable AZURE_TENANT_ID, AZURE_CLIENT_ID, and AZURE_CLIENT_SECRET',
+    );
+  }
+
+  return {
+    tenantId: assertUsableAzureGuid(tenantId, 'AZURE_TENANT_ID'),
+    clientId: assertUsableAzureGuid(clientId, 'AZURE_CLIENT_ID'),
+    clientSecret: secret,
+  };
 }

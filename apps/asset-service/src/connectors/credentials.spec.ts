@@ -1,6 +1,11 @@
 import { generateKeyPairSync } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
-import { requireAwsCredentials, requireGcpCredentials, resolveCredential } from './credentials';
+import {
+  requireAwsCredentials,
+  requireAzureCredentials,
+  requireGcpCredentials,
+  resolveCredential,
+} from './credentials';
 
 const gcpPem = generateKeyPairSync('rsa', { modulusLength: 2048 })
   .privateKey.export({ type: 'pkcs8', format: 'pem' })
@@ -17,6 +22,10 @@ afterEach(() => {
   delete process.env.GCP_CLIENT_EMAIL;
   delete process.env.GCP_PRIVATE_KEY;
   delete process.env.GCP_TEST_TOKEN;
+  delete process.env.AZURE_TENANT_ID;
+  delete process.env.AZURE_CLIENT_ID;
+  delete process.env.AZURE_CLIENT_SECRET;
+  delete process.env.AZURE_TEST_TOKEN;
 });
 
 describe('resolveCredential', () => {
@@ -42,6 +51,11 @@ describe('resolveCredential', () => {
   it('reads an allowlisted GCP_* env var', () => {
     process.env.GCP_CLIENT_EMAIL = 'ctem@acme-prod.iam.gserviceaccount.com';
     expect(resolveCredential('env:GCP_CLIENT_EMAIL')).toBe('ctem@acme-prod.iam.gserviceaccount.com');
+  });
+
+  it('reads an allowlisted AZURE_* env var', () => {
+    process.env.AZURE_TENANT_ID = '22222222-2222-2222-2222-222222222222';
+    expect(resolveCredential('env:AZURE_TENANT_ID')).toBe('22222222-2222-2222-2222-222222222222');
   });
 
   it('returns undefined when an allowlisted name is unset (public-listing path)', () => {
@@ -145,6 +159,79 @@ describe('requireGcpCredentials', () => {
     expect(requireGcpCredentials('env:GCP_CLIENT_EMAIL')).toEqual({
       clientEmail: 'ctem@acme-prod.iam.gserviceaccount.com',
       privateKey: gcpPem,
+    });
+  });
+});
+
+describe('requireAzureCredentials', () => {
+  const tenant = '22222222-2222-2222-2222-222222222222';
+  const client = '33333333-3333-3333-3333-333333333333';
+
+  function setAzureTriple(): void {
+    process.env.AZURE_TENANT_ID = tenant;
+    process.env.AZURE_CLIENT_ID = client;
+    process.env.AZURE_CLIENT_SECRET = 'super-secret';
+  }
+
+  it('fails closed when credentialRef is missing', () => {
+    expect(() => requireAzureCredentials(null)).toThrow(/env:AZURE_\*/);
+  });
+
+  it('fails closed when the pointed AZURE_* env var is empty', () => {
+    expect(() => requireAzureCredentials('env:AZURE_CLIENT_ID')).toThrow(/cannot be used/);
+  });
+
+  it('fails closed when the client-credentials triple is incomplete', () => {
+    process.env.AZURE_TENANT_ID = tenant;
+    process.env.AZURE_CLIENT_ID = client;
+    expect(() => requireAzureCredentials('env:AZURE_CLIENT_ID')).toThrow(
+      /AZURE_TENANT_ID, AZURE_CLIENT_ID, and AZURE_CLIENT_SECRET/,
+    );
+  });
+
+  it('fails closed when AZURE_TENANT_ID is unusable', () => {
+    process.env.AZURE_TENANT_ID = 'https://evil.example';
+    process.env.AZURE_CLIENT_ID = client;
+    process.env.AZURE_CLIENT_SECRET = 'super-secret';
+    expect(() => requireAzureCredentials('env:AZURE_TENANT_ID')).toThrow(/unusable/);
+  });
+
+  it('fails closed when AZURE_CLIENT_ID is unusable', () => {
+    process.env.AZURE_TENANT_ID = tenant;
+    process.env.AZURE_CLIENT_ID = 'not-a-guid';
+    process.env.AZURE_CLIENT_SECRET = 'super-secret';
+    expect(() => requireAzureCredentials('env:AZURE_CLIENT_ID')).toThrow(/unusable/);
+  });
+
+  it('refuses a GITHUB_* ref even when Azure keys are present', () => {
+    process.env.GITHUB_TOKEN = 'ghp_test';
+    setAzureTriple();
+    expect(() => requireAzureCredentials('env:GITHUB_TOKEN')).toThrow(/env:AZURE_\*/);
+  });
+
+  it('refuses an AWS_* ref even when Azure keys are present', () => {
+    process.env.AWS_ACCESS_KEY_ID = 'AKIATEST';
+    setAzureTriple();
+    expect(() => requireAzureCredentials('env:AWS_ACCESS_KEY_ID')).toThrow(/env:AZURE_\*/);
+  });
+
+  it('refuses a GCP_* ref even when Azure keys are present', () => {
+    process.env.GCP_CLIENT_EMAIL = 'ctem@acme-prod.iam.gserviceaccount.com';
+    setAzureTriple();
+    expect(() => requireAzureCredentials('env:GCP_CLIENT_EMAIL')).toThrow(/env:AZURE_\*/);
+  });
+
+  it('refuses env:DATABASE_URL without reading the secret', () => {
+    process.env.DATABASE_URL = 'postgres://should-not-leak';
+    expect(() => requireAzureCredentials('env:DATABASE_URL')).toThrow(/not allowlisted/);
+  });
+
+  it('returns the platform triple when the ref and all three keys are set', () => {
+    setAzureTriple();
+    expect(requireAzureCredentials('env:AZURE_CLIENT_ID')).toEqual({
+      tenantId: tenant,
+      clientId: client,
+      clientSecret: 'super-secret',
     });
   });
 });
