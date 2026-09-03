@@ -1,14 +1,36 @@
 import { Injectable } from '@nestjs/common';
-import { BaseScanner, type ScanContext, type ScanOutcome } from '@ctem/scanner-sdk';
+import {
+  BaseScanner,
+  CheckoutError,
+  GitRepoCheckout,
+  type ScanContext,
+  type ScanOutcome,
+} from '@ctem/scanner-sdk';
 import type { RawFinding, ScanJob, ScannerType } from '@ctem/contracts';
+import { SastAnalyzer } from './analyzer';
+import { isSastGraph, SastAnalysisError, serializeSastGraph, verdictForMatch } from './graph';
 import { RuleEngine } from './rule-engine';
+
+/** Tenant-writable analyzer overrides — never executed, only ignored. */
+export const TENANT_ANALYZER_OPTION_KEYS = [
+  'script',
+  'rulesYaml',
+  'rulesPath',
+  'patternPack',
+  'customRules',
+  'semgrep',
+  'semgrepConfig',
+  'bandit',
+  'codeql',
+  'eslint',
+] as const;
 
 /**
  * Static analysis over source repositories.
  *
- * Incremental-by-default is the goal: scan the diff on a pull request, scan the
- * full tree on a schedule. Full-tree scans on every push is how a security tool
- * becomes the slowest step in someone's CI and then gets turned off.
+ * Checkout uses the shared fail-closed allowlist (same as SCA). Analysis is
+ * in-process built-in rules over that workDir plus an import/call and
+ * taint/dataflow graph. Crash, timeout, or no graph fails the job.
  */
 @Injectable()
 export class SastScanner extends BaseScanner {
@@ -16,7 +38,11 @@ export class SastScanner extends BaseScanner {
   readonly name = 'ctem-sast';
   readonly version = '0.1.0';
 
-  constructor(private readonly rules: RuleEngine) {
+  constructor(
+    private readonly rules: RuleEngine,
+    private readonly checkout: GitRepoCheckout = new GitRepoCheckout(),
+    private readonly analyzer: SastAnalyzer = new SastAnalyzer(rules),
+  ) {
     super();
   }
 
@@ -25,12 +51,35 @@ export class SastScanner extends BaseScanner {
   }
 
   async execute(ctx: ScanContext): Promise<ScanOutcome> {
-    // TODO: shallow clone at target.ref into ctx.workDir. Use a sparse checkout
-    // plus `git diff --name-only` against the base ref for incremental runs.
-    const languages = (ctx.job.options.languages as string[]) ?? [];
-    const matches = await this.rules.run(ctx.workDir, languages);
+    const ignored = tenantAnalyzerOptions(ctx.job.options);
+    if (ignored.length) {
+      ctx.log('ignoring tenant-supplied analyzer options', { keys: ignored });
+    }
 
-    const findings: RawFinding[] = matches.map((m) => ({
+    await this.checkout.checkout(ctx);
+    if (!ctx.checkDeadline()) {
+      throw new SastAnalysisError('Job deadline exceeded');
+    }
+
+    const languages = Array.isArray(ctx.job.options.languages)
+      ? (ctx.job.options.languages as string[])
+      : [];
+
+    let analysis;
+    try {
+      analysis = await this.analyzer.analyze(ctx.workDir, languages, ctx.checkDeadline);
+    } catch (err) {
+      if (err instanceof SastAnalysisError || err instanceof CheckoutError) throw err;
+      throw new SastAnalysisError(
+        `SAST analysis failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    if (!isSastGraph(analysis.graph)) {
+      throw new SastAnalysisError('SAST analyzer did not produce a graph — refusing empty success');
+    }
+
+    const findings: RawFinding[] = analysis.matches.map((m) => ({
       externalId: `${m.rule.id}:${m.path}:${m.startLine}`,
       scannerType: 'sast' as const,
       scannerName: this.name,
@@ -47,14 +96,34 @@ export class SastScanner extends BaseScanner {
       kev: false,
       location: { path: m.path, startLine: m.startLine, endLine: m.endLine },
       fix: { available: false, guidance: m.rule.message },
-      evidence: { snippet: m.snippet, dataflow: m.dataflow ?? [] },
+      evidence: {
+        snippet: m.snippet,
+        dataflow: m.dataflow ?? [],
+        reachability: verdictForMatch({ ruleId: m.rule.id, path: m.path, startLine: m.startLine }, analysis.graph),
+      },
       raw: {},
     }));
 
     return {
       findings,
-      rawOutput: { matches, rulesApplied: this.rules.list(languages).length },
-      stats: { matches: matches.length },
+      rawOutput: {
+        matches: analysis.matches,
+        rulesApplied: this.rules.list(languages).length,
+        graph: serializeSastGraph(analysis.graph),
+        ignoredTenantOptions: ignored,
+      },
+      stats: {
+        matches: analysis.matches.length,
+        files: analysis.graph.files.size,
+        taintFlows: analysis.graph.taintFlows.length,
+      },
     };
   }
+}
+
+export function tenantAnalyzerOptions(options: Record<string, unknown>): string[] {
+  return TENANT_ANALYZER_OPTION_KEYS.filter((key) => {
+    const value = options[key];
+    return value !== undefined && value !== null && value !== '';
+  });
 }

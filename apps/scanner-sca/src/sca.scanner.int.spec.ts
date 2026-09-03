@@ -5,12 +5,11 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { PrismaService, type PrismaClient } from '@ctem/db';
 import { ownerClient, uniqueSlug } from '@ctem/testing';
-import type { ScanContext } from '@ctem/scanner-sdk';
+import { type GitRepoCheckout, type ScanContext } from '@ctem/scanner-sdk';
 import type { ArtifactStore } from '@ctem/storage';
 import { ScaScanner } from './sca.scanner';
 import { SbomParser } from './sbom.parser';
 import { VulnMatcher } from './vuln.matcher';
-import type { GitRepoCheckout } from './repo.checkout';
 
 /**
  * Source path (no SBOM key): lockfile resolution + local-mirror matching.
