@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { isPrivateTarget, resolveGithubCredential } from './github.credential';
+import { isPrivateTarget, resolveGithubCredential } from './scm.credential';
 
 afterEach(() => {
   delete process.env.GITHUB_TOKEN;

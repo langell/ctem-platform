@@ -1,10 +1,9 @@
 import { Module } from '@nestjs/common';
-import { ScannerModule } from '@ctem/scanner-sdk';
+import { GitRepoCheckout, ScannerModule } from '@ctem/scanner-sdk';
 import { DbModule } from '@ctem/db';
 import { ScaScanner } from './sca.scanner';
 import { SbomParser } from './sbom.parser';
 import { VulnMatcher } from './vuln.matcher';
-import { GitRepoCheckout } from './repo.checkout';
 import { ReachabilityAnalyzer } from './reachability';
 
 @Module({

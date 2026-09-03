@@ -1,12 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import type { ScanContext } from '@ctem/scanner-sdk';
+import { CheckoutError, GitRepoCheckout, type ScanContext } from '@ctem/scanner-sdk';
 import type { ArtifactStore } from '@ctem/storage';
 import { ScaScanner } from './sca.scanner';
 import { SbomParser } from './sbom.parser';
 import { VulnMatcher } from './vuln.matcher';
-import { CheckoutError, GitRepoCheckout } from './repo.checkout';
 import { LockfileResolutionError } from './lockfiles/resolve';
 import {
   emptyReachabilityGraph,

@@ -3,8 +3,8 @@ import { promisify } from 'node:util';
 import { Injectable } from '@nestjs/common';
 import { rootLogger } from '@ctem/observability';
 import type { ScanJob } from '@ctem/contracts';
-import type { ScanContext } from '@ctem/scanner-sdk';
-import { isPrivateTarget, resolveGithubCredential } from './github.credential';
+import type { ScanContext } from './base-scanner';
+import { isPrivateTarget, resolveGithubCredential } from './scm.credential';
 
 const execFileAsync = promisify(execFile);
 
@@ -89,7 +89,7 @@ export function resolveCloneUrl(target: Record<string, unknown>): string {
     return fromKey;
   }
   throw new CheckoutError(
-    'SCA source scan needs an allowlisted clone source (cloneUrl on github.com or gitlab.com, or github:owner/repo / gitlab:owner/repo). ' +
+    'Source scan needs an allowlisted clone source (cloneUrl on github.com or gitlab.com, or github:owner/repo / gitlab:owner/repo). ' +
       'htmlUrl / url / git@ are refused so tenant-writable target metadata cannot drive scanner egress.',
   );
 }

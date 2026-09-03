@@ -63,6 +63,28 @@ describe('FindingNormalizer.fingerprint', () => {
     expect(fromB).toBe(expected);
   });
 
+  it('does not collide a SAST fingerprint with SCA (asset, sca, vuln, purl)', () => {
+    const sca = raw({
+      scannerType: 'sca',
+      identifiers: [{ system: 'CVE', value: 'CVE-2024-0001' }],
+      location: { purl: 'pkg:npm/express@4.17.1' },
+    });
+    const sast = raw({
+      scannerType: 'sast',
+      externalId: 'CVE-2024-0001',
+      identifiers: [{ system: 'CVE', value: 'CVE-2024-0001' }],
+      location: { path: 'src/db.ts', purl: 'pkg:npm/express@4.17.1' },
+    });
+    const scaFp = normalizer.fingerprint('asset-1', sca);
+    const sastFp = normalizer.fingerprint('asset-1', sast);
+    expect(scaFp).toBe(
+      createHash('sha256')
+        .update(['asset-1', 'sca', 'CVE-2024-0001', 'pkg:npm/express@4.17.1'].join('|'))
+        .digest('hex'),
+    );
+    expect(sastFp).not.toBe(scaFp);
+  });
+
   it('ignores line numbers for code findings so a diff above the match is not a new finding', () => {
     const base = raw({
       scannerType: 'sast',

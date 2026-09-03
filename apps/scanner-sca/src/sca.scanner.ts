@@ -1,10 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import { BaseScanner, type ScanContext, type ScanOutcome } from '@ctem/scanner-sdk';
+import { BaseScanner, GitRepoCheckout, type ScanContext, type ScanOutcome } from '@ctem/scanner-sdk';
 import type { RawFinding, ScannerType } from '@ctem/contracts';
 import { SbomParser, type ResolvedComponent } from './sbom.parser';
 import { VulnMatcher } from './vuln.matcher';
 import { resolveLockfiles } from './lockfiles';
-import { GitRepoCheckout } from './repo.checkout';
 import {
   isReachabilityGraph,
   ReachabilityAnalysisError,
