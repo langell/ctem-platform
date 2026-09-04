@@ -5,7 +5,9 @@
  */
 import { TOKEN_STORAGE_KEY, isPatToken, tokenStore } from '../api/client';
 
-export const OIDC_ISSUER = 'http://localhost:8080/realms/ctem';
+/** Baked in at build time (VITE_OIDC_ISSUER); the compose Keycloak realm otherwise. */
+export const OIDC_ISSUER: string =
+  (import.meta.env.VITE_OIDC_ISSUER as string | undefined) || 'http://localhost:8080/realms/ctem';
 export const OIDC_CLIENT_ID = 'ctem-web';
 export const OIDC_CALLBACK_PATH = '/login/callback';
 export const PKCE_VERIFIER_KEY = 'ctem.oidc.code_verifier';

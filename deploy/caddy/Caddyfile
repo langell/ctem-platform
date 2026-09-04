@@ -1,0 +1,13 @@
+# TLS is automatic (Let's Encrypt) as long as both names resolve to this VM
+# and ports 80/443 are open. Only Caddy publishes host ports in
+# docker-compose.prod.yml; everything else is reachable on the compose network.
+
+{$CTEM_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy api-gateway:3000
+}
+
+{$AUTH_DOMAIN} {
+	# Keycloak trusts X-Forwarded-* (KC_PROXY_HEADERS=xforwarded).
+	reverse_proxy keycloak:8080
+}

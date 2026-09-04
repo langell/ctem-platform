@@ -4,6 +4,7 @@ dist/
 *.tsbuildinfo
 .env
 .env.local
+.env.prod
 coverage/
 .DS_Store
 libs/db/src/generated/

@@ -1,0 +1,14 @@
+.git
+.nx
+node_modules
+**/node_modules
+**/dist
+libs/db/src/generated
+coverage
+.env
+.env.*
+!.env.example
+.vscode
+docs
+*.md
+!README.md

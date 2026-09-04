@@ -1,0 +1,331 @@
+# Single-VM test environment: the whole platform behind Caddy on one box.
+#
+#   cp .env.prod.example .env.prod   # fill in domains + secrets
+#   make deploy-build && make deploy-up && make deploy-migrate && make deploy-seed
+#
+# Only Caddy publishes host ports. Postgres, Redis, NATS, MinIO and the service
+# ports stay on the compose network. Every app service runs one replica: the
+# schedulers have no leader election yet (README "Not yet built").
+name: ctem-prod
+
+x-app-image: &app-image
+  image: ctem-platform:local
+  build:
+    context: .
+    dockerfile: deploy/docker/Dockerfile
+    args:
+      VITE_OIDC_ISSUER: https://${AUTH_DOMAIN:?}/realms/ctem
+
+x-app-env: &app-env
+  NODE_ENV: production
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  DATABASE_URL: postgresql://ctem:${POSTGRES_PASSWORD:?}@postgres:5432/ctem?schema=public
+  DATABASE_APP_URL: postgresql://ctem_app:${CTEM_APP_DB_PASSWORD:?}@postgres:5432/ctem?schema=public
+  REDIS_URL: redis://redis:6379
+  NATS_URL: nats://nats:4222
+  S3_ENDPOINT: http://minio:9000
+  S3_REGION: us-east-1
+  S3_BUCKET: ctem-artifacts
+  S3_ACCESS_KEY_ID: ctem
+  S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?}
+  S3_FORCE_PATH_STYLE: 'true'
+  # MinIO has no KMS; the production default of AES256 would be rejected.
+  S3_SSE: none
+  OIDC_ISSUER: https://${AUTH_DOMAIN:?}/realms/ctem
+  OIDC_AUDIENCE: ctem-api
+  INTERNAL_TOKEN_SECRET: ${INTERNAL_TOKEN_SECRET:?}
+  IDENTITY_SERVICE_URL: http://identity-service:3001
+  ASSET_SERVICE_URL: http://asset-service:3002
+  ORCHESTRATOR_SERVICE_URL: http://orchestrator-service:3003
+  FINDINGS_SERVICE_URL: http://findings-service:3004
+  RISK_SERVICE_URL: http://risk-service:3005
+  REPORTING_SERVICE_URL: http://reporting-service:3006
+  NOTIFICATION_SERVICE_URL: http://notification-service:3007
+  GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+  GITLAB_TOKEN: ${GITLAB_TOKEN:-}
+  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+  GCP_CLIENT_EMAIL: ${GCP_CLIENT_EMAIL:-}
+  GCP_PRIVATE_KEY: ${GCP_PRIVATE_KEY:-}
+  SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+  JIRA_BASE_URL: ${JIRA_BASE_URL:-}
+  JIRA_EMAIL: ${JIRA_EMAIL:-}
+  JIRA_API_TOKEN: ${JIRA_API_TOKEN:-}
+  JIRA_PROJECT_KEY: ${JIRA_PROJECT_KEY:-}
+  NVD_API_KEY: ${NVD_API_KEY:-}
+  SCANNER_CONCURRENCY: ${SCANNER_CONCURRENCY:-4}
+  SCANNER_JOB_TIMEOUT_MS: ${SCANNER_JOB_TIMEOUT_MS:-900000}
+
+x-app-service: &app-service
+  <<: *app-image
+  environment: *app-env
+  restart: unless-stopped
+  depends_on:
+    postgres: { condition: service_healthy }
+    nats: { condition: service_started }
+    redis: { condition: service_started }
+    minio-init: { condition: service_completed_successfully }
+  logging:
+    driver: json-file
+    options: { max-size: '20m', max-file: '5' }
+
+x-http-health: &http-health
+  interval: 15s
+  timeout: 5s
+  retries: 5
+  start_period: 20s
+
+services:
+  # ---------------------------------------------------------------- edge
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports: ['80:80', '443:443']
+    environment:
+      CTEM_DOMAIN: ${CTEM_DOMAIN:?}
+      AUTH_DOMAIN: ${AUTH_DOMAIN:?}
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    depends_on: [api-gateway, keycloak]
+
+  # ---------------------------------------------------------------- infra
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ctem
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: ctem
+      KEYCLOAK_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?}
+      # Only read by deploy/postgres/set-app-password.sh via `make deploy-migrate`.
+      CTEM_APP_DB_PASSWORD: ${CTEM_APP_DB_PASSWORD:?}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./deploy/postgres/10-keycloak.sh:/docker-entrypoint-initdb.d/10-keycloak.sh:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ctem']
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes']
+    volumes:
+      - redisdata:/data
+
+  nats:
+    image: nats:2.11-alpine
+    restart: unless-stopped
+    command: ['-js', '-sd', '/data', '-m', '8222']
+    volumes:
+      - natsdata:/data
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: ['server', '/data', '--console-address', ':9001']
+    environment:
+      MINIO_ROOT_USER: ctem
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?}
+    volumes:
+      - miniodata:/data
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on: [minio]
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 ctem $$MINIO_ROOT_PASSWORD; do sleep 1; done;
+      mc mb --ignore-existing local/ctem-artifacts;
+      mc anonymous set none local/ctem-artifacts;
+      "
+    environment:
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?}
+
+  # Rewrites the dev realm for the public origin + real secrets before Keycloak
+  # imports it. Import only happens on first boot of an empty keycloak database.
+  realm-init:
+    image: python:3.13-alpine
+    command: ['python3', '/render-realm.py', '/src/ctem-realm.json', '/import/ctem-realm.json']
+    environment:
+      CTEM_ORIGIN: https://${CTEM_DOMAIN:?}
+      OIDC_API_CLIENT_SECRET: ${OIDC_API_CLIENT_SECRET:?}
+      DEMO_PASSWORD: ${DEMO_PASSWORD:?}
+    volumes:
+      - ./deploy/keycloak/render-realm.py:/render-realm.py:ro
+      - ./deploy/keycloak/ctem-realm.json:/src/ctem-realm.json:ro
+      - kcimport:/import
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    restart: unless-stopped
+    command: ['start', '--import-realm']
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?}
+      KC_HOSTNAME: https://${AUTH_DOMAIN:?}
+      KC_HTTP_ENABLED: 'true'
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: 'true'
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?}
+    volumes:
+      - kcimport:/opt/keycloak/data/import:ro
+    depends_on:
+      postgres: { condition: service_healthy }
+      realm-init: { condition: service_completed_successfully }
+
+  # ---------------------------------------------------------------- one-shots
+  migrate:
+    <<: *app-image
+    profiles: [ops]
+    environment: *app-env
+    command: ['pnpm', 'db:deploy']
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  seed:
+    <<: *app-image
+    profiles: [ops]
+    environment: *app-env
+    command: ['pnpm', 'db:seed']
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  # ---------------------------------------------------------------- control plane
+  api-gateway:
+    <<: *app-service
+    environment:
+      <<: *app-env
+      APP: api-gateway
+    healthcheck:
+      <<: *http-health
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://localhost:3000/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+
+  identity-service:
+    <<: *app-service
+    environment: { <<: *app-env, APP: identity-service }
+    healthcheck:
+      <<: *http-health
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://localhost:3001/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+
+  asset-service:
+    <<: *app-service
+    environment: { <<: *app-env, APP: asset-service }
+    healthcheck:
+      <<: *http-health
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://localhost:3002/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+
+  orchestrator-service:
+    <<: *app-service
+    environment: { <<: *app-env, APP: orchestrator-service }
+    healthcheck:
+      <<: *http-health
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://localhost:3003/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+
+  findings-service:
+    <<: *app-service
+    environment: { <<: *app-env, APP: findings-service }
+    healthcheck:
+      <<: *http-health
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://localhost:3004/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+
+  risk-service:
+    <<: *app-service
+    environment: { <<: *app-env, APP: risk-service }
+    healthcheck:
+      <<: *http-health
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://localhost:3005/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+
+  reporting-service:
+    <<: *app-service
+    environment: { <<: *app-env, APP: reporting-service }
+    healthcheck:
+      <<: *http-health
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://localhost:3006/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+
+  notification-service:
+    <<: *app-service
+    environment: { <<: *app-env, APP: notification-service }
+    healthcheck:
+      <<: *http-health
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://localhost:3007/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+
+  # ---------------------------------------------------------------- scanners (NATS workers)
+  scanner-sca:
+    <<: *app-service
+    environment: { <<: *app-env, APP: scanner-sca }
+
+  scanner-sast:
+    <<: *app-service
+    environment: { <<: *app-env, APP: scanner-sast }
+
+  scanner-asm:
+    <<: *app-service
+    environment: { <<: *app-env, APP: scanner-asm }
+
+  scanner-container-iac:
+    <<: *app-service
+    environment: { <<: *app-env, APP: scanner-container-iac }
+
+volumes:
+  pgdata:
+  redisdata:
+  natsdata:
+  miniodata:
+  kcimport:
+  caddydata:
+  caddyconfig:
