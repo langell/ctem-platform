@@ -14,6 +14,7 @@ import { DiscoverySchedulerService } from './connectors/discovery-scheduler.serv
 import { AwsConnector } from './connectors/aws.connector';
 import { AzureConnector } from './connectors/azure.connector';
 import { GcpConnector } from './connectors/gcp.connector';
+import { GhcrConnector } from './connectors/ghcr.connector';
 import { GitHubConnector } from './connectors/github.connector';
 import { GitLabConnector } from './connectors/gitlab.connector';
 
@@ -30,6 +31,7 @@ import { GitLabConnector } from './connectors/gitlab.connector';
     AwsConnector,
     AzureConnector,
     GcpConnector,
+    GhcrConnector,
     { provide: APP_GUARD, useClass: InternalAuthGuard },
   ],
 })
@@ -41,6 +43,7 @@ export class AppModule implements OnModuleInit {
     private readonly aws: AwsConnector,
     private readonly azure: AzureConnector,
     private readonly gcp: GcpConnector,
+    private readonly ghcr: GhcrConnector,
   ) {}
 
   /** Connector registration is explicit and lives in one greppable place. */
@@ -50,6 +53,7 @@ export class AppModule implements OnModuleInit {
     this.registry.register(this.aws);
     this.registry.register(this.azure);
     this.registry.register(this.gcp);
+    this.registry.register(this.ghcr);
   }
 
   configure(consumer: MiddlewareConsumer): void {
