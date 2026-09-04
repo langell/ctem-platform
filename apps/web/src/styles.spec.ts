@@ -48,3 +48,31 @@ describe("Designer's first-pass UI tokens", () => {
     expect(html).toMatch(/IBM\+Plex\+Sans/);
   });
 });
+
+describe("Designer's Findings Score Rail", () => {
+  it('declares inset rails and 12% risk-band fills without retinting pass-1 tokens', () => {
+    expect(css).toMatch(/\.rail-danger\s*,[\s\S]*inset 3px 0 0 0 var\(--danger\)/);
+    expect(css).toMatch(/\.rail-warn\s*,[\s\S]*inset 3px 0 0 0 var\(--warn\)/);
+    expect(css).toMatch(/\.rail-accent\s*,[\s\S]*inset 3px 0 0 0 var\(--accent\)/);
+    expect(css).toMatch(/\.rail-info\s*,[\s\S]*inset 3px 0 0 0 var\(--info\)/);
+    expect(css).toMatch(/\.rail-muted\s*,[\s\S]*inset 3px 0 0 0 var\(--muted\)/);
+    expect(css).toMatch(
+      /\.risk-band-high\s*\{[\s\S]*color-mix\(in srgb, var\(--danger\) 12%, transparent\)/,
+    );
+    expect(css).toMatch(
+      /\.risk-band-mid\s*\{[\s\S]*color-mix\(in srgb, var\(--warn\) 12%, transparent\)/,
+    );
+    expect(css).toMatch(
+      /\.risk-band-low\s*\{[\s\S]*color-mix\(in srgb, var\(--ok\) 12%, transparent\)/,
+    );
+    expect(css).toMatch(/font-size:\s*22px/);
+    expect(css).toMatch(/font-weight:\s*700/);
+    expect(css).toMatch(/a\.finding-title\s*\{[\s\S]*font-weight:\s*600/);
+    expect(css).toMatch(/a\.finding-title:hover\s*\{[\s\S]*color:\s*var\(--accent\)/);
+    expect(css).toMatch(/tbody tr:hover\s*\{[\s\S]*background:\s*var\(--panel-2\)/);
+    expect(css).toMatch(/position:\s*sticky/);
+    expect(css).toMatch(/--danger:\s*#F07178/);
+    expect(css).toMatch(/--warn:\s*#E6C07B/);
+    expect(css).toMatch(/--ok:\s*#9CCC65/);
+  });
+});
