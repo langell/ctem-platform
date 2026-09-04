@@ -110,10 +110,10 @@ afterEach(() => {
 });
 
 describe('ContainerScanner.supports', () => {
-  it('supports only container_image and kubernetes_workload', () => {
+  it('supports container_image only — not kubernetes_workload, repository, or iac_stack', () => {
     const s = scanner();
     expect(s.supports({ target: { kind: 'container_image' } } as never)).toBe(true);
-    expect(s.supports({ target: { kind: 'kubernetes_workload' } } as never)).toBe(true);
+    expect(s.supports({ target: { kind: 'kubernetes_workload' } } as never)).toBe(false);
     expect(s.supports({ target: { kind: 'repository' } } as never)).toBe(false);
     expect(s.supports({ target: { kind: 'iac_stack' } } as never)).toBe(false);
   });

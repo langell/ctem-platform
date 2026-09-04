@@ -38,8 +38,8 @@ const TENANT_ANALYZER_KEYS = [
  *
  * Pull allowlisted `ghcr.io` digests in-process (manifest + layer blobs),
  * inventory OS/app packages per layer, and match the shared vuln mirror.
- * `kubernetes_workload` stays unimplemented (throw, never empty success).
- * `repository` / `iac_stack` belong to IacScanner.
+ * `kubernetes_workload` is not claimed by `supports()` and still throws if
+ * execute is invoked for it. `repository` / `iac_stack` belong to IacScanner.
  */
 @Injectable()
 export class ContainerScanner extends BaseScanner {
@@ -55,7 +55,7 @@ export class ContainerScanner extends BaseScanner {
   }
 
   supports(job: ScanJob): boolean {
-    return job.target.kind === 'container_image' || job.target.kind === 'kubernetes_workload';
+    return job.target.kind === 'container_image';
   }
 
   async onReady(): Promise<void> {
