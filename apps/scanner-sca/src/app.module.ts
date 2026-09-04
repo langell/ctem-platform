@@ -3,7 +3,7 @@ import { GitRepoCheckout, ScannerModule } from '@ctem/scanner-sdk';
 import { DbModule } from '@ctem/db';
 import { ScaScanner } from './sca.scanner';
 import { SbomParser } from './sbom.parser';
-import { VulnMatcher } from './vuln.matcher';
+import { VulnMatcher } from '@ctem/vuln-intel';
 import { ReachabilityAnalyzer } from './reachability';
 
 @Module({

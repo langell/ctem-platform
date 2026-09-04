@@ -28,6 +28,8 @@
     "@ctem/observability": "workspace:*",
     "@ctem/events": "workspace:*",
     "@ctem/storage": "workspace:*",
-    "@ctem/scanner-sdk": "workspace:*"
+    "@ctem/scanner-sdk": "workspace:*",
+    "@ctem/db": "workspace:*",
+    "@ctem/vuln-intel": "workspace:*"
   }
 }

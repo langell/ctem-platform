@@ -1,15 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { VulnMatcher } from './vuln.matcher';
-import type { ResolvedComponent } from './sbom.parser';
+import { VulnMatcher, type MatchableComponent } from './vuln.matcher';
 
-const component: ResolvedComponent = {
-  purl: 'pkg:npm/express@4.17.1',
+const component: MatchableComponent = {
   name: 'express',
   version: '4.17.1',
   ecosystem: 'npm',
-  direct: true,
-  dependencyPath: [],
-  licenses: [],
 };
 
 function stubOsv(body: unknown, status = 200): void {

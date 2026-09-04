@@ -32,6 +32,9 @@
       "path": "libs/testing"
     },
     {
+      "path": "libs/vuln-intel"
+    },
+    {
       "path": "apps/api-gateway"
     },
     {

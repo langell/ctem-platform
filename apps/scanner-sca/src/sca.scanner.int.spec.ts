@@ -9,7 +9,7 @@ import { type GitRepoCheckout, type ScanContext } from '@ctem/scanner-sdk';
 import type { ArtifactStore } from '@ctem/storage';
 import { ScaScanner } from './sca.scanner';
 import { SbomParser } from './sbom.parser';
-import { VulnMatcher } from './vuln.matcher';
+import { VulnMatcher } from '@ctem/vuln-intel';
 
 /**
  * Source path (no SBOM key): lockfile resolution + local-mirror matching.

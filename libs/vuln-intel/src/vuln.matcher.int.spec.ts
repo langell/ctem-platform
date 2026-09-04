@@ -1,8 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { PrismaService, type PrismaClient } from '@ctem/db';
 import { ownerClient, uniqueSlug } from '@ctem/testing';
-import { VulnMatcher } from './vuln.matcher';
-import type { ResolvedComponent } from './sbom.parser';
+import { VulnMatcher, type MatchableComponent } from './vuln.matcher';
 
 /**
  * Local-first matching against a real mirrored advisory. fetch is stubbed to
@@ -16,14 +15,10 @@ describe('VulnMatcher local mirror (integration)', () => {
   let prisma: PrismaService;
   let matcher: VulnMatcher;
 
-  const component = (version: string): ResolvedComponent => ({
-    purl: `pkg:npm/${pkg}@${version}`,
+  const component = (version: string): MatchableComponent => ({
     name: pkg,
     version,
     ecosystem: 'npm',
-    direct: true,
-    dependencyPath: [],
-    licenses: [],
   });
 
   beforeAll(async () => {

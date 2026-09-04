@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { BaseScanner, GitRepoCheckout, type ScanContext, type ScanOutcome } from '@ctem/scanner-sdk';
 import type { RawFinding, ScannerType } from '@ctem/contracts';
 import { SbomParser, type ResolvedComponent } from './sbom.parser';
-import { VulnMatcher } from './vuln.matcher';
+import { VulnMatcher } from '@ctem/vuln-intel';
 import { resolveLockfiles } from './lockfiles';
 import {
   isReachabilityGraph,

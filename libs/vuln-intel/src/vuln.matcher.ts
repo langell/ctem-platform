@@ -4,8 +4,14 @@ import { rootLogger } from '@ctem/observability';
 import { Severity } from '@ctem/contracts';
 import { PrismaService } from '@ctem/db';
 import { versionAffected, type OsvAffected } from './osv-range';
-import type { ResolvedComponent } from './sbom.parser';
 import { fetchEpssPaged } from './epss.client';
+
+/** Minimum package identity the mirror / live OSV path needs. */
+export interface MatchableComponent {
+  name: string;
+  version: string;
+  ecosystem: string;
+}
 
 export interface VulnMatch {
   id: string;
@@ -67,7 +73,7 @@ export class VulnMatcher implements OnModuleDestroy {
     await this.loadEpss();
   }
 
-  async match(component: ResolvedComponent): Promise<MatchResult> {
+  async match(component: MatchableComponent): Promise<MatchResult> {
     const local = await this.matchLocal(component);
     if (local) return { matches: local, mirrored: true };
     return { matches: await this.matchLive(component), mirrored: false };
@@ -78,7 +84,7 @@ export class VulnMatcher implements OnModuleDestroy {
    * so the caller can take the one-time live OSV + observe path. A present
    * sync row — fresh or stale — is authoritative.
    */
-  private async matchLocal(component: ResolvedComponent): Promise<VulnMatch[] | null> {
+  private async matchLocal(component: MatchableComponent): Promise<VulnMatch[] | null> {
     if (!this.prisma || component.ecosystem === 'unknown') return null;
 
     let seen = false;
@@ -128,7 +134,7 @@ export class VulnMatcher implements OnModuleDestroy {
       kev: boolean;
       affected: unknown;
     },
-    component: ResolvedComponent,
+    component: MatchableComponent,
   ): VulnMatch {
     const cveId = [row.id, ...row.aliases].find((a) => a.startsWith('CVE-'));
     const severity = Severity.safeParse(row.severity);
@@ -150,7 +156,7 @@ export class VulnMatcher implements OnModuleDestroy {
     };
   }
 
-  private async matchLive(component: ResolvedComponent): Promise<VulnMatch[]> {
+  private async matchLive(component: MatchableComponent): Promise<VulnMatch[]> {
     const env = loadEnv();
     try {
       const res = await fetch(`${env.OSV_API_URL}/query`, {
@@ -176,7 +182,7 @@ export class VulnMatcher implements OnModuleDestroy {
     }
   }
 
-  private toMatch(vuln: OsvVuln, component: ResolvedComponent): VulnMatch {
+  private toMatch(vuln: OsvVuln, component: MatchableComponent): VulnMatch {
     const cvss = vuln.severity?.find((s) => s.type?.startsWith('CVSS'));
     const score = cvss ? parseCvssBaseScore(cvss.score) : null;
     const cveId = [vuln.id, ...(vuln.aliases ?? [])].find((a) => a.startsWith('CVE-'));

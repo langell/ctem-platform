@@ -554,6 +554,9 @@ importers:
       '@ctem/contracts':
         specifier: workspace:*
         version: link:../../libs/contracts
+      '@ctem/db':
+        specifier: workspace:*
+        version: link:../../libs/db
       '@ctem/events':
         specifier: workspace:*
         version: link:../../libs/events
@@ -566,6 +569,9 @@ importers:
       '@ctem/storage':
         specifier: workspace:*
         version: link:../../libs/storage
+      '@ctem/vuln-intel':
+        specifier: workspace:*
+        version: link:../../libs/vuln-intel
       '@nestjs/common':
         specifier: ^11.0.0
         version: 11.2.1(reflect-metadata@0.2.2)(rxjs@7.8.2)
@@ -668,6 +674,9 @@ importers:
       '@ctem/storage':
         specifier: workspace:*
         version: link:../../libs/storage
+      '@ctem/vuln-intel':
+        specifier: workspace:*
+        version: link:../../libs/vuln-intel
       '@nestjs/common':
         specifier: ^11.0.0
         version: 11.2.1(reflect-metadata@0.2.2)(rxjs@7.8.2)
@@ -918,6 +927,24 @@ importers:
       jose:
         specifier: ^5.9.6
         version: 5.10.0
+
+  libs/vuln-intel:
+    dependencies:
+      '@ctem/config':
+        specifier: workspace:*
+        version: link:../config
+      '@ctem/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@ctem/db':
+        specifier: workspace:*
+        version: link:../db
+      '@ctem/observability':
+        specifier: workspace:*
+        version: link:../observability
+      '@nestjs/common':
+        specifier: ^11.0.0
+        version: 11.2.1(reflect-metadata@0.2.2)(rxjs@7.8.2)
 
 packages:
 

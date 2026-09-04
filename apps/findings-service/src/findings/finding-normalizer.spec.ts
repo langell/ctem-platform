@@ -142,6 +142,78 @@ describe('FindingNormalizer.fingerprint', () => {
     expect(sastFp).not.toBe(scaFp);
   });
 
+  it('is (asset, container, vuln, purl, layer) so base vs app layer stay distinct', () => {
+    const base = raw({
+      scannerType: 'container',
+      scannerName: 'ctem-container',
+      identifiers: [{ system: 'CVE', value: 'CVE-2024-0001' }],
+      location: {
+        purl: 'pkg:apk/openssl@1.1.1w',
+        packageName: 'openssl',
+        packageVersion: '1.1.1w',
+        imageLayer: `sha256:${'b'.repeat(64)}`,
+      },
+    });
+    const app = raw({
+      scannerType: 'container',
+      scannerName: 'ctem-container',
+      identifiers: [{ system: 'CVE', value: 'CVE-2024-0001' }],
+      location: {
+        purl: 'pkg:npm/lodash@4.17.21',
+        packageName: 'lodash',
+        packageVersion: '4.17.21',
+        imageLayer: `sha256:${'c'.repeat(64)}`,
+      },
+    });
+    const samePkgOtherLayer = raw({
+      scannerType: 'container',
+      identifiers: [{ system: 'CVE', value: 'CVE-2024-0001' }],
+      location: {
+        purl: 'pkg:apk/openssl@1.1.1w',
+        imageLayer: `sha256:${'c'.repeat(64)}`,
+      },
+    });
+    const baseFp = normalizer.fingerprint('asset-1', base);
+    const appFp = normalizer.fingerprint('asset-1', app);
+    expect(baseFp).toBe(
+      createHash('sha256')
+        .update(
+          ['asset-1', 'container', 'CVE-2024-0001', 'pkg:apk/openssl@1.1.1w', `sha256:${'b'.repeat(64)}`].join('|'),
+        )
+        .digest('hex'),
+    );
+    expect(baseFp).not.toBe(appFp);
+    expect(baseFp).not.toBe(normalizer.fingerprint('asset-1', samePkgOtherLayer));
+
+    const scaFp = normalizer.fingerprint(
+      'asset-1',
+      raw({
+        scannerType: 'sca',
+        identifiers: [{ system: 'CVE', value: 'CVE-2024-0001' }],
+        location: { purl: 'pkg:apk/openssl@1.1.1w' },
+      }),
+    );
+    const sastFp = normalizer.fingerprint(
+      'asset-1',
+      raw({
+        scannerType: 'sast',
+        identifiers: [{ system: 'CVE', value: 'CVE-2024-0001' }],
+        location: { path: 'src/db.ts', purl: 'pkg:apk/openssl@1.1.1w' },
+      }),
+    );
+    const iacFp = normalizer.fingerprint(
+      'asset-1',
+      raw({
+        scannerType: 'iac',
+        identifiers: [{ system: 'rule', value: 'ctem.iac.s3-public' }],
+        location: { path: 's3.tf', resource: 'aws_s3_bucket.logs', purl: 'pkg:apk/openssl@1.1.1w' },
+      }),
+    );
+    expect(baseFp).not.toBe(scaFp);
+    expect(baseFp).not.toBe(sastFp);
+    expect(baseFp).not.toBe(iacFp);
+  });
+
   it('ignores line numbers for code findings so a diff above the match is not a new finding', () => {
     const base = raw({
       scannerType: 'sast',

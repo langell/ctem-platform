@@ -29,6 +29,7 @@
     "@ctem/storage": "workspace:*",
     "@ctem/scanner-sdk": "workspace:*",
     "@ctem/db": "workspace:*",
+    "@ctem/vuln-intel": "workspace:*",
     "yaml": "^2.8.1"
   }
 }

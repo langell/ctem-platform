@@ -12,4 +12,5 @@ export const workspaceAliases = {
   '@ctem/service-kit': resolve(__dirname, 'libs/service-kit/src/index.ts'),
   '@ctem/scanner-sdk': resolve(__dirname, 'libs/scanner-sdk/src/index.ts'),
   '@ctem/testing': resolve(__dirname, 'libs/testing/src/index.ts'),
+  '@ctem/vuln-intel': resolve(__dirname, 'libs/vuln-intel/src/index.ts'),
 };
