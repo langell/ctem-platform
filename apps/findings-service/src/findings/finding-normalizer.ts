@@ -38,6 +38,20 @@ export class FindingNormalizer {
         .digest('hex');
     }
 
+    // Container identity is (asset, container, vuln, purl, layer digest).
+    // Same CVE in a base layer vs an app layer must not collapse, and this
+    // key must not collide with SCA (asset, sca, vuln, purl).
+    if (finding.scannerType === 'container') {
+      const vuln =
+        finding.identifiers.find((i) => /^(cve|ghsa|osv)$/i.test(i.system))?.value.toUpperCase() ??
+        finding.externalId;
+      const pkg =
+        finding.location.purl ??
+        `${finding.location.packageName ?? ''}@${finding.location.packageVersion ?? ''}`;
+      const layer = finding.location.imageLayer ?? '';
+      return createHash('sha256').update([assetId, 'container', vuln, pkg, layer].join('|')).digest('hex');
+    }
+
     const parts: string[] = [assetId, finding.scannerType];
 
     const cve = finding.identifiers.find((i) => /^(cve|ghsa|osv)$/i.test(i.system));
@@ -49,7 +63,6 @@ export class FindingNormalizer {
 
     switch (finding.scannerType) {
       case 'sca':
-      case 'container':
         parts.push(finding.location.purl ?? `${finding.location.packageName}@${finding.location.packageVersion}`);
         break;
       case 'sast':

@@ -5,7 +5,7 @@ import { CheckoutError, GitRepoCheckout, type ScanContext } from '@ctem/scanner-
 import type { ArtifactStore } from '@ctem/storage';
 import { ScaScanner } from './sca.scanner';
 import { SbomParser } from './sbom.parser';
-import { VulnMatcher } from './vuln.matcher';
+import { VulnMatcher } from '@ctem/vuln-intel';
 import { LockfileResolutionError } from './lockfiles/resolve';
 import {
   emptyReachabilityGraph,
