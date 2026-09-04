@@ -4,9 +4,11 @@ import {
   exposureBadgeClass,
   formatContribution,
   humanize,
+  riskBandClass,
   scoreBand,
   scoreClass,
   severityBadgeClass,
+  severityRailClass,
   validationBadgeClass,
 } from './display';
 
@@ -21,6 +23,21 @@ describe('score bands', () => {
     expect(scoreClass(88)).toBe('score-high');
     expect(scoreClass(55)).toBe('score-mid');
     expect(scoreClass(12)).toBe('score-low');
+    expect(riskBandClass(94)).toBe('risk-band-high');
+    expect(riskBandClass(61)).toBe('risk-band-mid');
+    expect(riskBandClass(28)).toBe('risk-band-low');
+  });
+});
+
+describe('findings score rail', () => {
+  it('maps fixture severity to rail classes', () => {
+    expect(severityRailClass('critical')).toBe('rail-danger');
+    expect(severityRailClass('high')).toBe('rail-warn');
+    expect(severityRailClass('medium')).toBe('rail-accent');
+    expect(severityRailClass('low')).toBe('rail-info');
+    expect(severityRailClass('info')).toBe('rail-info');
+    expect(severityRailClass('unknown')).toBe('rail-muted');
+    expect(severityRailClass('other')).toBe('rail-muted');
   });
 });
 

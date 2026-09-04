@@ -20,6 +20,28 @@ export function scoreClass(score: number): string {
   return `score-${scoreBand(score)}`;
 }
 
+/** 12% tint cell fill for the Findings list Risk column. */
+export function riskBandClass(score: number): string {
+  return `risk-band-${scoreBand(score)}`;
+}
+
+/** 3px inset left rail on Findings list data rows. */
+export function severityRailClass(severity: string): string {
+  switch (severity) {
+    case 'critical':
+      return 'rail-danger';
+    case 'high':
+      return 'rail-warn';
+    case 'medium':
+      return 'rail-accent';
+    case 'low':
+    case 'info':
+      return 'rail-info';
+    default:
+      return 'rail-muted';
+  }
+}
+
 export function severityBadgeClass(severity: string): string {
   switch (severity) {
     case 'critical':

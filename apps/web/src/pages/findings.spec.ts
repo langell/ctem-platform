@@ -6,6 +6,9 @@ const findings = readFileSync(resolve('apps/web/src/pages/FindingsPage.tsx'), 'u
 const detail = readFileSync(resolve('apps/web/src/pages/FindingDetailPage.tsx'), 'utf8');
 const assets = readFileSync(resolve('apps/web/src/pages/AssetsPage.tsx'), 'utf8');
 const policies = readFileSync(resolve('apps/web/src/pages/PoliciesPage.tsx'), 'utf8');
+const app = readFileSync(resolve('apps/web/src/App.tsx'), 'utf8');
+const layout = readFileSync(resolve('apps/web/src/ui/Layout.tsx'), 'utf8');
+const login = readFileSync(resolve('apps/web/src/pages/LoginPage.tsx'), 'utf8');
 
 describe('findings list human path', () => {
   it('keeps the six existing columns', () => {
@@ -42,8 +45,33 @@ describe('findings list human path', () => {
 
   it('whole row clicks through to detail', () => {
     expect(findings).toMatch(/onClick=\{\(\) => navigate\(`\/findings\/\$\{f\.id\}`\)\}/);
-    expect(findings).toMatch(/className="clickable"/);
-    expect(findings).toMatch(/<Link to=\{`\/findings\/\$\{f\.id\}`\}>/);
+    expect(findings).toMatch(/className=\{`clickable \$\{severityRailClass\(f\.severity\)\}`\}/);
+    expect(findings).toMatch(/<Link className="finding-title" to=\{`\/findings\/\$\{f\.id\}`\}>/);
+    expect(app).toMatch(/path="\/findings\/:id"/);
+  });
+
+  it('paints a severity rail and risk-band on data rows for fixture severity', () => {
+    expect(findings).toMatch(/severityRailClass\(f\.severity\)/);
+    expect(findings).toMatch(/riskBandClass\(f\.riskScore\)/);
+    expect(findings).toMatch(/scoreClass\(f\.riskScore\)/);
+    expect(findings).toMatch(/className="finding-title"/);
+    expect(findings).toMatch(/className="num risk-cell"/);
+    expect(findings).toMatch(/\{loading \? \(\s*<SkeletonRows columns=\{6\} \/>/);
+    const empty = findings.slice(findings.indexOf('No findings yet'));
+    expect(empty).not.toMatch(/severityRailClass|rail-/);
+    expect(detail).not.toMatch(/severityRailClass/);
+    expect(detail).not.toMatch(/riskBandClass/);
+    expect(detail).not.toMatch(/finding-title/);
+  });
+
+  it('takes org from the JWT and does not paste a token or add routes', () => {
+    expect(findings).toMatch(/gatewayFetch<Page<Finding>>\('\/v1\/findings'\)/);
+    expect(findings).not.toMatch(/orgId/);
+    expect(findings).not.toMatch(/<textarea/);
+    expect(findings).not.toMatch(/Paste a JWT/);
+    expect(login).not.toMatch(/Paste a JWT/);
+    expect(layout).not.toMatch(/<select/);
+    expect(app.match(/path="/g)?.length).toBe(9);
   });
 });
 

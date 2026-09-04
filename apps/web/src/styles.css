@@ -226,6 +226,70 @@ tr.clickable {
   cursor: pointer;
 }
 
+tr.clickable > td {
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+tr.clickable > td.risk-cell {
+  padding: 0;
+}
+
+.rail-danger,
+tr.rail-danger > td:first-child {
+  box-shadow: inset 3px 0 0 0 var(--danger);
+}
+
+.rail-warn,
+tr.rail-warn > td:first-child {
+  box-shadow: inset 3px 0 0 0 var(--warn);
+}
+
+.rail-accent,
+tr.rail-accent > td:first-child {
+  box-shadow: inset 3px 0 0 0 var(--accent);
+}
+
+.rail-info,
+tr.rail-info > td:first-child {
+  box-shadow: inset 3px 0 0 0 var(--info);
+}
+
+.rail-muted,
+tr.rail-muted > td:first-child {
+  box-shadow: inset 3px 0 0 0 var(--muted);
+}
+
+a.finding-title {
+  font-weight: 600;
+  color: var(--text);
+}
+
+a.finding-title:hover {
+  color: var(--accent);
+}
+
+.risk-band-high,
+.risk-band-mid,
+.risk-band-low {
+  padding: 10px 16px;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.risk-band-high {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+.risk-band-mid {
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+}
+
+.risk-band-low {
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+}
+
 .num {
   text-align: right;
   font-variant-numeric: tabular-nums;
