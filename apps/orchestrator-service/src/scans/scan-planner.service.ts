@@ -11,6 +11,8 @@ import type { CreateScanRequest, ScannerType } from '@ctem/contracts';
 export const SCANNER_ASSET_KINDS: Record<ScannerType, string[]> = {
   sca: ['repository', 'package', 'container_image'],
   sast: ['repository'],
+  // Container scanner supports() is container_image only. kubernetes_workload
+  // is later (cloud_posture today); dispatching it here would hang the job.
   container: ['container_image'],
   iac: ['repository', 'iac_stack'],
   secrets: ['repository'],
