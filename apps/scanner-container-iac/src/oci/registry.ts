@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import type { GhcrImageRef } from '../container.identity';
 import {
   allowlistedGhcrBlobRedirect,
@@ -25,6 +25,9 @@ export class ContainerPullError extends Error {
 }
 
 export const MAX_IMAGE_LAYERS = 128;
+
+/** Injection token for overriding the fetch implementation (tests, egress shims). */
+export const GHCR_FETCH = Symbol('GHCR_FETCH');
 
 const MANIFEST_ACCEPT = [
   'application/vnd.oci.image.index.v1+json',
@@ -79,8 +82,15 @@ interface OciManifest {
 @Injectable()
 export class GhcrRegistry implements ImagePuller {
   private readonly layerCache = new Map<string, LayerSnapshot>();
+  private readonly fetchImpl: typeof fetch;
 
-  constructor(private readonly fetchImpl: typeof fetch = fetch) {}
+  /**
+   * `@Optional()` + explicit token: without them Nest tries to resolve the
+   * `typeof fetch` param as a `Function` provider and fails at bootstrap.
+   */
+  constructor(@Optional() @Inject(GHCR_FETCH) fetchImpl?: typeof fetch) {
+    this.fetchImpl = fetchImpl ?? fetch;
+  }
 
   async pull(
     ref: GhcrImageRef,

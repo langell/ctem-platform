@@ -28,6 +28,8 @@ make demo-token # JWT for the demo org (curl / API; browser login is Keycloak)
 
 Gateway on `http://localhost:3000` (OpenAPI at `/docs`, web UI at `/`). The UI is a thin Nx client of the gateway — org comes from the JWT, never from a header or query. `/login` redirects to compose Keycloak (`ctem` realm, public client `ctem-web` with PKCE); the callback stores the issued access-token JWT and sends it as `Authorization` (machine callers present a PAT as `Authorization`, not in the UI). Compose Keycloak imports the `ctem` realm (`OIDC_ISSUER=http://localhost:8080/realms/ctem`) and a demo analyst whose IdP subject is `demo|analyst`, matching the seeded user. Optional Vite HMR: `pnpm dev:web` on port 4200 (proxies `/v1` to the gateway). Tenants list, create, and reorder notify, ticket, or fail-build rules at `/policies`. CI polls `GET /v1/scans/:id` for `conclusion`.
 
+Want it on a real box? [deploy/README.md](deploy/README.md) covers a single-VM Compose deployment behind Caddy.
+
 ## Testing
 
 ```bash
