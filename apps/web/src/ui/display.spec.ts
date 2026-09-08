@@ -51,14 +51,14 @@ describe('badges and labels', () => {
   });
 
   it('maps severity and validation to the spec tints', () => {
-    expect(severityBadgeClass('critical')).toBe('badge badge-danger');
-    expect(severityBadgeClass('high')).toBe('badge badge-warn');
-    expect(severityBadgeClass('medium')).toBe('badge badge-accent');
-    expect(severityBadgeClass('low')).toBe('badge badge-info');
-    expect(validationBadgeClass('exploitable')).toBe('badge badge-danger');
-    expect(validationBadgeClass('reachable')).toBe('badge badge-warn');
+    expect(severityBadgeClass('critical')).toBe('badge badge-danger badge-signal');
+    expect(severityBadgeClass('high')).toBe('badge badge-warn badge-signal');
+    expect(severityBadgeClass('medium')).toBe('badge badge-accent badge-signal');
+    expect(severityBadgeClass('low')).toBe('badge badge-info badge-signal');
+    expect(validationBadgeClass('exploitable')).toBe('badge badge-danger badge-signal');
+    expect(validationBadgeClass('reachable')).toBe('badge badge-warn badge-signal');
     expect(validationBadgeClass('not_validated')).toBe('badge badge-muted');
-    expect(exposureBadgeClass('internet_facing')).toBe('badge badge-danger');
+    expect(exposureBadgeClass('internet_facing')).toBe('badge badge-danger badge-signal');
     expect(exposureBadgeClass('internal')).toBe('badge badge-muted');
   });
 

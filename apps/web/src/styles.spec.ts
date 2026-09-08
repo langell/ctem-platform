@@ -50,22 +50,22 @@ describe("Designer's first-pass UI tokens", () => {
 });
 
 describe("Designer's Findings Score Rail", () => {
-  it('declares inset rails and 12% risk-band fills without retinting pass-1 tokens', () => {
-    expect(css).toMatch(/\.rail-danger\s*,[\s\S]*inset 3px 0 0 0 var\(--danger\)/);
-    expect(css).toMatch(/\.rail-warn\s*,[\s\S]*inset 3px 0 0 0 var\(--warn\)/);
-    expect(css).toMatch(/\.rail-accent\s*,[\s\S]*inset 3px 0 0 0 var\(--accent\)/);
-    expect(css).toMatch(/\.rail-info\s*,[\s\S]*inset 3px 0 0 0 var\(--info\)/);
-    expect(css).toMatch(/\.rail-muted\s*,[\s\S]*inset 3px 0 0 0 var\(--muted\)/);
+  it('declares inset rails and 18% risk-band fills without retinting pass-1 tokens', () => {
+    expect(css).toMatch(/\.rail-danger\s*,[\s\S]*inset 4px 0 0 0 var\(--danger\)/);
+    expect(css).toMatch(/\.rail-warn\s*,[\s\S]*inset 4px 0 0 0 var\(--warn\)/);
+    expect(css).toMatch(/\.rail-accent\s*,[\s\S]*inset 4px 0 0 0 var\(--accent\)/);
+    expect(css).toMatch(/\.rail-info\s*,[\s\S]*inset 4px 0 0 0 var\(--info\)/);
+    expect(css).toMatch(/\.rail-muted\s*,[\s\S]*inset 4px 0 0 0 var\(--muted\)/);
     expect(css).toMatch(
-      /\.risk-band-high\s*\{[\s\S]*color-mix\(in srgb, var\(--danger\) 12%, transparent\)/,
+      /\.risk-band-high\s*\{[\s\S]*color-mix\(in srgb, var\(--danger\) 18%, transparent\)/,
     );
     expect(css).toMatch(
-      /\.risk-band-mid\s*\{[\s\S]*color-mix\(in srgb, var\(--warn\) 12%, transparent\)/,
+      /\.risk-band-mid\s*\{[\s\S]*color-mix\(in srgb, var\(--warn\) 18%, transparent\)/,
     );
     expect(css).toMatch(
-      /\.risk-band-low\s*\{[\s\S]*color-mix\(in srgb, var\(--ok\) 12%, transparent\)/,
+      /\.risk-band-low\s*\{[\s\S]*color-mix\(in srgb, var\(--ok\) 18%, transparent\)/,
     );
-    expect(css).toMatch(/font-size:\s*22px/);
+    expect(css).toMatch(/font-size:\s*28px/);
     expect(css).toMatch(/font-weight:\s*700/);
     expect(css).toMatch(/a\.finding-title\s*\{[\s\S]*font-weight:\s*600/);
     expect(css).toMatch(/a\.finding-title:hover\s*\{[\s\S]*color:\s*var\(--accent\)/);
@@ -74,5 +74,28 @@ describe("Designer's Findings Score Rail", () => {
     expect(css).toMatch(/--danger:\s*#F07178/);
     expect(css).toMatch(/--warn:\s*#E6C07B/);
     expect(css).toMatch(/--ok:\s*#9CCC65/);
+  });
+});
+
+describe("Designer's Signal First suite restyle", () => {
+  it('declares badge-signal, page-title, login-brand, and cta-loud without retinting tokens', () => {
+    expect(css).toMatch(/\.badge-signal\s*\{[\s\S]*font-size:\s*12px/);
+    expect(css).toMatch(/\.badge-signal\s*\{[\s\S]*font-weight:\s*600/);
+    expect(css).toMatch(/\.badge-signal\s*\{[\s\S]*letter-spacing:\s*0\.05em/);
+    expect(css).toMatch(
+      /\.badge-danger\.badge-signal\s*\{[\s\S]*color-mix\(in srgb, var\(--danger\) 28%, transparent\)/,
+    );
+    expect(css).toMatch(
+      /\.badge-danger\.badge-signal\s*\{[\s\S]*inset 0 0 0 1px color-mix\(in srgb, var\(--danger\) 45%/,
+    );
+    expect(css).toMatch(
+      /\.page-title\s*\{[\s\S]*border-left:\s*4px solid var\(--accent\)[\s\S]*padding-left:\s*12px/,
+    );
+    expect(css).toMatch(/\.login-brand::after\s*\{[\s\S]*background:\s*var\(--accent\)/);
+    expect(css).toMatch(/button\.cta-loud\s*\{[\s\S]*font-weight:\s*700[\s\S]*font-size:\s*15px/);
+    expect(css).toMatch(/\.brand\s*\{[\s\S]*color:\s*var\(--accent\)/);
+    expect(css).toMatch(/--accent:\s*#6CB6FF/);
+    expect(css).toMatch(/--bg:\s*#0B1016/);
+    expect(css).toMatch(/IBM Plex Sans/);
   });
 });

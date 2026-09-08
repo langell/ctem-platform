@@ -11,6 +11,11 @@ const layout = readFileSync(resolve('apps/web/src/ui/Layout.tsx'), 'utf8');
 const login = readFileSync(resolve('apps/web/src/pages/LoginPage.tsx'), 'utf8');
 
 describe('findings list human path', () => {
+  it('uses page-title on the Findings heading', () => {
+    expect(findings).toMatch(/<h1 className="page-title">Findings<\/h1>/);
+    expect(detail).toMatch(/<h1 className="page-title">\{finding\.title\}<\/h1>/);
+  });
+
   it('keeps the six existing columns', () => {
     expect(findings).toMatch(/<th>Title<\/th>/);
     expect(findings).toMatch(/<th>Severity<\/th>/);

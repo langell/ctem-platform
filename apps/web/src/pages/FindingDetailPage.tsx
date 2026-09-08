@@ -88,7 +88,7 @@ export function FindingDetailPage() {
       <p>
         <Link to="/findings">Findings</Link>
       </p>
-      <h1>{finding.title}</h1>
+      <h1 className="page-title">{finding.title}</h1>
       <p className="lede">{finding.description}</p>
 
       <div className="chips">

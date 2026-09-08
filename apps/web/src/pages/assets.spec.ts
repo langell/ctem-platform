@@ -6,6 +6,10 @@ const assets = readFileSync(resolve('apps/web/src/pages/AssetsPage.tsx'), 'utf8'
 const app = readFileSync(resolve('apps/web/src/App.tsx'), 'utf8');
 
 describe('assets human path', () => {
+  it('uses page-title on the Assets heading', () => {
+    expect(assets).toMatch(/<h1 className="page-title">Assets<\/h1>/);
+  });
+
   it('keeps the six existing columns', () => {
     expect(assets).toMatch(/<th>Name<\/th>/);
     expect(assets).toMatch(/<th>Kind<\/th>/);

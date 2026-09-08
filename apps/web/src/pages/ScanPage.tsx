@@ -38,7 +38,7 @@ export function ScanPage() {
 
   return (
     <section>
-      <h1>Scan</h1>
+      <h1 className="page-title">Scan</h1>
       <p className="lede">
         Start a scan for this organization. Leave asset IDs empty to include every in-scope asset.
       </p>
@@ -65,7 +65,7 @@ export function ScanPage() {
           />
         </label>
         {error ? <p className="banner error">{error}</p> : null}
-        <button type="submit" disabled={busy}>
+        <button type="submit" className="cta-loud" disabled={busy}>
           {busy ? 'Starting…' : 'Start scan'}
         </button>
       </form>

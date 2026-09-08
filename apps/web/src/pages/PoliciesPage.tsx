@@ -118,7 +118,7 @@ export function PoliciesPage() {
 
   return (
     <section>
-      <h1>Policies</h1>
+      <h1 className="page-title">Policies</h1>
       <p className="lede">Ordered rules. Lower priority runs first; the first match wins.</p>
       {!loading && !error ? <p className="muted count">{items.length} rules</p> : null}
       {error ? <p className="banner error">{error}</p> : null}
@@ -308,7 +308,7 @@ export function PoliciesPage() {
                 Cancel edit
               </button>
             ) : null}
-            <button type="submit" disabled={busy}>
+            <button type="submit" className="cta-loud" disabled={busy}>
               {busy ? 'Saving…' : editingId ? 'Update rule' : 'Create rule'}
             </button>
           </div>

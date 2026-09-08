@@ -9,6 +9,11 @@ const table = policies.slice(policies.indexOf('<table>'), policies.indexOf('</ta
 const form = policies.slice(policies.indexOf('<form'), policies.indexOf('</form>'));
 
 describe('policies human path', () => {
+  it('uses page-title and a loud create/save CTA', () => {
+    expect(policies).toMatch(/<h1 className="page-title">Policies<\/h1>/);
+    expect(form).toMatch(/className="cta-loud"/);
+  });
+
   it('distinguishes loading vs empty', () => {
     expect(policies).toMatch(/const \[loading, setLoading\] = useState\(true\)/);
     expect(policies).toMatch(/SkeletonRows/);

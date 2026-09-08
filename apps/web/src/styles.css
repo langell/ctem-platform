@@ -86,6 +86,22 @@ button:disabled {
   cursor: default;
 }
 
+button.cta-loud {
+  font-weight: 700;
+  font-size: 15px;
+  padding: 12px 20px;
+  letter-spacing: 0.02em;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent),
+    0 4px 14px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+button.cta-loud:hover:not(:disabled) {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent-pressed) 45%, transparent),
+    0 6px 18px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
 button.link {
   background: transparent;
   border: 0;
@@ -136,6 +152,7 @@ button.link:hover:not(:disabled) {
   letter-spacing: 0.08em;
   font-size: 16px;
   font-weight: 600;
+  color: var(--accent);
 }
 
 .session {
@@ -170,6 +187,12 @@ h3 {
 
 h1 {
   font-size: 24px;
+}
+
+.page-title {
+  border-left: 4px solid var(--accent);
+  padding-left: 12px;
+  margin-left: -2px;
 }
 
 h2 {
@@ -237,27 +260,27 @@ tr.clickable > td.risk-cell {
 
 .rail-danger,
 tr.rail-danger > td:first-child {
-  box-shadow: inset 3px 0 0 0 var(--danger);
+  box-shadow: inset 4px 0 0 0 var(--danger);
 }
 
 .rail-warn,
 tr.rail-warn > td:first-child {
-  box-shadow: inset 3px 0 0 0 var(--warn);
+  box-shadow: inset 4px 0 0 0 var(--warn);
 }
 
 .rail-accent,
 tr.rail-accent > td:first-child {
-  box-shadow: inset 3px 0 0 0 var(--accent);
+  box-shadow: inset 4px 0 0 0 var(--accent);
 }
 
 .rail-info,
 tr.rail-info > td:first-child {
-  box-shadow: inset 3px 0 0 0 var(--info);
+  box-shadow: inset 4px 0 0 0 var(--info);
 }
 
 .rail-muted,
 tr.rail-muted > td:first-child {
-  box-shadow: inset 3px 0 0 0 var(--muted);
+  box-shadow: inset 4px 0 0 0 var(--muted);
 }
 
 a.finding-title {
@@ -272,22 +295,22 @@ a.finding-title:hover {
 .risk-band-high,
 .risk-band-mid,
 .risk-band-low {
-  padding: 10px 16px;
-  font-size: 22px;
+  padding: 12px 16px;
+  font-size: 28px;
   font-weight: 700;
   line-height: 1;
 }
 
 .risk-band-high {
-  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
 }
 
 .risk-band-mid {
-  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  background: color-mix(in srgb, var(--warn) 18%, transparent);
 }
 
 .risk-band-low {
-  background: color-mix(in srgb, var(--ok) 12%, transparent);
+  background: color-mix(in srgb, var(--ok) 18%, transparent);
 }
 
 .num {
@@ -382,6 +405,25 @@ tbody tr.editing:hover {
   width: min(440px, 100%);
 }
 
+.login-brand {
+  position: relative;
+  padding-bottom: 10px;
+}
+
+.login-brand::after {
+  content: '';
+  display: block;
+  width: 48px;
+  height: 3px;
+  background: var(--accent);
+  margin-top: 10px;
+  border-radius: 2px;
+}
+
+.login-card .cta-loud {
+  width: 100%;
+}
+
 .login-card textarea {
   resize: vertical;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -414,9 +456,21 @@ tbody tr.editing:hover {
   vertical-align: middle;
 }
 
+.badge-signal {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  padding: 4px 10px;
+}
+
 .badge-danger {
   color: var(--danger);
   background: color-mix(in srgb, var(--danger) 15%, transparent);
+}
+
+.badge-danger.badge-signal {
+  background: color-mix(in srgb, var(--danger) 28%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 45%, transparent);
 }
 
 .badge-warn {
@@ -424,9 +478,19 @@ tbody tr.editing:hover {
   background: color-mix(in srgb, var(--warn) 15%, transparent);
 }
 
+.badge-warn.badge-signal {
+  background: color-mix(in srgb, var(--warn) 28%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 45%, transparent);
+}
+
 .badge-accent {
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+
+.badge-accent.badge-signal {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 .badge-info {
@@ -434,14 +498,29 @@ tbody tr.editing:hover {
   background: color-mix(in srgb, var(--info) 15%, transparent);
 }
 
+.badge-info.badge-signal {
+  background: color-mix(in srgb, var(--info) 28%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--info) 45%, transparent);
+}
+
 .badge-muted {
   color: var(--muted);
   background: color-mix(in srgb, var(--muted) 15%, transparent);
 }
 
+.badge-muted.badge-signal {
+  background: color-mix(in srgb, var(--muted) 28%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--muted) 45%, transparent);
+}
+
 .badge-ok {
   color: var(--ok);
   background: color-mix(in srgb, var(--ok) 15%, transparent);
+}
+
+.badge-ok.badge-signal {
+  background: color-mix(in srgb, var(--ok) 28%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ok) 45%, transparent);
 }
 
 .grid {

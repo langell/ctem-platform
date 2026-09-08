@@ -34,7 +34,8 @@ describe('scan human path', () => {
   });
 
   it('matches nav copy and drops the POST lecture', () => {
-    expect(scan).toMatch(/<h1>Scan<\/h1>/);
+    expect(scan).toMatch(/<h1 className="page-title">Scan<\/h1>/);
+    expect(scan).toMatch(/className="cta-loud"/);
     expect(scan).not.toMatch(/Kick a scan/);
     expect(scan).not.toMatch(/Dispatches/);
     expect(scan).not.toMatch(/POST \/v1\/scans/);
