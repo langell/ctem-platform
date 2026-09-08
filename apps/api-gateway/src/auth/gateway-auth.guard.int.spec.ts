@@ -7,7 +7,7 @@ import { APP_GUARD, Reflector } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { AuthModule, CurrentUser, JwtVerifier, RequirePermissions } from '@ctem/auth';
 import type { Principal } from '@ctem/contracts';
-import { TestIdp, applyTestEnv } from '@ctem/testing';
+import { TestIdp, applyTestEnv, stubUserIdFromSubject } from '@ctem/testing';
 import { GatewayAuthGuard } from './gateway-auth.guard';
 
 const KNOWN_PAT = 'ctem_pat_known-integration-token';
@@ -50,20 +50,42 @@ describe('GatewayAuthGuard (integration)', () => {
       let body = '';
       req.on('data', (c: Buffer) => (body += c.toString()));
       req.on('end', () => {
-        const presented = (() => {
+        const json = (() => {
           try {
-            return (JSON.parse(body) as { token?: string }).token;
+            return JSON.parse(body) as { token?: string; sub?: string; orgId?: string };
           } catch {
-            return undefined;
+            return {} as { token?: string; sub?: string; orgId?: string };
           }
         })();
         // Fail-closed: identity never answers for this PAT.
-        if (presented === PAT_DROP) {
+        if (json.token === PAT_DROP) {
           req.socket.destroy();
           return;
         }
         res.setHeader('content-type', 'application/json');
-        if (req.url === '/internal/tokens/verify' && presented === KNOWN_PAT) {
+        if (req.url === '/internal/auth/resolve') {
+          const sub = json.sub ?? '';
+          if (sub.includes('|nomember')) {
+            res.statusCode = 403;
+            res.end(JSON.stringify({ message: 'No organization membership' }));
+            return;
+          }
+          if (sub === 'idp|raw-sub') {
+            // Identity must never echo an IdP sub as userId; gateway fail-closes.
+            res.end(JSON.stringify({ userId: sub, orgId: json.orgId, role: 'owner' }));
+            return;
+          }
+          const role = sub.includes('|auditor') ? 'auditor' : 'owner';
+          res.end(
+            JSON.stringify({
+              userId: stubUserIdFromSubject(sub || 'test|user'),
+              orgId: json.orgId,
+              role,
+            }),
+          );
+          return;
+        }
+        if (req.url === '/internal/tokens/verify' && json.token === KNOWN_PAT) {
           res.end(
             JSON.stringify({
               orgId,
@@ -72,7 +94,7 @@ describe('GatewayAuthGuard (integration)', () => {
               scopes: ['scan:run', 'finding:read', 'not-a-real-permission'],
             }),
           );
-        } else if (req.url === '/internal/tokens/verify' && presented === PAT_NO_ORG) {
+        } else if (req.url === '/internal/tokens/verify' && json.token === PAT_NO_ORG) {
           // 200 without an org — gateway must not invent a tenant from the client.
           res.end(JSON.stringify({ tokenId: 'tok-x', name: 'ci-bot', scopes: ['finding:read'] }));
         } else {
@@ -130,17 +152,23 @@ describe('GatewayAuthGuard (integration)', () => {
     expect((await get('/probe/read', forged)).status).toBe(401);
   });
 
-  it('mints a principal from a valid JWT', async () => {
-    const jwt = await idp.issueToken({ sub: 'idp|alice', orgId, roles: ['security_analyst'] });
+  it('mints a principal from Membership, not the IdP sub or JWT roles', async () => {
+    const jwt = await idp.issueToken({
+      sub: 'idp|alice',
+      orgId,
+      roles: ['security_analyst'],
+      email: 'alice@test.local',
+    });
     const res = await get('/probe/read', jwt);
     expect(res.status).toBe(200);
     const principal = (await res.json()) as Principal;
     expect(principal).toMatchObject({
-      userId: 'idp|alice',
+      userId: stubUserIdFromSubject('idp|alice'),
       orgId,
-      role: 'security_analyst',
+      role: 'owner',
       serviceAccount: null,
     });
+    expect(principal.userId).not.toBe('idp|alice');
     expect(principal.permissions).toContain('finding:triage');
   });
 
@@ -166,15 +194,39 @@ describe('GatewayAuthGuard (integration)', () => {
     expect(principal.orgId).not.toBe(otherOrg);
   });
 
-  it('rejects a JWT with an unknown role', async () => {
-    const jwt = await idp.issueToken({ orgId, roles: ['superuser'] });
+  it('rejects a JWT with no Membership (403), ignoring JWT roles', async () => {
+    const jwt = await idp.issueToken({
+      sub: 'idp|nomember',
+      orgId,
+      roles: ['owner'],
+      email: 'nobody@test.local',
+    });
     expect((await get('/probe/read', jwt)).status).toBe(403);
   });
 
-  it('denies a role that lacks the route permission', async () => {
-    const jwt = await idp.issueToken({ orgId, roles: ['auditor'] });
-    expect((await get('/probe/read', jwt)).status).toBe(200);
+  it('does not write an IdP-shaped sub as Principal.userId', async () => {
+    const jwt = await idp.issueToken({ sub: 'idp|raw-sub', orgId, roles: ['owner'] });
+    expect((await get('/probe/read', jwt)).status).toBe(401);
+  });
+
+  it('takes permissions from Membership when JWT roles disagree', async () => {
+    const jwt = await idp.issueToken({
+      sub: 'idp|auditor',
+      orgId,
+      roles: ['owner'],
+      email: 'auditor@test.local',
+    });
+    const res = await get('/probe/read', jwt);
+    expect(res.status).toBe(200);
+    const principal = (await res.json()) as Principal;
+    expect(principal.role).toBe('auditor');
+    expect(principal.permissions).not.toContain('finding:triage');
     expect((await get('/probe/triage', jwt)).status).toBe(403);
+  });
+
+  it('ignores unknown JWT role claims when Membership exists', async () => {
+    const jwt = await idp.issueToken({ orgId, roles: ['superuser'] });
+    expect((await get('/probe/read', jwt)).status).toBe(200);
   });
 
   it('mints a service-account principal from a valid PAT, keeping only real permissions', async () => {

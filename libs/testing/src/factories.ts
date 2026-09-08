@@ -176,13 +176,15 @@ export async function seedDemoOrg(prisma: PrismaClient) {
 
   const user = await prisma.user.upsert({
     where: { email: DEMO_USER_EMAIL },
-    update: { idpSubject: DEMO_IDP_SUBJECT },
+    update: { idpSubject: DEMO_IDP_SUBJECT, name: 'Demo Analyst' },
     create: { email: DEMO_USER_EMAIL, name: 'Demo Analyst', idpSubject: DEMO_IDP_SUBJECT },
   });
 
+  // Membership is AuthZ for the demo analyst. JWT `roles` are ignored after
+  // verify; Keycloak `sub`/`org_id` must match this row or login 403s.
   await prisma.membership.upsert({
     where: { orgId_userId: { orgId: org.id, userId: user.id } },
-    update: {},
+    update: { role: 'owner', disabledAt: null },
     create: { orgId: org.id, userId: user.id, role: 'owner' },
   });
 

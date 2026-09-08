@@ -4,8 +4,9 @@ import { CurrentUser } from '@ctem/auth';
 import type { Principal } from '@ctem/contracts';
 
 /**
- * Thin echo of the gateway-minted principal. Org is whatever the JWT (or PAT)
- * already carried — the client cannot supply one.
+ * Thin echo of the gateway-minted principal. Org is whatever the JWT (humans:
+ * token `org_id` + Membership) or PAT record already carried — the client
+ * cannot supply one. Role/permissions for humans come from Membership.
  */
 @ApiTags('session')
 @ApiBearerAuth()

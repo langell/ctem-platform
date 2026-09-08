@@ -1,11 +1,22 @@
+import { createHash } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import { type AddressInfo } from 'node:net';
 import { SignJWT, exportJWK, generateKeyPair, type JWK, type KeyLike } from 'jose';
+
+/**
+ * Deterministic UUID for gateway identity stubs. Never an IdP-shaped `sub`.
+ */
+export function stubUserIdFromSubject(sub: string): string {
+  const hex = createHash('sha256').update(`ctem:stub-user:${sub}`).digest('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
 
 export interface TestTokenClaims {
   sub?: string;
   orgId?: string | null;
   roles?: string[];
+  email?: string;
+  name?: string;
   audience?: string;
   /** Seconds until expiry; negative values produce an already-expired token. */
   expiresIn?: number;
@@ -49,10 +60,20 @@ export class TestIdp {
   }
 
   async issueToken(claims: TestTokenClaims = {}): Promise<string> {
-    const { sub = 'test|user', orgId = 'org-unset', roles = ['developer'], audience = 'ctem-api', expiresIn = 300 } = claims;
+    const {
+      sub = 'test|user',
+      orgId = 'org-unset',
+      roles = ['developer'],
+      email,
+      name,
+      audience = 'ctem-api',
+      expiresIn = 300,
+    } = claims;
     const jwt = new SignJWT({
       ...(orgId === null ? {} : { org_id: orgId }),
       roles,
+      ...(email ? { email } : {}),
+      ...(name ? { name } : {}),
     })
       .setProtectedHeader({ alg: 'RS256', kid: this.kid })
       .setSubject(sub)

@@ -37,9 +37,8 @@ export function scanJobCredentialRef(
 }
 
 /**
- * Gateway JWT `userId` is the IdP `sub` (e.g. `demo|analyst`), not `users.id`.
- * `Scan.requestedBy` is `@db.Uuid`. Classify before persist so a Keycloak
- * subject cannot P2023 the create.
+ * Gateway JWT `userId` is `users.id` after identity resolve. IdP-shaped ids
+ * (`demo|analyst`) are still classified so a stale principal cannot P2023.
  */
 export function requestedByFromPrincipal(
   principalId: string | null,

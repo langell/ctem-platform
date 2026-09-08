@@ -4,10 +4,14 @@ import {
   CreateScanRequest,
   UpdatePolicyRequest,
   EVENT_SCHEMAS,
+  InviteMemberRequest,
+  ResolveJwtRequest,
+  ResolveJwtResponse,
   ROLE_PERMISSIONS,
   SUBJECTS,
   STREAMS,
   ScanJob,
+  SetMemberRoleRequest,
   concludeScan,
   findClientConclusionKeys,
   findTenantWebhookKeys,
@@ -56,6 +60,29 @@ describe('rbac', () => {
   it('gives the owner everything', () => {
     expect(ROLE_PERMISSIONS.owner).toContain('org:write');
     expect(ROLE_PERMISSIONS.owner).toContain('exception:approve');
+    expect(ROLE_PERMISSIONS.admin).toContain('member:manage');
+    expect(ROLE_PERMISSIONS.admin).not.toContain('org:write');
+  });
+
+  it('rejects invalid member admin payloads as 4xx-shaped zod errors, not 500', () => {
+    expect(InviteMemberRequest.safeParse({ email: 'not-an-email', role: 'developer' }).success).toBe(
+      false,
+    );
+    expect(InviteMemberRequest.safeParse({ email: 'ok@test.local', role: 'superuser' }).success).toBe(
+      false,
+    );
+    expect(SetMemberRoleRequest.safeParse({ role: 'superuser' }).success).toBe(false);
+    expect(SetMemberRoleRequest.safeParse({}).success).toBe(false);
+    expect(ResolveJwtRequest.safeParse({ sub: 'idp|alice', orgId: 'not-a-uuid' }).success).toBe(
+      false,
+    );
+    expect(
+      ResolveJwtResponse.safeParse({
+        userId: 'idp|alice',
+        orgId: 'c7e00000-0000-4000-8000-000000000001',
+        role: 'owner',
+      }).success,
+    ).toBe(false);
   });
 });
 

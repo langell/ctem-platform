@@ -17,7 +17,7 @@ import { APP_GUARD, Reflector } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { AuthModule, CurrentUser, JwtVerifier, RequirePermissions } from '@ctem/auth';
 import { findClientConclusionKeys, type Principal } from '@ctem/contracts';
-import { TestIdp, applyTestEnv } from '@ctem/testing';
+import { TestIdp, applyTestEnv, stubUserIdFromSubject } from '@ctem/testing';
 import { GatewayAuthGuard } from './gateway-auth.guard';
 import { SessionController } from '../routes/session.controller';
 
@@ -142,13 +142,24 @@ describe('JWT org scoping and findings tenancy (integration)', () => {
       req.on('data', (c: Buffer) => (body += c.toString()));
       req.on('end', () => {
         res.setHeader('content-type', 'application/json');
-        const presented = (() => {
+        const json = (() => {
           try {
-            return (JSON.parse(body) as { token?: string }).token;
+            return JSON.parse(body) as { token?: string; sub?: string; orgId?: string };
           } catch {
-            return undefined;
+            return {} as { token?: string; sub?: string; orgId?: string };
           }
         })();
+        if (req.url === '/internal/auth/resolve' && json.orgId && json.sub) {
+          res.end(
+            JSON.stringify({
+              userId: stubUserIdFromSubject(json.sub),
+              orgId: json.orgId,
+              role: 'owner',
+            }),
+          );
+          return;
+        }
+        const presented = json.token;
         const record =
           presented === PAT_A
             ? {
@@ -229,7 +240,8 @@ describe('JWT org scoping and findings tenancy (integration)', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { orgId: string; userId: string };
     expect(body.orgId).toBe(ORG_A);
-    expect(body.userId).toBe('idp|alice');
+    expect(body.userId).toBe(stubUserIdFromSubject('idp|alice'));
+    expect(body.userId).not.toBe('idp|alice');
   });
 
   it('a JWT without org_id is rejected even when the client supplies an org header', async () => {

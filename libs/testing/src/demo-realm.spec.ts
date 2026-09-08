@@ -39,9 +39,10 @@ describe('compose Keycloak ctem realm', () => {
     expect(DEMO_IDP_SUBJECT).toBe('demo|analyst');
     const seed = readFileSync(resolve('libs/testing/src/factories.ts'), 'utf8');
     expect(seed).toMatch(/idpSubject: DEMO_IDP_SUBJECT/);
+    expect(seed).toMatch(/role: 'owner', disabledAt: null/);
   });
 
-  it('issues org_id, roles, audience and sub the gateway JWT path accepts', () => {
+  it('issues org_id, audience and sub the gateway JWT path accepts (roles claim is not AuthZ)', () => {
     const api = realm.clients.find((c) => c.clientId === 'ctem-api');
     const web = realm.clients.find((c) => c.clientId === 'ctem-web');
     expect(api).toBeDefined();
