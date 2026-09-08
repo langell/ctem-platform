@@ -11,9 +11,10 @@ export const DEMO_PASSWORD = process.env.DEMO_PASSWORD ?? 'demo';
  */
 export async function expectCtemLoginHasNoSecretFields(page: Page): Promise<void> {
   await expect(page.getByRole('heading', { name: 'CTEM' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Sign in with Keycloak' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Sign in with Keycloak' })).toHaveCount(1);
   await expect(page.locator('input[type="password"]')).toHaveCount(0);
   await expect(page.locator('textarea')).toHaveCount(0);
+  await expect(page.getByPlaceholder(/eyJ/)).toHaveCount(0);
   await expect(page.getByText(/Paste a JWT/i)).toHaveCount(0);
   await expect(page.getByText(/personal access|machine token|ctem_pat_/i)).toHaveCount(0);
 }
@@ -70,15 +71,22 @@ export async function loginAsDemoAnalyst(page: Page): Promise<string> {
 }
 
 /**
- * React Strict Mode remounts CallbackPage. After a real login the code is
- * already stripped; visiting /login/callback again must keep the JWT (the
- * same keepSessionAfterCallbackError / inflight-exchange path).
+ * Replay `/login/callback` with the same authorization code. Strict Mode and a
+ * second completeAuthorization must keep the stored JWT (not log out).
  */
-export async function expectCallbackRemountKeepsSession(page: Page): Promise<void> {
+export async function expectSameCodeCallbackKeepsSession(
+  page: Page,
+  callbackUrl: string,
+): Promise<void> {
+  if (!callbackUrl.includes('code=')) {
+    throw new Error(
+      'Need the original /login/callback?code=… URL to replay completeAuthorization with the same code',
+    );
+  }
   const before = await expectJwtSession(page);
-  await page.goto('/login/callback');
+  await page.goto(callbackUrl);
   await page.waitForURL(/\/findings/, { timeout: 15_000 });
   await expectStillSignedIn(page);
   const after = await expectJwtSession(page);
-  expect(after, 'Strict Mode remount must not replace or drop the stored JWT').toBe(before);
+  expect(after, 'second completeAuthorization with the same code must keep the JWT').toBe(before);
 }

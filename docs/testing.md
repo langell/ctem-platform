@@ -38,15 +38,18 @@ gateway-served SPA and compose Keycloak. `make test-ui` (`tools/e2e/run-ui.sh`)
 starts infra including Keycloak, applies migrations + RLS, seeds the demo org,
 builds the web UI if `apps/web/dist` is missing, starts the control-plane
 services when the gateway is not already healthy, installs Chromium if needed,
-then runs `@ctem/web-e2e`. Specs cover Keycloak analyst/demo PKCE login (JWT in
-`sessionStorage`, org from that JWT, Strict Mode callback remount must not log
-out), Findings Score Rail (six columns, `rail-*` / `risk-band-*`, whole-row
-click → detail), and a scan-kick smoke (container or first available scanner —
-must not be a gateway 500; a result card or fail-closed error is OK). Empty
-tables or missing outcomes fail; they do not pass. Traces and screenshots are
-retained on failure under `apps/web-e2e/test-results`. This tier does **not**
-replace `make e2e`. CI runs it as an optional `ui-smoke` job (Phase A) so a
-Playwright flake does not block the required lint/unit/int/e2e job.
+then runs `@ctem/web-e2e`. Specs cover Keycloak analyst/demo PKCE login (one
+Sign-in button, no password/PAT/JWT paste, JWT in `sessionStorage`, org from
+that JWT; two `completeAuthorization` calls with the same code must keep the
+session), Findings Score Rail (six columns, every data row has `rail-*` and
+`risk-band-*`, whole-row click → `/findings/:id`; skeleton / empty / error stay
+distinct), and a scan-kick smoke (Keycloak JWT session — not a PAT — POST
+`/v1/scans` is 2xx and the UI shows a queued card with id; never an HTTP 500 /
+Internal Server Error banner). Empty tables or missing outcomes fail; they do
+not pass. Traces and screenshots are retained on failure under
+`apps/web-e2e/test-results`. This tier does **not** replace `make e2e`. CI runs
+it as an optional `ui-smoke` job (Phase A) so a Playwright flake does not block
+the required lint/unit/int/e2e job.
 
 **E2E smoke** — one scripted golden path against the live stack: health →
 machine-token issuance → gateway PAT auth → asset registration → cross-org
