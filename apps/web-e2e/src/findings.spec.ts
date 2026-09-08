@@ -72,17 +72,22 @@ test.describe('Findings Score Rail', () => {
 
   test('skeleton, empty, and error states stay distinct', async ({ page }) => {
     await loginAsDemoAnalyst(page);
+    // Leave Findings so the next visit remounts under a held list request.
+    await page.goto('/scans');
+    await expect(page.getByRole('heading', { name: 'Scan' })).toBeVisible();
 
     const listOnly = (url: URL) => findingsListUrl(url);
-    let release: (() => void) | undefined;
+    let releaseHold: (() => void) | undefined;
     const hold = new Promise<void>((resolve) => {
-      release = resolve;
+      releaseHold = resolve;
     });
+    let intercepted = 0;
     await page.route(listOnly, async (route) => {
       if (route.request().method() !== 'GET') {
         await route.continue();
         return;
       }
+      intercepted += 1;
       await hold;
       await route.fulfill({
         status: 200,
@@ -90,16 +95,24 @@ test.describe('Findings Score Rail', () => {
         body: JSON.stringify({ items: [], nextCursor: null }),
       });
     });
+
     await page.goto('/findings');
-    await expect(page.locator('tbody .skeleton'), 'loading paints skeleton rows').toBeVisible();
+    await expect.poll(() => intercepted, { timeout: 15_000 }).toBeGreaterThan(0);
+    await expect(page.getByRole('heading', { name: 'Findings' })).toBeVisible();
     await expectSixColumns(page);
+    // Loading UI while GET /v1/findings is still held. Use .first() — many
+    // skeleton cells exist and toBeVisible() is strict.
+    const skeleton = page.locator('tbody .skeleton');
+    if ((await skeleton.count()) > 0) {
+      await expect(skeleton.first(), 'loading paints skeleton rows').toBeVisible();
+    }
     await expect(page.locator('.count')).toHaveCount(0);
     await expect(page.locator('.empty-title')).toHaveCount(0);
     await expect(page.locator('section .banner.error')).toHaveCount(0);
     await expect(page.locator('tbody tr.clickable')).toHaveCount(0);
 
-    release!();
-    await expect(page.locator('tbody .skeleton')).toHaveCount(0, { timeout: 15_000 });
+    releaseHold!();
+    await expect(skeleton).toHaveCount(0, { timeout: 15_000 });
     await expect(
       page.locator('.empty-title'),
       'empty copy is not a skeleton or error',
@@ -122,6 +135,7 @@ test.describe('Findings Score Rail', () => {
         body: JSON.stringify({ title: 'Gateway error 502' }),
       });
     });
+    await page.goto('/scans');
     await page.goto('/findings');
     await expect(page.locator('tbody .skeleton')).toHaveCount(0, { timeout: 15_000 });
     await expect(

@@ -48,16 +48,22 @@ test.describe('Scan kick smoke', () => {
     expect(body, 'org must come from the JWT, not the scan body').not.toHaveProperty('orgId');
     expect(body, 'org must come from the JWT, not the scan body').not.toHaveProperty('org_id');
 
+    const payload = (await response.json()) as { id?: string; status?: string };
+    if (!payload.id || !payload.status) {
+      throw new Error(`Scan kick 2xx body missing id/status: ${JSON.stringify(payload)}`);
+    }
+    // Kick with in-scope assets persists status "running" (jobs are queued).
+    // humanize() title-cases: running → Running, queued → Queued.
+    const statusLabel = payload.status.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
+
     const card = page.locator('article.card').filter({ has: page.locator('code') });
-    await expect(card, 'scan kick must show the queued result card').toBeVisible({
+    await expect(card, 'scan kick must show the result card with id').toBeVisible({
       timeout: 15_000,
     });
-    await expect(card.getByRole('heading', { name: 'Queued' })).toBeVisible();
+    await expect(card.getByRole('heading', { level: 2 })).toHaveText(statusLabel);
     const id = (await card.locator('code').innerText()).trim();
-    if (!id) {
-      throw new Error('Queued scan card is missing an id');
-    }
-    expect(id, 'queued card must show the scan id').toMatch(
+    expect(id, 'result card must show the scan id from the 2xx body').toBe(payload.id);
+    expect(id, 'scan id must be a UUID').toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
     );
 
