@@ -36,6 +36,9 @@ describe('compose Keycloak ctem realm', () => {
     expect(realm.realm).toBe('ctem');
     const user = realm.users.find((u) => u.email === DEMO_USER_EMAIL);
     expect(user?.id).toBe(DEMO_IDP_SUBJECT);
+    expect(DEMO_IDP_SUBJECT).toBe('demo|analyst');
+    const seed = readFileSync(resolve('libs/testing/src/factories.ts'), 'utf8');
+    expect(seed).toMatch(/idpSubject: DEMO_IDP_SUBJECT/);
   });
 
   it('issues org_id, roles, audience and sub the gateway JWT path accepts', () => {
