@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@ctem/db';
 import { EventBus } from '@ctem/events';
-import { SUBJECTS, ScanJob, type CreateScanRequest, type ScannerType } from '@ctem/contracts';
+import { SUBJECTS, ScanJob, UserId, type CreateScanRequest, type ScannerType } from '@ctem/contracts';
 import { loadEnv } from '@ctem/config';
 import { currentTraceId, rootLogger } from '@ctem/observability';
 import { ScanPlannerService } from './scan-planner.service';
@@ -36,6 +36,20 @@ export function scanJobCredentialRef(
   return refs.get(asset.integrationId) ?? null;
 }
 
+/**
+ * Gateway JWT `userId` is the IdP `sub` (e.g. `demo|analyst`), not `users.id`.
+ * `Scan.requestedBy` is `@db.Uuid`. Classify before persist so a Keycloak
+ * subject cannot P2023 the create.
+ */
+export function requestedByFromPrincipal(
+  principalId: string | null,
+): { kind: 'uuid'; id: string } | { kind: 'idp'; subject: string } | { kind: 'none' } {
+  if (!principalId) return { kind: 'none' };
+  const parsed = UserId.safeParse(principalId);
+  if (parsed.success) return { kind: 'uuid', id: parsed.data };
+  return { kind: 'idp', subject: principalId };
+}
+
 @Injectable()
 export class ScanDispatcherService {
   private readonly log = rootLogger.child({ component: 'scan-dispatcher' });
@@ -63,6 +77,7 @@ export class ScanDispatcherService {
       request.scannerType as ScannerType,
       request.assetSelector,
     );
+    const requestedBy = await this.resolveRequestedBy(userId);
 
     const scan = await this.prisma.withOrg(orgId, async (tx) => {
       const created = await tx.scan.create({
@@ -71,7 +86,7 @@ export class ScanDispatcherService {
           scannerType: request.scannerType,
           trigger,
           status: assets.length ? 'running' : 'succeeded',
-          requestedBy: userId,
+          requestedBy,
           assetSelector: request.assetSelector as object,
           options: request.options as object,
           jobsTotal: assets.length,
@@ -135,6 +150,26 @@ export class ScanDispatcherService {
 
     this.log.info({ scanId: scan.id, jobs: jobs.length }, 'scan dispatched');
     return { ...(latest ?? scan), jobsDispatched: jobs.length };
+  }
+
+  /**
+   * `users` is not RLS-scoped (global IdP directory). Lookup by `idpSubject`
+   * so a Keycloak `sub` becomes `users.id`. Unknown subjects persist as null
+   * rather than 500ing the kick.
+   */
+  private async resolveRequestedBy(principalId: string | null): Promise<string | null> {
+    const who = requestedByFromPrincipal(principalId);
+    if (who.kind === 'none') return null;
+    if (who.kind === 'uuid') return who.id;
+    const user = await this.prisma.user.findUnique({
+      where: { idpSubject: who.subject },
+      select: { id: true },
+    });
+    if (!user) {
+      this.log.warn({ idpSubject: who.subject }, 'no users.id for IdP subject — persisting scan unattributed');
+      return null;
+    }
+    return user.id;
   }
 
   /** Re-dispatch a single failed job — used by retries and by manual re-runs. */
