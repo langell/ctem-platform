@@ -178,6 +178,16 @@ describe('ContainerScanner.execute', () => {
         ctx({
           target: {
             kind: 'container_image',
+            externalKey: `ecr:123456789012/payments-api@${DIGEST}`,
+          },
+        }),
+      ),
+    ).rejects.toThrow(/ghcr:owner\/name@sha256|non-digest|malformed/);
+    await expect(
+      s.execute(
+        ctx({
+          target: {
+            kind: 'container_image',
             externalKey: `ghcr:acme/app@sha256:deadbeef`,
           },
         }),

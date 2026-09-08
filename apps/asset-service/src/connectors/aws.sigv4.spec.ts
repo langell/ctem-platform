@@ -39,6 +39,22 @@ describe('signAwsRequest', () => {
     ).toThrow(/only amazonaws\.com/);
   });
 
+  it('signs the ECR JSON API host as service ecr', () => {
+    const signed = signAwsRequest({
+      method: 'POST',
+      url: 'https://api.ecr.us-east-1.amazonaws.com/',
+      region: 'us-east-1',
+      service: 'ecr',
+      credentials: creds,
+      headers: { 'content-type': 'application/x-amz-json-1.1' },
+      body: '{"maxResults":100}',
+      now: new Date('2015-08-30T12:36:00.000Z'),
+    });
+    expect(signed.url).toBe('https://api.ecr.us-east-1.amazonaws.com/');
+    expect(signed.headers.host).toBe('api.ecr.us-east-1.amazonaws.com');
+    expect(signed.headers.authorization).toContain('/us-east-1/ecr/aws4_request');
+  });
+
   it('includes a session token header when present', () => {
     const signed = signAwsRequest({
       method: 'POST',

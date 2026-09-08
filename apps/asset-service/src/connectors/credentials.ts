@@ -35,9 +35,7 @@ export function resolveCredential(ref: string | null): string | undefined {
     return process.env[key] || undefined;
   }
 
-  throw new Error(
-    `Unsupported credentialRef scheme '${scheme}' — only 'env:<VAR>' is implemented`,
-  );
+  throw new Error(`Unsupported credentialRef scheme '${scheme}' — only 'env:<VAR>' is implemented`);
 }
 
 const GITHUB_ENV_NAME = /^GITHUB_[A-Z0-9_]+$/;
@@ -86,14 +84,14 @@ export interface AwsCredentials {
 const AWS_ENV_NAME = /^AWS_[A-Z0-9_]+$/;
 
 /**
- * AWS discovery has no unauthenticated public path. The integration pointer
- * must be `env:AWS_*`, and the platform-operated signing pair
+ * AWS and ECR discovery have no unauthenticated public path. The integration
+ * pointer must be `env:AWS_*`, and the platform-operated signing pair
  * `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` must both be usable.
  */
 export function requireAwsCredentials(credentialRef: string | null): AwsCredentials {
   if (!credentialRef) {
     throw new Error(
-      'AWS discovery requires a usable credentialRef (env:AWS_*) — refusing unauthenticated listing',
+      'AWS/ECR discovery requires a usable credentialRef (env:AWS_*) — refusing unauthenticated listing',
     );
   }
 
@@ -203,8 +201,7 @@ export interface AzureCredentials {
 const AZURE_ENV_NAME = /^AZURE_[A-Z0-9_]+$/;
 
 /** Entra tenant / app ids are GUIDs — identifiers, never hosts. */
-const AZURE_GUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const AZURE_GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function assertUsableAzureGuid(value: string, envName: string): string {
   const trimmed = value.trim();
