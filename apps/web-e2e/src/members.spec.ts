@@ -1,6 +1,15 @@
-import { expect, test, type Page, type Response } from '@playwright/test';
+import { expect, test, type Locator, type Page, type Response } from '@playwright/test';
 import { loginAsDemoAnalyst } from './helpers/auth';
 import { expectJwtSession, isJwtAccessToken } from './helpers/session';
+
+/** Role / status badges — not the Actions <select> options that repeat the same labels. */
+function roleBadge(row: Locator): Locator {
+  return row.locator('td').nth(1).locator('.badge');
+}
+
+function statusBadge(row: Locator): Locator {
+  return row.locator('td').nth(2).locator('.badge');
+}
 
 function membersUrl(url: URL): boolean {
   return url.pathname === '/v1/org/members' || url.pathname === '/v1/org/members/';
@@ -46,10 +55,10 @@ test.describe('Members admin', () => {
 
     const ownerRow = page.locator('tbody tr').filter({ hasText: 'security@demo.test' });
     const teammateRow = page.locator('tbody tr').filter({ hasText: 'developer@demo.test' });
-    await expect(ownerRow.getByText('Owner')).toBeVisible();
-    await expect(ownerRow.getByText('Active')).toBeVisible();
-    await expect(teammateRow.getByText('Developer')).toBeVisible();
-    await expect(teammateRow.getByText('Active')).toBeVisible();
+    await expect(roleBadge(ownerRow)).toHaveText('Owner');
+    await expect(statusBadge(ownerRow)).toHaveText('Active');
+    await expect(roleBadge(teammateRow)).toHaveText('Developer');
+    await expect(statusBadge(teammateRow)).toHaveText('Active');
 
     const inviteEmail = `invitee-${Date.now()}@demo.test`;
     await page.getByLabel('Email').fill(inviteEmail);
@@ -76,7 +85,7 @@ test.describe('Members admin', () => {
     const setRoleRes = await setRole;
     expect(setRoleRes.status(), 'setRole must be 2xx').toBeGreaterThanOrEqual(200);
     expect(setRoleRes.status()).toBeLessThan(300);
-    await expect(teammateRow.getByText('Auditor')).toBeVisible();
+    await expect(roleBadge(teammateRow)).toHaveText('Auditor');
 
     await teammateRow.getByRole('button', { name: 'Disable' }).click();
     const dialog = page.locator('dialog');
@@ -88,7 +97,7 @@ test.describe('Members admin', () => {
     expect(disableRes.status(), 'disable must be 2xx').toBeGreaterThanOrEqual(200);
     expect(disableRes.status()).toBeLessThan(300);
     await expect(dialog).toBeHidden();
-    await expect(teammateRow.getByText('Disabled')).toBeVisible();
+    await expect(statusBadge(teammateRow)).toHaveText('Disabled');
     await expect(teammateRow.getByRole('button', { name: 'Disable' })).toHaveCount(0);
 
     await ownerRow.getByRole('button', { name: 'Disable' }).click();
@@ -97,7 +106,7 @@ test.describe('Members admin', () => {
     await dialog.getByRole('button', { name: 'Disable member' }).click();
     expect((await lastOwner).status()).toBe(403);
     await expect(page.locator('section .banner.error')).toContainText(/last owner/i);
-    await expect(ownerRow.getByText('Active')).toBeVisible();
+    await expect(statusBadge(ownerRow)).toHaveText('Active');
 
     await expectJwtSession(page);
   });
