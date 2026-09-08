@@ -129,6 +129,40 @@ export const DEMO_USER_EMAIL = 'security@demo.test';
 export const DEMO_IDP_SUBJECT = 'demo|analyst';
 
 /**
+ * Pre-GHCR-discovery tag stub. Re-seed archives this key so local verify cannot
+ * pick `image:…:latest` / `source=ecr` for a container scan.
+ */
+export const LEGACY_DEMO_CONTAINER_KEY = 'image:ghcr.io/demo/payments-api:latest';
+
+/** Deterministic digest matching GHCR discovery (`ghcr:owner/name@sha256:<64 hex>`). */
+export const DEMO_CONTAINER_DIGEST = `sha256:${'a'.repeat(64)}`;
+export const DEMO_CONTAINER_OWNER = 'demo';
+export const DEMO_CONTAINER_PACKAGE = 'payments-api';
+export const DEMO_CONTAINER_EXTERNAL_KEY = `ghcr:${DEMO_CONTAINER_OWNER}/${DEMO_CONTAINER_PACKAGE}@${DEMO_CONTAINER_DIGEST}`;
+
+/**
+ * Demo `container_image` identity the container scanner will accept. Pull of
+ * this digest may 404 / miss creds — that is a failed job, not a kick 500.
+ */
+export const DEMO_CONTAINER_IMAGE = {
+  kind: 'container_image',
+  externalKey: DEMO_CONTAINER_EXTERNAL_KEY,
+  name: `${DEMO_CONTAINER_OWNER}/${DEMO_CONTAINER_PACKAGE}`,
+  source: 'ghcr',
+  exposure: 'internet_facing',
+  criticality: 'tier0',
+  attributes: {
+    owner: DEMO_CONTAINER_OWNER,
+    package: DEMO_CONTAINER_PACKAGE,
+    digest: DEMO_CONTAINER_DIGEST,
+    tags: ['latest'],
+    visibility: 'public',
+    htmlUrl: null,
+    packageType: 'container',
+  },
+};
+
+/**
  * The demo organization: assets across every kind, a completed scan, findings
  * at several severities, and the asset edges the risk service walks. This is
  * what `make db-seed` installs.
@@ -168,6 +202,8 @@ export async function seedDemoOrg(prisma: PrismaClient) {
     },
   });
 
+  await migrateLegacyDemoContainerImage(prisma, org.id);
+
   const assets = await Promise.all(
     [
       {
@@ -180,14 +216,7 @@ export async function seedDemoOrg(prisma: PrismaClient) {
         dataClasses: ['pci', 'pii'],
         ownerTeam: 'payments',
       },
-      {
-        kind: 'container_image',
-        externalKey: 'image:ghcr.io/demo/payments-api:latest',
-        name: 'payments-api:latest',
-        source: 'ecr',
-        exposure: 'internet_facing',
-        criticality: 'tier0',
-      },
+      DEMO_CONTAINER_IMAGE,
       {
         kind: 'repository',
         externalKey: 'github:demo/batch-reconciler',
@@ -208,7 +237,7 @@ export async function seedDemoOrg(prisma: PrismaClient) {
     ].map((data) =>
       prisma.asset.upsert({
         where: { orgId_externalKey: { orgId: org.id, externalKey: data.externalKey } },
-        update: {},
+        update: data,
         create: { orgId: org.id, ...data },
       }),
     ),
@@ -308,4 +337,31 @@ export async function seedDemoOrg(prisma: PrismaClient) {
   });
 
   return { org, user, assets, scan };
+}
+
+/**
+ * Re-seed of an existing demo DB must not leave the tag-style stub selectable.
+ * Prefer rewriting that row to the digest key (keeps edges); otherwise archive it.
+ */
+async function migrateLegacyDemoContainerImage(prisma: PrismaClient, orgId: string): Promise<void> {
+  const legacy = await prisma.asset.findUnique({
+    where: { orgId_externalKey: { orgId, externalKey: LEGACY_DEMO_CONTAINER_KEY } },
+  });
+  if (!legacy) return;
+
+  const digest = await prisma.asset.findUnique({
+    where: { orgId_externalKey: { orgId, externalKey: DEMO_CONTAINER_EXTERNAL_KEY } },
+  });
+  if (digest && digest.id !== legacy.id) {
+    await prisma.asset.update({
+      where: { id: legacy.id },
+      data: { archivedAt: new Date() },
+    });
+    return;
+  }
+
+  await prisma.asset.update({
+    where: { id: legacy.id },
+    data: { ...DEMO_CONTAINER_IMAGE, archivedAt: null },
+  });
 }

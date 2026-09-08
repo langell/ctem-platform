@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@ctem/db';
 import { EventBus } from '@ctem/events';
-import { SUBJECTS, type CreateScanRequest, type ScanJob, type ScannerType } from '@ctem/contracts';
+import { SUBJECTS, ScanJob, type CreateScanRequest, type ScannerType } from '@ctem/contracts';
 import { loadEnv } from '@ctem/config';
 import { currentTraceId, rootLogger } from '@ctem/observability';
 import { ScanPlannerService } from './scan-planner.service';
@@ -94,35 +94,47 @@ export class ScanDispatcherService {
       return created;
     });
 
-    const jobs = await this.prisma.withOrg(orgId, (tx) =>
-      tx.scanJob.findMany({ where: { scanId: scan.id } }),
-    );
-    const credByIntegration = await this.credentialRefsFor(orgId, assets);
+    // Jobs are already queued. Anything after this (schema, NATS, missing
+    // asset) must fail the job — never turn a kick into HTTP 500.
+    let jobs: Array<{ id: string; scanId: string; assetId: string; scannerType: string; attempt: number }> =
+      [];
+    try {
+      jobs = await this.prisma.withOrg(orgId, (tx) => tx.scanJob.findMany({ where: { scanId: scan.id } }));
+      const credByIntegration = await this.credentialRefsFor(orgId, assets);
 
-    for (const job of jobs) {
-      const asset = assets.find((a) => a.id === job.assetId)!;
-      const payload: ScanJob = {
-        jobId: job.id,
-        scanId: scan.id,
-        orgId,
-        scannerType: request.scannerType as ScannerType,
-        assetId: job.assetId,
-        target: scanJobTarget(asset),
-        // Pointer from the discovering integration — resolved by the scanner
-        // via the platform-operated env: allowlist, never stored as a secret.
-        credentialRef: scanJobCredentialRef(asset, credByIntegration),
-        options: request.options,
-        attempt: 1,
-        deadlineAt: new Date(Date.now() + env.SCANNER_JOB_TIMEOUT_MS),
-        traceId: currentTraceId(),
-      };
-      await this.bus.publish(SUBJECTS.scanJobDispatched, orgId, payload, {
-        causationId: scan.id,
-      });
+      for (const job of jobs) {
+        try {
+          await this.publishQueuedJob({
+            orgId,
+            scanId: scan.id,
+            job,
+            asset: assets.find((a) => a.id === job.assetId),
+            scannerType: request.scannerType as ScannerType,
+            options: request.options,
+            credByIntegration,
+            timeoutMs: env.SCANNER_JOB_TIMEOUT_MS,
+            causationId: scan.id,
+          });
+        } catch (err) {
+          this.log.error({ err, jobId: job.id, scanId: scan.id }, 'scan job dispatch failed — failing job closed');
+          await this.failDispatch(orgId, job, err).catch((persistErr) =>
+            this.log.error({ persistErr, jobId: job.id }, 'failed to persist dispatch failure'),
+          );
+        }
+      }
+    } catch (err) {
+      this.log.error(
+        { err, scanId: scan.id },
+        'scan dispatch failed after persist — returning queued scan rather than 500',
+      );
     }
 
+    const latest = await this.prisma
+      .withOrg(orgId, (tx) => tx.scan.findUnique({ where: { id: scan.id } }))
+      .catch(() => null);
+
     this.log.info({ scanId: scan.id, jobs: jobs.length }, 'scan dispatched');
-    return { ...scan, jobsDispatched: jobs.length };
+    return { ...(latest ?? scan), jobsDispatched: jobs.length };
   }
 
   /** Re-dispatch a single failed job — used by retries and by manual re-runs. */
@@ -138,20 +150,95 @@ export class ScanDispatcherService {
     );
     const credByIntegration = await this.credentialRefsFor(orgId, [asset]);
 
-    await this.bus.publish(SUBJECTS.scanJobDispatched, orgId, {
-      jobId: job.id,
-      scanId: job.scanId,
-      orgId,
-      scannerType: job.scannerType,
-      assetId: job.assetId,
-      target: scanJobTarget(asset),
-      credentialRef: scanJobCredentialRef(asset, credByIntegration),
-      options: {},
-      attempt: job.attempt,
-      deadlineAt: new Date(Date.now() + loadEnv().SCANNER_JOB_TIMEOUT_MS),
+    try {
+      await this.publishQueuedJob({
+        orgId,
+        scanId: job.scanId,
+        job,
+        asset,
+        scannerType: job.scannerType as ScannerType,
+        options: {},
+        credByIntegration,
+        timeoutMs: loadEnv().SCANNER_JOB_TIMEOUT_MS,
+        causationId: job.scanId,
+      });
+    } catch (err) {
+      this.log.error({ err, jobId: job.id }, 'retry dispatch failed — failing job closed');
+      await this.failDispatch(orgId, job, err);
+    }
+    return job;
+  }
+
+  private async publishQueuedJob(args: {
+    orgId: string;
+    scanId: string;
+    job: { id: string; assetId: string; attempt: number };
+    asset: DispatchAsset | undefined;
+    scannerType: ScannerType;
+    options: Record<string, unknown>;
+    credByIntegration: Map<string, string | null>;
+    timeoutMs: number;
+    causationId: string;
+  }): Promise<void> {
+    if (!args.asset) {
+      throw new Error(`Scan job ${args.job.id} has no matching asset — refusing dispatch`);
+    }
+    const payload = ScanJob.parse({
+      jobId: args.job.id,
+      scanId: args.scanId,
+      orgId: args.orgId,
+      scannerType: args.scannerType,
+      assetId: args.job.assetId,
+      target: scanJobTarget(args.asset),
+      // Pointer from the discovering integration — resolved by the scanner
+      // via the platform-operated env: allowlist, never stored as a secret.
+      credentialRef: scanJobCredentialRef(args.asset, args.credByIntegration),
+      options: args.options,
+      attempt: args.job.attempt,
+      deadlineAt: new Date(Date.now() + args.timeoutMs),
       traceId: currentTraceId(),
     });
-    return job;
+    await this.bus.publish(SUBJECTS.scanJobDispatched, args.orgId, payload, {
+      causationId: args.causationId,
+    });
+  }
+
+  /**
+   * Persist a dispatch-time failure so kick is fail-closed at the job, not a
+   * gateway 500. Mirrors scan-lifecycle close-out when every job has finished.
+   */
+  private async failDispatch(
+    orgId: string,
+    job: { id: string; scanId: string },
+    error: unknown,
+  ): Promise<void> {
+    const message = error instanceof Error ? error.message : String(error);
+    await this.prisma.withOrg(orgId, async (tx) => {
+      await tx.scanJob.update({
+        where: { id: job.id },
+        data: {
+          status: 'failed',
+          error: message,
+          startedAt: new Date(),
+          finishedAt: new Date(),
+        },
+      });
+      const updated = await tx.scan.update({
+        where: { id: job.scanId },
+        data: { jobsCompleted: { increment: 1 } },
+      });
+      if (updated.jobsCompleted < updated.jobsTotal) return;
+      const failed = await tx.scanJob.count({
+        where: { scanId: job.scanId, status: 'failed' },
+      });
+      await tx.scan.update({
+        where: { id: job.scanId },
+        data: {
+          status: failed === 0 ? 'succeeded' : failed === updated.jobsTotal ? 'failed' : 'partial',
+          finishedAt: new Date(),
+        },
+      });
+    });
   }
 
   private async credentialRefsFor(

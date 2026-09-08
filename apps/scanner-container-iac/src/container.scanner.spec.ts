@@ -8,7 +8,8 @@ import { FindingNormalizer } from '../../findings-service/src/findings/finding-n
 import { ContainerScanError, ContainerScanner } from './container.scanner';
 import { ContainerCredentialError } from './container.credential';
 import { ContainerEgressError } from './container.egress';
-import { ContainerIdentityError } from './container.identity';
+import { parseGhcrImageRef, ContainerIdentityError } from './container.identity';
+import { DEMO_CONTAINER_DIGEST, DEMO_CONTAINER_IMAGE } from '@ctem/testing';
 import { ContainerInventoryError } from './inventory/packages';
 import { ContainerPullError, type ImagePuller, type LayerSnapshot } from './oci/registry';
 import type { VulnMatcher } from '@ctem/vuln-intel';
@@ -183,6 +184,20 @@ describe('ContainerScanner.execute', () => {
       ),
     ).rejects.toThrow(ContainerIdentityError);
     expect(registry.pull).not.toHaveBeenCalled();
+  });
+
+  it('accepts the demo seed digest GHCR identity', () => {
+    expect(
+      parseGhcrImageRef({
+        kind: DEMO_CONTAINER_IMAGE.kind,
+        externalKey: DEMO_CONTAINER_IMAGE.externalKey,
+        ...DEMO_CONTAINER_IMAGE.attributes,
+      }),
+    ).toEqual({
+      owner: 'demo',
+      name: 'payments-api',
+      digest: DEMO_CONTAINER_DIGEST,
+    });
   });
 
   it('fails a private pull when GITHUB_* credentials are missing — no empty success', async () => {
