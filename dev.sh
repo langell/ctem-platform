@@ -80,13 +80,10 @@ ensure_env() {
 
 # ── Install deps ──────────────────────────────────────────────────────────────
 install_deps() {
-  if [[ ! -d node_modules ]]; then
-    log "Installing dependencies..."
-    pnpm install --frozen-lockfile
-    success "Dependencies installed"
-  else
-    dim "node_modules exists — skipping install"
-  fi
+  # Re-run even when root node_modules exists so new workspace packages get linked.
+  log "Installing dependencies..."
+  pnpm install --frozen-lockfile
+  success "Dependencies installed"
 }
 
 # ── Infra ─────────────────────────────────────────────────────────────────────
