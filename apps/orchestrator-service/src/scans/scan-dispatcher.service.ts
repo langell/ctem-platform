@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaService } from '@ctem/db';
 import { EventBus } from '@ctem/events';
 import { SUBJECTS, ScanJob, UserId, type CreateScanRequest, type ScannerType } from '@ctem/contracts';
@@ -154,8 +154,9 @@ export class ScanDispatcherService {
 
   /**
    * `users` is not RLS-scoped (global IdP directory). Lookup by `idpSubject`
-   * so a Keycloak `sub` becomes `users.id`. Unknown subjects persist as null
-   * rather than 500ing the kick.
+   * so a Keycloak `sub` becomes `users.id`. Unmapped subjects fail-close as
+   * 4xx — never 500, never an unattributed persist. Null (scheduled) and UUID
+   * (PAT token id) pass through as today.
    */
   private async resolveRequestedBy(principalId: string | null): Promise<string | null> {
     const who = requestedByFromPrincipal(principalId);
@@ -166,8 +167,9 @@ export class ScanDispatcherService {
       select: { id: true },
     });
     if (!user) {
-      this.log.warn({ idpSubject: who.subject }, 'no users.id for IdP subject — persisting scan unattributed');
-      return null;
+      throw new BadRequestException(
+        `No user mapped for IdP subject — refusing scan create (idpSubject is not a users row)`,
+      );
     }
     return user.id;
   }

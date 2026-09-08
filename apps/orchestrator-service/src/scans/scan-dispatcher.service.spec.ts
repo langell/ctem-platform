@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import { ScanJob, SUBJECTS } from '@ctem/contracts';
 import { DEMO_CONTAINER_IMAGE, DEMO_IDP_SUBJECT } from '@ctem/testing';
@@ -390,14 +391,21 @@ describe('ScanDispatcherService requestedBy mapping', () => {
     });
   });
 
-  it('persists unattributed rather than 500 when the IdP subject has no users row', async () => {
-    const { dispatcher, tx } = harness({ userRow: null });
-    await expect(
-      dispatcher.createScan(orgId, 'idp|unknown', { scannerType: 'container', assetSelector: {}, options: {} }),
-    ).resolves.toMatchObject({ id: scanId, jobsDispatched: 1 });
+  it('keeps scheduled/machine kicks unattributed when principal is null', async () => {
+    const { dispatcher, tx, userFind } = harness();
+    await dispatcher.createScan(orgId, null, { scannerType: 'container', assetSelector: {}, options: {} });
+    expect(userFind).not.toHaveBeenCalled();
     expect(tx.scan.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ requestedBy: null }),
     });
+  });
+
+  it('4xxs an unmapped IdP subject instead of 500 or unattributed persist', async () => {
+    const { dispatcher, tx } = harness({ userRow: null });
+    await expect(
+      dispatcher.createScan(orgId, 'idp|unknown', { scannerType: 'container', assetSelector: {}, options: {} }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(tx.scan.create).not.toHaveBeenCalled();
   });
 
   it('still fail-closes dispatch after a successful IdP-mapped create', async () => {
