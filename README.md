@@ -36,7 +36,7 @@ Want it on a real box? [deploy/README.md](deploy/README.md) covers a single-VM C
 make test       # unit tier: pure logic, seconds, no infra
 make test-int   # integration tier: real Postgres + RLS (needs infra)
 make e2e        # smoke the golden path against a running `make dev` stack
-make test-ui    # Playwright Chromium: Keycloak login + findings rail + scan kick
+make test-ui    # Playwright Chromium: Keycloak login + findings rail + scan kick + members
 ```
 
 `make test-ui` starts compose infra (including Keycloak), migrates and seeds the demo org, builds the web UI if needed, starts the control-plane stack when it is not already healthy, then runs `@ctem/web-e2e`. It does not replace `make e2e` (PAT API smoke). Failure traces and screenshots land under `apps/web-e2e/test-results`.

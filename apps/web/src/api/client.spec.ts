@@ -113,6 +113,26 @@ describe('gateway client org scoping', () => {
     ).toThrow(/org selector/);
   });
 
+  it('sends member invite and role writes without an org selector', () => {
+    const invite = buildGatewayRequest('/v1/org/members', {
+      method: 'POST',
+      token: 'jwt-for-org-a',
+      body: { email: 'new@demo.test', role: 'developer' },
+    });
+    expect(invite.url).toBe('/v1/org/members');
+    expect(invite.headers.authorization).toBe('Bearer jwt-for-org-a');
+    expect(JSON.parse(invite.body ?? '{}')).not.toHaveProperty('orgId');
+    expect(JSON.parse(invite.body ?? '{}').email).toBe('new@demo.test');
+
+    const role = buildGatewayRequest('/v1/org/members/11111111-1111-4111-8111-111111111111/role', {
+      method: 'PATCH',
+      token: 'jwt-for-org-a',
+      body: { role: 'auditor' },
+    });
+    expect(role.url).toBe('/v1/org/members/11111111-1111-4111-8111-111111111111/role');
+    expect(JSON.parse(role.body ?? '{}')).not.toHaveProperty('orgId');
+  });
+
   it('does not treat assetId as an org selector', () => {
     const req = buildGatewayRequest('/v1/findings', {
       token: 'jwt',
