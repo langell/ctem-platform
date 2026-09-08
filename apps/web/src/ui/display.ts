@@ -20,12 +20,12 @@ export function scoreClass(score: number): string {
   return `score-${scoreBand(score)}`;
 }
 
-/** 12% tint cell fill for the Findings list Risk column. */
+/** 18% tint cell fill for the Findings list Risk column. */
 export function riskBandClass(score: number): string {
   return `risk-band-${scoreBand(score)}`;
 }
 
-/** 3px inset left rail on Findings list data rows. */
+/** 4px inset left rail on Findings list data rows. */
 export function severityRailClass(severity: string): string {
   switch (severity) {
     case 'critical':
@@ -45,24 +45,24 @@ export function severityRailClass(severity: string): string {
 export function severityBadgeClass(severity: string): string {
   switch (severity) {
     case 'critical':
-      return 'badge badge-danger';
+      return 'badge badge-danger badge-signal';
     case 'high':
-      return 'badge badge-warn';
+      return 'badge badge-warn badge-signal';
     case 'medium':
-      return 'badge badge-accent';
+      return 'badge badge-accent badge-signal';
     case 'low':
-      return 'badge badge-info';
+      return 'badge badge-info badge-signal';
     default:
-      return 'badge badge-muted';
+      return 'badge badge-muted badge-signal';
   }
 }
 
 export function validationBadgeClass(validation: string): string {
   switch (validation) {
     case 'exploitable':
-      return 'badge badge-danger';
+      return 'badge badge-danger badge-signal';
     case 'reachable':
-      return 'badge badge-warn';
+      return 'badge badge-warn badge-signal';
     case 'not_validated':
       return 'badge badge-muted';
     default:
@@ -71,7 +71,9 @@ export function validationBadgeClass(validation: string): string {
 }
 
 export function exposureBadgeClass(exposure: string): string {
-  return exposure === 'internet_facing' ? 'badge badge-danger' : 'badge badge-muted';
+  return exposure === 'internet_facing'
+    ? 'badge badge-danger badge-signal'
+    : 'badge badge-muted';
 }
 
 export function contributionBarWidth(contribution: number): string {

@@ -29,7 +29,7 @@ export function FindingsPage() {
 
   return (
     <section>
-      <h1>Findings</h1>
+      <h1 className="page-title">Findings</h1>
       {!loading && !error ? <p className="muted count">{items.length} findings</p> : null}
       {error ? <p className="banner error">{error}</p> : null}
       <table>

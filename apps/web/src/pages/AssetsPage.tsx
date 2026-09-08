@@ -20,7 +20,7 @@ export function AssetsPage() {
 
   return (
     <section>
-      <h1>Assets</h1>
+      <h1 className="page-title">Assets</h1>
       {!loading && !error ? <p className="muted count">{items.length} assets</p> : null}
       {error ? <p className="banner error">{error}</p> : null}
       <table>
