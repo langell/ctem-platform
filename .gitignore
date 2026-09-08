@@ -9,6 +9,12 @@ coverage/
 .DS_Store
 libs/db/src/generated/
 
+# Playwright (apps/web-e2e)
+**/test-results/
+**/playwright-report/
+**/blob-report/
+playwright/.cache/
+
 # draw.io temp/lock files
 .$*.dtmp
 .$*.bkp

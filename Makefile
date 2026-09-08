@@ -1,4 +1,4 @@
-.PHONY: help setup infra infra-down build typecheck lint test test-int e2e db-migrate db-seed demo-token dev clean deploy-build deploy-up deploy-down deploy-migrate deploy-seed deploy-logs deploy-ps
+.PHONY: help setup infra infra-down build typecheck lint test test-int e2e test-ui db-migrate db-seed demo-token dev clean deploy-build deploy-up deploy-down deploy-migrate deploy-seed deploy-logs deploy-ps
 
 COMPOSE_PROD = docker compose --env-file .env.prod -f docker-compose.prod.yml
 
@@ -38,6 +38,9 @@ test-int: ## Integration tier: real Postgres/RLS, real crypto (needs `make infra
 
 e2e: ## Smoke the golden path against a running stack (needs `make dev` in another terminal)
 	pnpm e2e
+
+test-ui: ## Playwright Chromium: Keycloak login + findings rail + scan kick (starts stack)
+	./tools/e2e/run-ui.sh
 
 db-migrate: ## Apply Prisma migrations, then the row-level security policies
 	pnpm db:generate

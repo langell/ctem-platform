@@ -3,7 +3,17 @@ import tseslint from '@typescript-eslint/eslint-plugin';
 import tsparser from '@typescript-eslint/parser';
 
 export default [
-  { ignores: ['**/dist/**', '**/node_modules/**', '.nx/**', 'libs/db/src/generated/**', '**/__fixtures__/**'] },
+  {
+    ignores: [
+      '**/dist/**',
+      '**/node_modules/**',
+      '.nx/**',
+      'libs/db/src/generated/**',
+      '**/__fixtures__/**',
+      '**/test-results/**',
+      '**/playwright-report/**',
+    ],
+  },
   js.configs.recommended,
   {
     files: ['**/*.{ts,tsx}'],

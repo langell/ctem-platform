@@ -7,11 +7,12 @@ enough to run constantly.
 
 ## Tiers
 
-| Tier             | Files                | Command         | Needs                            | Budget  |
-| ---------------- | -------------------- | --------------- | -------------------------------- | ------- |
-| 1. Unit          | `*.spec.ts`          | `make test`     | nothing                          | seconds |
-| 2–3. Integration | `*.int.spec.ts`      | `make test-int` | `make infra` + `make db-migrate` | < 1 min |
-| 4. E2E smoke     | `tools/e2e/smoke.ts` | `make e2e`      | `make dev` running               | ~1 min  |
+| Tier             | Files                        | Command         | Needs                                          | Budget  |
+| ---------------- | ---------------------------- | --------------- | ---------------------------------------------- | ------- |
+| 1. Unit          | `*.spec.ts`                  | `make test`     | nothing                                        | seconds |
+| 2–3. Integration | `*.int.spec.ts`              | `make test-int` | `make infra` + `make db-migrate`               | < 1 min |
+| 4. E2E smoke     | `tools/e2e/smoke.ts`         | `make e2e`      | `make dev` running                             | ~1 min  |
+| 5. UI smoke      | `apps/web-e2e/src/*.spec.ts` | `make test-ui`  | Docker; script starts infra + Keycloak + stack | ~2 min  |
 
 **Unit** — pure logic: normalizers, dedup, scoring, contract schemas,
 permission mappings. Colocated `*.spec.ts`, no infra, `passWithNoTests`.
@@ -31,6 +32,21 @@ Integration files run sequentially (`fileParallelism: false`) because they
 share the dev database; keep suites self-contained by creating their own orgs
 via `@ctem/testing` factories and deleting them in `afterAll`
 (`deleteOrgCascade` — org deletion cascades to every tenant row).
+
+**UI smoke (Phase A, Playwright Chromium)** — browser paths against the
+gateway-served SPA and compose Keycloak. `make test-ui` (`tools/e2e/run-ui.sh`)
+starts infra including Keycloak, applies migrations + RLS, seeds the demo org,
+builds the web UI if `apps/web/dist` is missing, starts the control-plane
+services when the gateway is not already healthy, installs Chromium if needed,
+then runs `@ctem/web-e2e`. Specs cover Keycloak analyst/demo PKCE login (JWT in
+`sessionStorage`, org from that JWT, Strict Mode callback remount must not log
+out), Findings Score Rail (six columns, `rail-*` / `risk-band-*`, whole-row
+click → detail), and a scan-kick smoke (container or first available scanner —
+must not be a gateway 500; a result card or fail-closed error is OK). Empty
+tables or missing outcomes fail; they do not pass. Traces and screenshots are
+retained on failure under `apps/web-e2e/test-results`. This tier does **not**
+replace `make e2e`. CI runs it as an optional `ui-smoke` job (Phase A) so a
+Playwright flake does not block the required lint/unit/int/e2e job.
 
 **E2E smoke** — one scripted golden path against the live stack: health →
 machine-token issuance → gateway PAT auth → asset registration → cross-org
@@ -70,16 +86,22 @@ and a valid PAT that cannot POST a failed conclusion.
    `libs/db/prisma/manual/000_rls.sql` covers it. Fix the SQL, not the test.
 5. Changes the golden path (new endpoint in the flow, changed contract) →
    update `tools/e2e/smoke.ts`.
+6. Changes browser login, the findings list Score Rail, or scan kick →
+   extend `apps/web-e2e` (Playwright). Do not treat an empty list or a missing
+   scan outcome as a pass.
 
 ## Cadence
 
 - `make test` — on every change, it's seconds.
 - `make test-int` — before every commit.
 - `make e2e` — before merging anything that crosses a service boundary.
-- **CI runs all of it on every PR** (`.github/workflows/ci.yml`): lint →
+- `make test-ui` — before merging UI auth, findings list, or scan-kick changes.
+- **CI runs the required tiers on every PR** (`.github/workflows/ci.yml`): lint →
   build → unit → integration (ephemeral docker-compose Postgres with
-  migrations + RLS) → the full stack booted from dist → e2e smoke. The
-  pipeline _is_ the TEST environment — there is no standing test deployment.
+  migrations + RLS) → the full stack booted from dist → e2e smoke. Playwright
+  `ui-smoke` is an optional Phase A job (`continue-on-error`) and is not a
+  merge gate yet. The pipeline _is_ the TEST environment — there is no
+  standing test deployment.
 
 ## Conventions
 

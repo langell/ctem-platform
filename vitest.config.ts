@@ -8,7 +8,7 @@ import { workspaceAliases } from './vitest.alias';
 export default defineConfig({
   test: {
     include: ['{apps,libs}/**/*.spec.ts'],
-    exclude: ['**/node_modules/**', '**/dist/**', '**/*.int.spec.ts'],
+    exclude: ['**/node_modules/**', '**/dist/**', '**/*.int.spec.ts', 'apps/web-e2e/**'],
     environment: 'node',
     passWithNoTests: true,
   },

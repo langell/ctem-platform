@@ -1,0 +1,13 @@
+{
+  "name": "@ctem/web-e2e",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:playwright": "playwright test",
+    "test:headed": "playwright test --headed"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.1"
+  }
+}
