@@ -84,3 +84,91 @@ jobs:
       - name: Service logs on failure
         if: failure()
         run: tail -300 /tmp/stack.log 2>/dev/null || true
+
+  # Phase A: optional browser smoke. Not a merge gate — required checks stay
+  # lint / unit / int / PAT e2e. Promote to required in a later phase.
+  ui-smoke:
+    name: UI smoke (optional Phase A)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Environment
+        run: cp .env.example .env
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Build services + web UI
+        run: |
+          pnpm build
+          pnpm build:web
+
+      - name: Start infra (including Keycloak)
+        run: |
+          docker compose up -d
+          until docker compose exec -T postgres pg_isready -U ctem >/dev/null 2>&1; do sleep 1; done
+          for i in $(seq 1 120); do
+            if curl -sf -m 2 "http://localhost:8080/realms/ctem" >/dev/null 2>&1; then
+              echo "keycloak realm ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::Keycloak realm ctem did not become ready"
+          docker compose logs --tail=80 keycloak
+          exit 1
+
+      - name: Migrate + RLS + demo seed
+        run: |
+          pnpm db:deploy
+          docker compose exec -T postgres psql -U ctem -d ctem \
+            -f /dev/stdin < libs/db/prisma/manual/000_rls.sql
+          pnpm db:seed
+
+      - name: Start services
+        run: |
+          pnpm nx run-many -t dev --parallel=16 --exclude=@ctem/web --exclude=@ctem/web-e2e > /tmp/stack.log 2>&1 &
+          for i in $(seq 1 90); do
+            ok=1
+            for port in 3000 3001 3002 3003 3004 3005 3006 3007; do
+              curl -sf -m 2 "http://localhost:$port/health/live" >/dev/null 2>&1 || { ok=0; break; }
+            done
+            if [ "$ok" = "1" ]; then echo "all services healthy"; exit 0; fi
+            sleep 2
+          done
+          echo "::error::services failed to become healthy"
+          tail -150 /tmp/stack.log
+          exit 1
+
+      - name: Install Playwright Chromium
+        run: pnpm --filter @ctem/web-e2e exec playwright install --with-deps chromium
+
+      - name: Playwright UI smoke
+        run: pnpm test:ui
+
+      - name: Playwright artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-ui-smoke
+          path: |
+            apps/web-e2e/test-results
+            apps/web-e2e/playwright-report
+          if-no-files-found: ignore
+
+      - name: Service logs on failure
+        if: failure()
+        run: tail -300 /tmp/stack.log 2>/dev/null || true

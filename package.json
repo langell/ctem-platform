@@ -25,7 +25,8 @@
     "dev:web": "pnpm --filter @ctem/web dev",
     "graph": "nx graph",
     "test:int": "vitest run --config vitest.int.config.ts",
-    "e2e": "tsx tools/e2e/smoke.ts"
+    "e2e": "tsx tools/e2e/smoke.ts",
+    "test:ui": "pnpm --filter @ctem/web-e2e test:playwright"
   },
   "devDependencies": {
     "@eslint/js": "^9.18.0",
