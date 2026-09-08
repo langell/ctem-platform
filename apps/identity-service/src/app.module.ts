@@ -7,13 +7,14 @@ import { EventsModule } from '@ctem/events';
 import { DbModule } from '@ctem/db';
 import { HealthController } from '@ctem/service-kit';
 import { OrgController } from './org/org.controller';
+import { AuthResolveController } from './org/auth-resolve.controller';
 import { OrgService } from './org/org.service';
 import { ApiTokenService } from './tokens/api-token.service';
 import { ApiTokenController } from './tokens/api-token.controller';
 
 @Module({
   imports: [CtemConfigModule, ObservabilityModule, AuthModule, EventsModule, DbModule],
-  controllers: [HealthController, OrgController, ApiTokenController],
+  controllers: [HealthController, OrgController, AuthResolveController, ApiTokenController],
   providers: [OrgService, ApiTokenService, { provide: APP_GUARD, useClass: InternalAuthGuard }],
 })
 export class AppModule {

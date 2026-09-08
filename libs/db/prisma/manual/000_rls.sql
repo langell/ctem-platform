@@ -30,7 +30,8 @@ DECLARE
   tenant_tables text[] := ARRAY[
     'assets', 'asset_edges', 'integrations', 'scans', 'scan_jobs',
     'findings', 'finding_events', 'sbom_components', 'policies',
-    'risk_exceptions', 'audit_logs', 'api_tokens', 'memberships'
+    'risk_exceptions', 'audit_logs', 'api_tokens', 'memberships',
+    'membership_invites'
   ];
 BEGIN
   FOREACH t IN ARRAY tenant_tables LOOP

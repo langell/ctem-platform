@@ -14,7 +14,13 @@ import {
   permissionsForRole,
 } from '@ctem/auth';
 import { loadEnv } from '@ctem/config';
-import { Principal, Role, Permission } from '@ctem/contracts';
+import {
+  OrgId,
+  Principal,
+  Permission,
+  ResolveJwtRequest,
+  ResolveJwtResponse,
+} from '@ctem/contracts';
 import { currentTraceId, getContext, rootLogger } from '@ctem/observability';
 
 const PAT_PREFIX = 'ctem_pat_';
@@ -24,7 +30,8 @@ const PAT_PREFIX = 'ctem_pat_';
  * the signed principal this guard produces.
  *
  * Two paths:
- *   1. **JWT** — verified against the IdP's JWKS (human users).
+ *   1. **JWT** — verified against the IdP's JWKS, then Membership loaded from
+ *      identity-service. Role/permissions come from Membership, never JWT roles.
  *   2. **PAT** — forwarded to identity-service for SHA-256 lookup (CI/connectors).
  */
 @Injectable()
@@ -94,17 +101,77 @@ export class GatewayAuthGuard implements CanActivate {
     const orgId = claims.org_id;
     if (!orgId) throw new ForbiddenException('No organization selected');
 
-    const role = Role.safeParse(claims.roles?.[0] ?? 'developer');
-    if (!role.success) throw new ForbiddenException('Unknown role');
+    const membership = await this.resolveMembership(claims.sub, orgId, claims.email, claims.name);
 
     return {
-      userId: claims.sub,
+      userId: membership.userId,
       orgId,
-      role: role.data,
-      permissions: permissionsForRole(role.data) as Permission[],
+      role: membership.role,
+      permissions: permissionsForRole(membership.role) as Permission[],
       serviceAccount: null,
       traceId: currentTraceId(),
     };
+  }
+
+  /**
+   * Map IdP `sub` → `users.id` and load Membership. JWT `roles` / realm roles
+   * are ignored. A missing membership is 403; identity down is fail-closed 401.
+   * Raw IdP `sub` is never used as Principal.userId.
+   */
+  private async resolveMembership(
+    sub: string,
+    orgId: string,
+    email: string | undefined,
+    name: string | undefined,
+  ): Promise<ResolveJwtResponse> {
+    const tenant = OrgId.safeParse(orgId);
+    if (!tenant.success) throw new ForbiddenException('No organization selected');
+
+    // Invalid email/name must not 500 or block a valid membership resolve.
+    const emailParsed =
+      typeof email === 'string' ? ResolveJwtRequest.shape.email.safeParse(email) : undefined;
+    const nameParsed =
+      typeof name === 'string' && name.trim()
+        ? ResolveJwtRequest.shape.name.safeParse(name.trim())
+        : undefined;
+
+    const body: ResolveJwtRequest = {
+      sub,
+      orgId: tenant.data,
+      ...(emailParsed?.success ? { email: emailParsed.data } : {}),
+      ...(nameParsed?.success ? { name: nameParsed.data } : {}),
+    };
+
+    const env = loadEnv();
+    const url = `${env.IDENTITY_SERVICE_URL}/internal/auth/resolve`;
+
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(5_000),
+      });
+    } catch (err) {
+      this.log.error({ err }, 'identity-service unreachable for JWT membership resolve');
+      throw new UnauthorizedException('Token verification failed');
+    }
+
+    if (res.status === 403) throw new ForbiddenException('No organization membership');
+    if (!res.ok) throw new UnauthorizedException('Token verification failed');
+
+    let json: unknown;
+    try {
+      json = await res.json();
+    } catch {
+      throw new UnauthorizedException('Token verification failed');
+    }
+
+    const parsed = ResolveJwtResponse.safeParse(json);
+    if (!parsed.success) throw new UnauthorizedException('Token verification failed');
+    if (parsed.data.orgId !== orgId) throw new UnauthorizedException('Token verification failed');
+    return parsed.data;
   }
 
   // ---------------------------------------------------------------------------

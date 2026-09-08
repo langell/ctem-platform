@@ -62,7 +62,7 @@ Vulnerability intelligence (`vulnerabilities`) is deliberately **not** tenant-sc
 
 1. Humans authenticate with the IdP and present a bearer JWT. Machine callers present a `ctem_pat_…` token.
 2. The gateway verifies a JWT against the issuer's JWKS (`jose`, cached and auto-rotating), or POSTs a PAT to identity-service `/internal/tokens/verify`.
-3. Org comes from the verified JWT `org_id` claim or the PAT record — never from the client. The gateway maps the role (JWT) or scopes (PAT) to a permission set and builds a `Principal`.
+3. Org comes from the verified JWT `org_id` claim or the PAT record — never from the client. For humans the gateway maps `claims.sub` → `users.id` via `idpSubject` (JIT upsert) and loads **Membership**; role and permissions come from Membership + `permissionsForRole`. JWT `roles` / realm roles are ignored. A missing or disabled membership is 403. Machine PATs still map scopes to permissions.
 4. The principal is base64url-encoded and HMAC-signed into `x-ctem-principal` + `-signature`.
 5. Downstream services verify the signature with `timingSafeEqual` and check route permissions.
 

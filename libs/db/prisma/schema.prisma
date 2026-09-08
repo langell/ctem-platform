@@ -27,15 +27,16 @@ model Organization {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  memberships  Membership[]
-  assets       Asset[]
-  scans        Scan[]
-  findings     Finding[]
-  policies     Policy[]
-  exceptions   RiskException[]
-  integrations Integration[]
-  apiTokens    ApiToken[]
-  auditLogs    AuditLog[]
+  memberships       Membership[]
+  membershipInvites MembershipInvite[]
+  assets            Asset[]
+  scans             Scan[]
+  findings          Finding[]
+  policies          Policy[]
+  exceptions        RiskException[]
+  integrations      Integration[]
+  apiTokens         ApiToken[]
+  auditLogs         AuditLog[]
 
   @@map("organizations")
 }
@@ -55,10 +56,12 @@ model User {
 }
 
 model Membership {
-  orgId     String   @db.Uuid
-  userId    String   @db.Uuid
-  role      String
-  createdAt DateTime @default(now())
+  orgId      String    @db.Uuid
+  userId     String    @db.Uuid
+  role       String
+  /// Soft-disable: next JWT resolve 403s. User row is kept (other orgs may exist).
+  disabledAt DateTime?
+  createdAt  DateTime  @default(now())
 
   org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -66,6 +69,25 @@ model Membership {
   @@id([orgId, userId])
   @@index([userId])
   @@map("memberships")
+}
+
+/// CTEM-side invite. Becomes a Membership on first login when claims.email matches.
+/// Keycloak Admin API is not used (no fail-closed allowlist in deploy).
+model MembershipInvite {
+  id         String    @id @default(uuid()) @db.Uuid
+  orgId      String    @db.Uuid
+  email      String
+  role       String
+  tokenHash  String    @unique
+  invitedBy  String    @db.Uuid
+  expiresAt  DateTime
+  acceptedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, email])
+  @@map("membership_invites")
 }
 
 /// Machine credentials for CI pipelines and connectors. Only the hash is stored.

@@ -73,12 +73,42 @@ export const Membership = z.object({
   orgId: OrgId,
   userId: UserId,
   role: Role,
+  disabledAt: z.coerce.date().nullable().default(null),
 });
 export type Membership = z.infer<typeof Membership>;
 
+/** CTEM-side invite. Membership is created on first login (email match). */
+export const InviteMemberRequest = z.object({
+  email: z.string().email(),
+  role: Role,
+});
+export type InviteMemberRequest = z.infer<typeof InviteMemberRequest>;
+
+export const SetMemberRoleRequest = z.object({
+  role: Role,
+});
+export type SetMemberRoleRequest = z.infer<typeof SetMemberRoleRequest>;
+
+/** Gateway → identity after JWT verify. Role claims are intentionally absent. */
+export const ResolveJwtRequest = z.object({
+  sub: z.string().min(1),
+  orgId: OrgId,
+  email: z.string().email().optional(),
+  name: z.string().min(1).optional(),
+});
+export type ResolveJwtRequest = z.infer<typeof ResolveJwtRequest>;
+
+export const ResolveJwtResponse = z.object({
+  userId: UserId,
+  orgId: OrgId,
+  role: Role,
+});
+export type ResolveJwtResponse = z.infer<typeof ResolveJwtResponse>;
+
 /**
- * The request-scoped identity every service receives. It is derived from a
- * verified JWT at the gateway and forwarded as a signed internal header.
+ * The request-scoped identity every service receives. For humans it is derived
+ * from a verified JWT plus CTEM Membership (never JWT role claims) and
+ * forwarded as a signed internal header.
  */
 export const Principal = z.object({
   userId: z.string(),

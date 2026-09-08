@@ -5,8 +5,10 @@ import { loadEnv } from '@ctem/config';
 export interface VerifiedToken extends JWTPayload {
   sub: string;
   email?: string;
+  name?: string;
   /** Org selected for this session; a user may belong to several. */
   org_id?: string;
+  /** Present on some IdP tokens; ignored for AuthZ (Membership is source of truth). */
   roles?: string[];
 }
 
