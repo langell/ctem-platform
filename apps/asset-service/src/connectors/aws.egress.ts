@@ -72,19 +72,21 @@ export function allowlistedAwsUrl(raw: string): string {
   return `https://${parsed.hostname.toLowerCase()}${path}${parsed.search}`;
 }
 
-export type AwsService = 'ec2' | 'sts' | 's3';
+export type AwsService = 'ec2' | 'sts' | 's3' | 'ecr';
 
 /** Build the platform host for a service. Region is an id, never a host. */
 export function awsServiceUrl(service: AwsService, region: string): string {
   if (!AWS_REGION_RE.test(region)) {
-    throw new AwsEgressError(
-      `Refusing AWS region '${region}' — not a valid AWS region identifier`,
-    );
+    throw new AwsEgressError(`Refusing AWS region '${region}' — not a valid AWS region identifier`);
   }
   // S3 ListBuckets is the account-global API. Always s3.amazonaws.com —
   // never a tenant-derived bucket/website host.
   if (service === 's3') {
     return allowlistedAwsUrl('https://s3.amazonaws.com/');
+  }
+  // ECR JSON API is api.ecr.{region}.amazonaws.com — never dkr.ecr (layer pull).
+  if (service === 'ecr') {
+    return allowlistedAwsUrl(`https://api.ecr.${region}.${AWS_API_SUFFIX}/`);
   }
   return allowlistedAwsUrl(`https://${service}.${region}.${AWS_API_SUFFIX}/`);
 }

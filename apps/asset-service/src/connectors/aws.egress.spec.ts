@@ -22,9 +22,9 @@ describe('allowlistedAwsUrl', () => {
   });
 
   it('refuses suffix-confusion and lookalike hosts', () => {
-    expect(() =>
-      allowlistedAwsUrl('https://ec2.us-east-1.amazonaws.com.evil.example/'),
-    ).toThrow(/only amazonaws\.com/);
+    expect(() => allowlistedAwsUrl('https://ec2.us-east-1.amazonaws.com.evil.example/')).toThrow(
+      /only amazonaws\.com/,
+    );
     expect(() => allowlistedAwsUrl('https://evilamazonaws.com/')).toThrow(/only amazonaws\.com/);
     expect(() => allowlistedAwsUrl('https://amazonaws.com.evil.example/')).toThrow(
       /only amazonaws\.com/,
@@ -55,6 +55,13 @@ describe('awsServiceUrl', () => {
     expect(awsServiceUrl('ec2', 'us-east-1')).toBe('https://ec2.us-east-1.amazonaws.com/');
     expect(awsServiceUrl('sts', 'eu-central-1')).toBe('https://sts.eu-central-1.amazonaws.com/');
     expect(awsServiceUrl('s3', 'ap-southeast-2')).toBe('https://s3.amazonaws.com/');
+  });
+
+  it('derives the ECR JSON API host, including GovCloud, never dkr.ecr', () => {
+    expect(awsServiceUrl('ecr', 'us-east-1')).toBe('https://api.ecr.us-east-1.amazonaws.com/');
+    expect(awsServiceUrl('ecr', 'us-gov-west-1')).toBe(
+      'https://api.ecr.us-gov-west-1.amazonaws.com/',
+    );
   });
 
   it('refuses a region that is not an AWS region identifier', () => {
