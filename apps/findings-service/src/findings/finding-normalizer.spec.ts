@@ -142,6 +142,38 @@ describe('FindingNormalizer.fingerprint', () => {
     expect(sastFp).not.toBe(scaFp);
   });
 
+  it('is (asset, cloud_posture, rule, resource) and does not collide with IaC', () => {
+    const cspm = raw({
+      scannerType: 'cloud_posture',
+      scannerName: 'ctem-cspm',
+      externalId: 'ctem.cspm.public-bucket:arn:aws:s3:::logs',
+      identifiers: [{ system: 'rule', value: 'ctem.cspm.public-bucket' }],
+      location: { resource: 'arn:aws:s3:::logs' },
+      evidence: { reachability: 'unknown' },
+    });
+    const otherBucket = raw({
+      scannerType: 'cloud_posture',
+      identifiers: [{ system: 'rule', value: 'ctem.cspm.public-bucket' }],
+      location: { resource: 'arn:aws:s3:::assets' },
+    });
+    const cspmFp = normalizer.fingerprint('asset-1', cspm);
+    expect(cspmFp).toBe(
+      createHash('sha256')
+        .update(['asset-1', 'cloud_posture', 'ctem.cspm.public-bucket', 'arn:aws:s3:::logs'].join('|'))
+        .digest('hex'),
+    );
+    expect(cspmFp).not.toBe(normalizer.fingerprint('asset-1', otherBucket));
+    const iacFp = normalizer.fingerprint(
+      'asset-1',
+      raw({
+        scannerType: 'iac',
+        identifiers: [{ system: 'rule', value: 'ctem.iac.s3-public' }],
+        location: { path: 's3.tf', resource: 'arn:aws:s3:::logs' },
+      }),
+    );
+    expect(cspmFp).not.toBe(iacFp);
+  });
+
   it('is (asset, container, vuln, purl, layer) so base vs app layer stay distinct', () => {
     const base = raw({
       scannerType: 'container',

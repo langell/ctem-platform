@@ -52,6 +52,17 @@ export class FindingNormalizer {
       return createHash('sha256').update([assetId, 'container', vuln, pkg, layer].join('|')).digest('hex');
     }
 
+    // CSPM identity is (asset, cloud_posture, rule, resource). Must not collide
+    // with IaC (asset, iac, rule, path, address) even when the live resource
+    // matches a Terraform address.
+    if (finding.scannerType === 'cloud_posture') {
+      const ruleId =
+        finding.identifiers.find((i) => i.system.toLowerCase() === 'rule')?.value ?? finding.externalId;
+      return createHash('sha256')
+        .update([assetId, 'cloud_posture', ruleId, finding.location.resource ?? ''].join('|'))
+        .digest('hex');
+    }
+
     const parts: string[] = [assetId, finding.scannerType];
 
     const cve = finding.identifiers.find((i) => /^(cve|ghsa|osv)$/i.test(i.system));
@@ -70,7 +81,6 @@ export class FindingNormalizer {
         parts.push(finding.location.path ?? '');
         break;
       case 'asm':
-      case 'cloud_posture':
         parts.push(finding.location.resource ?? finding.location.url ?? String(finding.location.port ?? ''));
         break;
     }

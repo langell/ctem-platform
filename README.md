@@ -67,6 +67,7 @@ Shared fixtures (factories, a test OIDC issuer, RLS-aware db clients) are in `@c
 | `scanner-sast`          | `sast` — source code rules and taint analysis                             |
 | `scanner-container-iac` | `container`, `iac` — image layers, Terraform/K8s misconfig                |
 | `scanner-asm`           | `asm` — external attack surface, subdomain takeover                       |
+| `scanner-cspm`          | `cloud_posture` — read-only AWS/GCP/Azure posture on `cloud_resource`     |
 
 **Shared libraries** — `@ctem/contracts` (zod schemas + event catalog), `@ctem/db` (Prisma + RLS), `@ctem/auth`, `@ctem/events`, `@ctem/storage`, `@ctem/config`, `@ctem/observability`, `@ctem/service-kit`, `@ctem/scanner-sdk`.
 
