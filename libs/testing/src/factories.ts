@@ -125,6 +125,8 @@ export async function deleteOrgCascade(
 export const DEMO_ORG_ID = 'c7e00000-0000-4000-8000-000000000001';
 export const DEMO_ORG_SLUG = 'demo';
 export const DEMO_USER_EMAIL = 'security@demo.test';
+export const DEMO_DEVELOPER_EMAIL = 'developer@demo.test';
+export const DEMO_DEVELOPER_IDP_SUBJECT = 'demo|developer';
 /** IdP `sub` for the demo analyst — Keycloak user id and users.idpSubject. */
 export const DEMO_IDP_SUBJECT = 'demo|analyst';
 
@@ -186,6 +188,22 @@ export async function seedDemoOrg(prisma: PrismaClient) {
     where: { orgId_userId: { orgId: org.id, userId: user.id } },
     update: { role: 'owner', disabledAt: null },
     create: { orgId: org.id, userId: user.id, role: 'owner' },
+  });
+
+  // Second member so Members admin can setRole/disable without touching the last owner.
+  const developer = await prisma.user.upsert({
+    where: { email: DEMO_DEVELOPER_EMAIL },
+    update: { idpSubject: DEMO_DEVELOPER_IDP_SUBJECT, name: 'Demo Developer' },
+    create: {
+      email: DEMO_DEVELOPER_EMAIL,
+      name: 'Demo Developer',
+      idpSubject: DEMO_DEVELOPER_IDP_SUBJECT,
+    },
+  });
+  await prisma.membership.upsert({
+    where: { orgId_userId: { orgId: org.id, userId: developer.id } },
+    update: { role: 'developer', disabledAt: null },
+    create: { orgId: org.id, userId: developer.id, role: 'developer' },
   });
 
   // One seed rule (not a policy editor): critical → notify. The engine also

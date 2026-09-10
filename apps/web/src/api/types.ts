@@ -83,7 +83,15 @@ export interface Scan {
   createdAt?: string;
 }
 
-export const SCANNER_TYPES = ['sca', 'sast', 'container', 'iac', 'secrets', 'asm', 'cloud_posture'] as const;
+export const SCANNER_TYPES = [
+  'sca',
+  'sast',
+  'container',
+  'iac',
+  'secrets',
+  'asm',
+  'cloud_posture',
+] as const;
 export type ScannerType = (typeof SCANNER_TYPES)[number];
 
 export const SEVERITIES = ['critical', 'high', 'medium', 'low', 'info'] as const;
@@ -112,6 +120,19 @@ export interface Policy {
   };
   actions: string[];
   slaHours: number | null;
+}
+
+export const ROLES = ['owner', 'admin', 'security_analyst', 'developer', 'auditor'] as const;
+export type MemberRole = (typeof ROLES)[number];
+
+/** Tenant membership row from GET /v1/org/members. Pending invites are not listed. */
+export interface Member {
+  userId: string;
+  email: string;
+  name: string;
+  role: string;
+  disabledAt: string | null;
+  createdAt: string;
 }
 
 export interface PolicyWrite {

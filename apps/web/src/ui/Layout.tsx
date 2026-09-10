@@ -42,9 +42,14 @@ export function Layout() {
           <NavLink to="/findings">Findings</NavLink>
           <NavLink to="/scans">Scan</NavLink>
           <NavLink to="/policies">Policies</NavLink>
+          <NavLink to="/members">Members</NavLink>
         </nav>
         <div className="session">
-          {session ? <span title={session.orgId}>{session.role}</span> : <span className="muted">…</span>}
+          {session ? (
+            <span title={session.orgId}>{session.role}</span>
+          ) : (
+            <span className="muted">…</span>
+          )}
           <button type="button" className="link" onClick={logout}>
             Sign out
           </button>

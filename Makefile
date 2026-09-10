@@ -39,7 +39,7 @@ test-int: ## Integration tier: real Postgres/RLS, real crypto (needs `make infra
 e2e: ## Smoke the golden path against a running stack (needs `make dev` in another terminal)
 	pnpm e2e
 
-test-ui: ## Playwright Chromium: Keycloak login + findings rail + scan kick (starts stack)
+test-ui: ## Playwright Chromium: Keycloak login + findings rail + scan kick + members (starts stack)
 	./tools/e2e/run-ui.sh
 
 db-migrate: ## Apply Prisma migrations, then the row-level security policies

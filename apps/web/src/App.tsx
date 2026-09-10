@@ -8,6 +8,7 @@ import { FindingsPage } from './pages/FindingsPage';
 import { FindingDetailPage } from './pages/FindingDetailPage';
 import { ScanPage } from './pages/ScanPage';
 import { PoliciesPage } from './pages/PoliciesPage';
+import { MembersPage } from './pages/MembersPage';
 import { tokenStore } from './api/client';
 
 function RequireToken({ children }: { children: ReactNode }) {
@@ -32,6 +33,7 @@ export function App() {
         <Route path="/findings/:id" element={<FindingDetailPage />} />
         <Route path="/scans" element={<ScanPage />} />
         <Route path="/policies" element={<PoliciesPage />} />
+        <Route path="/members" element={<MembersPage />} />
         <Route path="/" element={<Navigate to="/findings" replace />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

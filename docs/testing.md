@@ -43,9 +43,11 @@ Sign-in button, no password/PAT/JWT paste, JWT in `sessionStorage`, org from
 that JWT; two `completeAuthorization` calls with the same code must keep the
 session), Findings Score Rail (six columns, every data row has `rail-*` and
 `risk-band-*`, whole-row click → `/findings/:id`; skeleton / empty / error stay
-distinct), and a scan-kick smoke (Keycloak JWT session — not a PAT — POST
+distinct), a scan-kick smoke (Keycloak JWT session — not a PAT — POST
 `/v1/scans` is 2xx and the UI shows a queued card with id; never an HTTP 500 /
-Internal Server Error banner). Empty tables or missing outcomes fail; they do
+Internal Server Error banner), and Members admin (Keycloak JWT with
+`member:manage` lists, invites, setRole, and disable-with-confirm; without
+`member:manage` write controls are absent). Empty tables or missing outcomes fail; they do
 not pass. Traces and screenshots are retained on failure under
 `apps/web-e2e/test-results`. This tier does **not** replace `make e2e`. CI runs
 it as an optional `ui-smoke` job (Phase A) so a Playwright flake does not block
@@ -89,9 +91,9 @@ and a valid PAT that cannot POST a failed conclusion.
    `libs/db/prisma/manual/000_rls.sql` covers it. Fix the SQL, not the test.
 5. Changes the golden path (new endpoint in the flow, changed contract) →
    update `tools/e2e/smoke.ts`.
-6. Changes browser login, the findings list Score Rail, or scan kick →
-   extend `apps/web-e2e` (Playwright). Do not treat an empty list or a missing
-   scan outcome as a pass.
+6. Changes browser login, the findings list Score Rail, scan kick, or Members
+   admin → extend `apps/web-e2e` (Playwright). Do not treat an empty list or a
+   missing scan / member outcome as a pass.
 
 ## Cadence
 
