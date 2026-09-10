@@ -47,6 +47,9 @@ x-app-env: &app-env
   AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
   GCP_CLIENT_EMAIL: ${GCP_CLIENT_EMAIL:-}
   GCP_PRIVATE_KEY: ${GCP_PRIVATE_KEY:-}
+  AZURE_TENANT_ID: ${AZURE_TENANT_ID:-}
+  AZURE_CLIENT_ID: ${AZURE_CLIENT_ID:-}
+  AZURE_CLIENT_SECRET: ${AZURE_CLIENT_SECRET:-}
   SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
   JIRA_BASE_URL: ${JIRA_BASE_URL:-}
   JIRA_EMAIL: ${JIRA_EMAIL:-}
@@ -320,6 +323,10 @@ services:
   scanner-container-iac:
     <<: *app-service
     environment: { <<: *app-env, APP: scanner-container-iac }
+
+  scanner-cspm:
+    <<: *app-service
+    environment: { <<: *app-env, APP: scanner-cspm }
 
 volumes:
   pgdata:

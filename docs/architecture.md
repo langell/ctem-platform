@@ -31,8 +31,8 @@ Services are drawn around **rate of change and ownership**, not around database 
         └──────────────┴───────┬────────┴──────────────┴──────────────┘
                                │  NATS JetStream
         ┌──────────────┬───────┴────────┬──────────────┐
-        ▼              ▼                ▼              ▼
-   scanner-sca   scanner-sast   scanner-container-iac  scanner-asm
+        ▼              ▼                ▼              ▼              ▼
+   scanner-sca   scanner-sast   scanner-container-iac  scanner-asm  scanner-cspm
                                │
                                ▼
                         notification-service → Slack / Jira / webhook
@@ -105,7 +105,7 @@ The mitigation is that `@ctem/contracts` is the single source of truth for every
 
 ## Known gaps in this scaffold
 
-- Scanner internals beyond SCA SBOM ingest and lockfile resolution: IaC misconfig scanning is live; container image scanning pulls allowlisted `ghcr.io` digests in-process (fail-closed on incomplete layer inventory). Remaining discovery connectors (Kubernetes, DNS) are not built yet. AWS, GCP, and Azure are inventory only — not CSPM scanners. GHCR discovery lists Packages REST on `api.github.com` only; ECR discovery lists the ECR JSON API on `api.ecr.{region}.amazonaws.com` only; layer pull is the container scanner on `ghcr.io` (ECR assets may exist without being scannable yet).
+- Scanner internals beyond SCA SBOM ingest and lockfile resolution: IaC misconfig scanning is live; container image scanning pulls allowlisted `ghcr.io` digests in-process (fail-closed on incomplete layer inventory). Remaining discovery connectors (Kubernetes, DNS) are not built yet. AWS, GCP, and Azure inventory is live; CSPM (`cloud_posture`) evaluates inventoried `cloud_resource` assets read-only (public bucket / open SG class). GHCR discovery lists Packages REST on `api.github.com` only; ECR discovery lists the ECR JSON API on `api.ecr.{region}.amazonaws.com` only; layer pull is the container scanner on `ghcr.io` (ECR assets may exist without being scannable yet).
 - SCA source clone is allowlisted to `https://github.com/owner/repo` or `https://gitlab.com/owner/repo` from `cloneUrl` or a `github:` / `gitlab:` externalKey. Self-hosted GitLab clone/API is the connector `baseUrl` host (https only, no userinfo, no git@) — not `http_url_to_repo` and not extra tenant host fields. A refused/missing checkout, a private repo without a usable `env:GITHUB_*` / `env:GITLAB_*` credentialRef, or every lockfile parser failing throws — the job must not succeed with zero findings. `pom.xml` / `*.csproj` / `requirements.txt` are pinned-manifest fallbacks, not graphs.
 - Policy `ticket` fans out to Jira Cloud (`{site}.atlassian.net`) via platform `env:JIRA_*` in notification-service. Slack still cannot ticket. Self-hosted Jira is later. Tenant config cannot set the host.
 - Policy `fail_build` fails the CI-facing scan `conclusion` on GET. There is no GitHub Checks integration and no client write for conclusion. `block_deploy` is still later.

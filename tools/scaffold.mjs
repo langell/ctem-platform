@@ -80,6 +80,7 @@ const WORKERS = {
   'scanner-sast': { port: 3101 },
   'scanner-container-iac': { port: 3102 },
   'scanner-asm': { port: 3103 },
+  'scanner-cspm': { port: 3104 },
 };
 
 const WORKER_REFS = ['contracts', 'config', 'observability', 'events', 'storage', 'scanner-sdk'];
