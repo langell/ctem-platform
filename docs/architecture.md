@@ -10,7 +10,7 @@
 | Sync transport  | REST                                                | Simple to debug, easy for partners to integrate against                                 |
 | Async transport | NATS JetStream                                      | Durable, replayable, cheap to run; consumer groups give free horizontal scaling         |
 | Primary store   | Postgres 17 + Prisma                                | Relational integrity for the asset/finding graph, JSONB for scanner payloads            |
-| Cache/queue     | Redis                                               | Session and rate-limit state, short-lived scanner coordination                          |
+| Cache/queue     | Redis                                               | Session and rate-limit state, short-lived scanner coordination, scheduler leader leases |
 | Blobs           | S3-compatible                                       | Raw scanner output and SBOMs do not belong in a relational database                     |
 | Tenancy         | Shared database, `org_id` + row-level security      | Matches how this category is sold; isolation is enforced by Postgres, not by discipline |
 | Auth            | OIDC/JWT at the edge, signed principal internally   | Keeps the IdP off the hot path; services stay stateless                                 |
@@ -44,7 +44,9 @@ The gateway holds no business logic — if it starts to, that logic belongs in a
 
 Two paths, and both matter.
 
-**Discovery (continuous):** connectors sync on an interval → assets are upserted by `externalKey` → anything not seen this cycle is archived, not deleted → `ctem.asset.discovered` / `.updated`.
+**Discovery (continuous):** the asset-service replica that holds `ctem:leader:discovery-schedule` syncs connectors on a 15-minute interval → assets are upserted by `externalKey` → anything not seen this cycle is archived, not deleted → `ctem.asset.discovered` / `.updated`. Manual `syncOrg` is not lease-gated.
+
+**Scheduled assessment:** the orchestrator replica that holds `ctem:leader:scan-schedule` walks orgs every 5 minutes and dispatches due scanner cadences. Manual / webhook / CI `createScan` is not lease-gated. A second replica of either scheduler process requires Redis; if Redis is unreachable the interval path skips the tick rather than running on every replica.
 
 **Assessment (event-driven):** scan requested → planner selects assets the scanner actually applies to → jobs persisted → `ctem.scan.job.dispatched` → worker executes, uploads raw output → `ctem.finding.reported` → findings normalized, deduped by fingerprint, anything no longer reported auto-resolved → `ctem.finding.created/.updated` → risk scored → policy evaluated → `ctem.policy.violated` → notification. CI polls `GET /v1/scans/:id`; if a matching `fail_build` rule wins, `conclusion` is `failed`. Callers cannot POST that field.
 
@@ -99,7 +101,7 @@ The mitigation is that `@ctem/contracts` is the single source of truth for every
 2. **SCA depth.** Lockfile resolvers per ecosystem, real dependency paths, then reachability. Reachability is the single largest reduction in noise available.
 3. **Cloud connectors.** GitHub and GitLab repository discovery is live (gitlab.com by default; self-hosted via explicit connector `baseUrl`). AWS inventory (EC2, S3, security groups, Elastic IPs → `cloud_resource`), GCP inventory (GCE, GCS, firewalls, external IPs → `cloud_resource`), Azure inventory (VMs, storage accounts, NSGs, public IPs → `cloud_resource`), GHCR inventory (container packages → `container_image` keyed by digest), and ECR inventory (repositories → `container_image` keyed by digest) are live via the same AssetConnector + scheduler.
 4. **Web UI.** Thin Nx app at `apps/web`, served by the gateway. Login is a public OIDC client with PKCE: the browser redirects to compose Keycloak realm `ctem` and the callback stores the issued access-token JWT (never a PAT, never a password form). Assets, findings, finding risk + reachability, kick a scan, tenant policy editor (ordered notify, ticket, or fail-build rules). Notify is Slack; ticket is Jira in notification-service. Fail-build is the CI scan conclusion on `GET /v1/scans/:id` (PAT or JWT) — not GitHub Checks, not a client POST. Org is taken from the JWT (humans) or the PAT record (machines), never from the client.
-5. **Distributed scheduling.** The discovery and scan schedulers use naive intervals; they need leader election or a JetStream-backed work queue before a second replica of either runs.
+5. **Distributed scheduling.** Redis leader leases in `@ctem/coordination` (`ctem:leader:scan-schedule`, `ctem:leader:discovery-schedule`) so a second replica of orchestrator or asset-service does not double-fire interval ticks. Manual kicks stay ungated. JetStream remains the job bus, not the scheduler control-plane.
 6. **Container layer scanning**, then remaining IaC depth, then ASM probing depth. GHCR digest pull on `ghcr.io` is live; Kubernetes workloads are not.
 7. **Reachability + exploit validation.** This is what separates a CTEM platform from a vulnerability scanner with a dashboard.
 
@@ -109,7 +111,7 @@ The mitigation is that `@ctem/contracts` is the single source of truth for every
 - SCA source clone is allowlisted to `https://github.com/owner/repo` or `https://gitlab.com/owner/repo` from `cloneUrl` or a `github:` / `gitlab:` externalKey. Self-hosted GitLab clone/API is the connector `baseUrl` host (https only, no userinfo, no git@) — not `http_url_to_repo` and not extra tenant host fields. A refused/missing checkout, a private repo without a usable `env:GITHUB_*` / `env:GITLAB_*` credentialRef, or every lockfile parser failing throws — the job must not succeed with zero findings. `pom.xml` / `*.csproj` / `requirements.txt` are pinned-manifest fallbacks, not graphs.
 - Policy `ticket` fans out to Jira Cloud (`{site}.atlassian.net`) via platform `env:JIRA_*` in notification-service. Slack still cannot ticket. Self-hosted Jira is later. Tenant config cannot set the host.
 - Policy `fail_build` fails the CI-facing scan `conclusion` on GET. There is no GitHub Checks integration and no client write for conclusion. `block_deploy` is still later.
-- Rate limiting is in-memory — correct for one replica only.
+- Rate limiting is in-memory — correct for one replica only. Scheduler interval ticks are lease-gated; a second replica still needs Redis (fail closed if it is down).
 - SLA breach de-duplication is in-memory and resets on restart.
 - No circuit breaker or retry budget on inter-service calls.
 - `libs/db/prisma/migrations/000_rls` must be applied after the generated Prisma migration (`make db-migrate` does both in order).

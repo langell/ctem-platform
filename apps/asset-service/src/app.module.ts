@@ -4,6 +4,7 @@ import { CtemConfigModule } from '@ctem/config';
 import { ObservabilityModule, RequestContextMiddleware } from '@ctem/observability';
 import { AuthModule, InternalAuthGuard } from '@ctem/auth';
 import { EventsModule } from '@ctem/events';
+import { CoordinationModule } from '@ctem/coordination';
 import { DbModule } from '@ctem/db';
 import { HealthController } from '@ctem/service-kit';
 import { AssetsController } from './assets/assets.controller';
@@ -20,7 +21,7 @@ import { GitHubConnector } from './connectors/github.connector';
 import { GitLabConnector } from './connectors/gitlab.connector';
 
 @Module({
-  imports: [CtemConfigModule, ObservabilityModule, AuthModule, EventsModule, DbModule],
+  imports: [CtemConfigModule, ObservabilityModule, AuthModule, EventsModule, CoordinationModule, DbModule],
   controllers: [HealthController, AssetsController],
   providers: [
     AssetsService,

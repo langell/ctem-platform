@@ -28,6 +28,7 @@
     "@ctem/auth": "workspace:*",
     "@ctem/db": "workspace:*",
     "@ctem/events": "workspace:*",
+    "@ctem/coordination": "workspace:*",
     "@ctem/service-kit": "workspace:*",
     "@prisma/client": "^6.3.0"
   }

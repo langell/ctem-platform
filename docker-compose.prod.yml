@@ -4,8 +4,9 @@
 #   make deploy-build && make deploy-up && make deploy-migrate && make deploy-seed
 #
 # Only Caddy publishes host ports. Postgres, Redis, NATS, MinIO and the service
-# ports stay on the compose network. Every app service runs one replica: the
-# schedulers have no leader election yet (README "Not yet built").
+# ports stay on the compose network. Compose still runs one replica per app
+# service; a second replica of orchestrator or asset-service needs Redis for
+# the scheduler leader lease (see README "Distributed scheduling").
 name: ctem-prod
 
 x-app-image: &app-image
