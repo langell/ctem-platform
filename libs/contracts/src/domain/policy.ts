@@ -42,7 +42,8 @@ export type Policy = z.infer<typeof Policy>;
  * Tenant-authored writes: notify, ticket, and/or fail-build. block-deploy stays
  * on the stored Policy shape (seed + engine) but cannot be created or updated
  * through the editor API. Slack still cannot ticket — ticket fans out to Jira
- * in notification-service. fail-build is the CI scan conclusion, not GitHub Checks.
+ * in notification-service. fail-build is the CI scan conclusion on GET;
+ * GitHub Checks (orchestrator, optional) map the same concludeScan result.
  */
 export const EditorActions = z.array(z.enum(['notify', 'ticket', 'fail_build'])).min(1);
 export type EditorActions = z.infer<typeof EditorActions>;

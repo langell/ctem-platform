@@ -62,7 +62,9 @@ The SBOM and intel steps query OSV/CISA/FIRST, so they need internet access;
 without it those steps fail with a message saying so. Policy editor steps cover
 ordered notify/ticket/fail-build create/update, refuse block-deploy, org-B 404 on
 another tenant's rule, CI GET conclusion failed from a matching fail_build rule,
-and a valid PAT that cannot POST a failed conclusion.
+and a valid PAT that cannot POST a failed conclusion. GitHub Checks (orchestrator,
+`api.github.com` only) are unit-tested as an optional additive publisher of the
+same `concludeScan` result — they are not part of the e2e smoke.
 
 ## Shared helpers: `@ctem/testing`
 

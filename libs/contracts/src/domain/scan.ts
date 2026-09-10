@@ -17,7 +17,10 @@ export const ScanTrigger = z.enum(['scheduled', 'manual', 'webhook', 'ci', 'asse
 export const ScanStatus = z.enum(['queued', 'running', 'succeeded', 'partial', 'failed', 'cancelled']);
 export type ScanStatus = z.infer<typeof ScanStatus>;
 
-/** CI reads this on GET. It is not a writeable column and not a GitHub Check. */
+/**
+ * CI reads this on GET. It is not a writeable column. GitHub Checks (optional,
+ * additive) map the same concludeScan result; they do not replace this field.
+ */
 export const ScanConclusion = z.enum(['pending', 'passed', 'failed']);
 export type ScanConclusion = z.infer<typeof ScanConclusion>;
 
@@ -128,6 +131,13 @@ export const CreateScanRequest = z
         tags: z.record(z.string()).optional(),
       })
       .default({}),
+    /**
+     * Scanner options plus optional GitHub Checks context (allowlisted keys
+     * under `options.github` or top-level): `repository` (`owner/name` or
+     * `owner`+`repo`), `sha` (40-char commit), optional `checkName` /
+     * `detailsUrl`. `detailsUrl` must be a CTEM URL. Client conclusion keys
+     * stay refused — they are not Checks context.
+     */
     options: z.record(z.unknown()).default({}),
   })
   .strict()

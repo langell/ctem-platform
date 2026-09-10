@@ -1,10 +1,11 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Optional } from '@nestjs/common';
 import { PrismaService } from '@ctem/db';
 import { EventBus } from '@ctem/events';
 import { SUBJECTS, ScanJob, UserId, type CreateScanRequest, type ScannerType } from '@ctem/contracts';
 import { loadEnv } from '@ctem/config';
 import { currentTraceId, rootLogger } from '@ctem/observability';
 import { ScanPlannerService } from './scan-planner.service';
+import { GithubChecksPublisher } from './github-checks.publisher';
 
 export interface DispatchAsset {
   id: string;
@@ -57,6 +58,7 @@ export class ScanDispatcherService {
     private readonly prisma: PrismaService,
     private readonly planner: ScanPlannerService,
     private readonly bus: EventBus,
+    @Optional() private readonly checks?: GithubChecksPublisher,
   ) {}
 
   /**
@@ -148,7 +150,12 @@ export class ScanDispatcherService {
       .catch(() => null);
 
     this.log.info({ scanId: scan.id, jobs: jobs.length }, 'scan dispatched');
-    return { ...(latest ?? scan), jobsDispatched: jobs.length };
+    const row = latest ?? scan;
+    // Zero-asset (already terminal) scans never emit scanCompleted via lifecycle.
+    if (row.status !== 'queued' && row.status !== 'running') {
+      await this.checks?.publishForCompletedScan(orgId, scan.id);
+    }
+    return { ...row, jobsDispatched: jobs.length };
   }
 
   /**

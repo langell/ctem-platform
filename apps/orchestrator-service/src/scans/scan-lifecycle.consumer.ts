@@ -3,6 +3,7 @@ import { PrismaService } from '@ctem/db';
 import { EventBus } from '@ctem/events';
 import { SUBJECTS, ScanJobResult } from '@ctem/contracts';
 import { rootLogger } from '@ctem/observability';
+import { GithubChecksPublisher } from './github-checks.publisher';
 
 /**
  * Tracks job completions and closes out the parent scan. A scan with any failed
@@ -16,6 +17,7 @@ export class ScanLifecycleConsumer implements OnApplicationBootstrap {
   constructor(
     private readonly prisma: PrismaService,
     private readonly bus: EventBus,
+    private readonly checks: GithubChecksPublisher,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -29,7 +31,7 @@ export class ScanLifecycleConsumer implements OnApplicationBootstrap {
     );
   }
 
-  private async applyResult(result: ScanJobResult): Promise<void> {
+  async applyResult(result: ScanJobResult): Promise<void> {
     const scan = await this.prisma.withOrg(result.orgId, async (tx) => {
       await tx.scanJob.update({
         where: { id: result.jobId },
@@ -70,6 +72,10 @@ export class ScanLifecycleConsumer implements OnApplicationBootstrap {
         status: scan.status,
       });
       this.log.info({ scanId: scan.id, status: scan.status }, 'scan completed');
+      // Additive Check Run from the same concludeScan math as GET. Org is the
+      // signed event / scan row, never a client header. Errors stay inside the
+      // publisher (soft-fail — do not roll back this terminal status).
+      await this.checks.publishForCompletedScan(result.orgId, scan.id);
     }
   }
 }

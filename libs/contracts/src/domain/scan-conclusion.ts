@@ -6,7 +6,8 @@ import type { ScanConclusion } from './scan';
  * CI-facing scan gate, distinct from job `status`.
  *
  * Only a matching tenant `fail_build` policy can produce `failed`. Callers
- * (PAT/JWT) cannot POST or PATCH this field — GET computes it.
+ * (PAT/JWT) cannot POST or PATCH this field — GET computes it. GitHub Checks
+ * reuse this function; they do not take a client conclusion.
  */
 
 export interface PolicyMatchFinding {
