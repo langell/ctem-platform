@@ -60,8 +60,12 @@ RLS script is written to be re-run).
   JWKS fetches fail, that is the first thing to check.
 - **The admin console and MinIO console are not exposed**; port-forward with
   `ssh -L 9001:localhost:9001` after temporarily publishing the port if needed.
-- **Schedulers are single-instance.** Do not scale any service above one
-  replica until leader election lands (README "Not yet built").
+- **A second replica needs Redis.** Scan and discovery interval ticks take a
+  Redis leader lease (`ctem:leader:scan-schedule` /
+  `ctem:leader:discovery-schedule`). Compose still ships one replica per
+  service; scaling orchestrator or asset-service without Redis will skip
+  scheduled ticks (fail closed) rather than double-fire. Manual kicks are
+  ungated. See README "Distributed scheduling".
 - **ASM probing** leaves the provider's IP space. Keep the allowlist tight and
   check the provider's acceptable-use policy.
 - **Secrets with quotes or backslashes** break the SQL/JSON interpolation;

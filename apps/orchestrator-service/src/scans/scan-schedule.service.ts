@@ -1,7 +1,15 @@
-import { Injectable, OnApplicationBootstrap } from '@nestjs/common';
+import { Inject, Injectable, OnApplicationBootstrap, OnModuleDestroy, Optional } from '@nestjs/common';
 import { PrismaService } from '@ctem/db';
 import { rootLogger } from '@ctem/observability';
 import type { ScannerType } from '@ctem/contracts';
+import {
+  LeaderLease,
+  RedisClient,
+  SCAN_SCHEDULE_LEASE_KEY,
+  UnavailableLeaseStore,
+  runIfLeader,
+  type LeaseStore,
+} from '@ctem/coordination';
 import { ScanDispatcherService } from './scan-dispatcher.service';
 
 /**
@@ -19,21 +27,38 @@ const DEFAULT_CADENCE_MS: Record<ScannerType, number> = {
   cloud_posture: 6 * 60 * 60_000,
 };
 
+/** Interval between scheduled-scan sweeps. Unchanged by leader election. */
+export const SCAN_SCHEDULE_TICK_MS = 5 * 60_000;
+
 @Injectable()
-export class ScanScheduleService implements OnApplicationBootstrap {
+export class ScanScheduleService implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly log = rootLogger.child({ component: 'scan-schedule' });
   private timer?: NodeJS.Timeout;
+  private readonly lease: LeaderLease;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly dispatcher: ScanDispatcherService,
-  ) {}
+    @Optional() @Inject(RedisClient) store?: LeaseStore,
+  ) {
+    this.lease = new LeaderLease(store ?? new UnavailableLeaseStore(), SCAN_SCHEDULE_LEASE_KEY);
+  }
 
   onApplicationBootstrap(): void {
-    // TODO: leader election (or a JetStream-backed scheduler) so multiple
-    // orchestrator replicas do not each fire the same scheduled scan.
-    this.timer = setInterval(() => void this.tick(), 5 * 60_000);
-    this.log.info('scan scheduler started');
+    this.lease.start();
+    this.timer = setInterval(() => void this.runScheduledTick(), SCAN_SCHEDULE_TICK_MS);
+    this.log.info(
+      { intervalMs: SCAN_SCHEDULE_TICK_MS, leaseKey: SCAN_SCHEDULE_LEASE_KEY },
+      'scan scheduler started',
+    );
+  }
+
+  /**
+   * Interval entrypoint. Only the Redis lease holder runs {@link tick}.
+   * Manual / webhook / CI createScan on the dispatcher is not gated here.
+   */
+  async runScheduledTick(): Promise<void> {
+    await runIfLeader(this.lease, this.log, () => this.tick());
   }
 
   private async tick(): Promise<void> {
@@ -67,7 +92,8 @@ export class ScanScheduleService implements OnApplicationBootstrap {
     }
   }
 
-  onModuleDestroy(): void {
+  async onModuleDestroy(): Promise<void> {
     if (this.timer) clearInterval(this.timer);
+    await this.lease.stop();
   }
 }

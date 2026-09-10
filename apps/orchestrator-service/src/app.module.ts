@@ -4,6 +4,7 @@ import { CtemConfigModule } from '@ctem/config';
 import { ObservabilityModule, RequestContextMiddleware } from '@ctem/observability';
 import { AuthModule, InternalAuthGuard } from '@ctem/auth';
 import { EventsModule } from '@ctem/events';
+import { CoordinationModule } from '@ctem/coordination';
 import { StorageModule } from '@ctem/storage';
 import { DbModule } from '@ctem/db';
 import { HealthController } from '@ctem/service-kit';
@@ -19,6 +20,7 @@ import { ScanScheduleService } from './scans/scan-schedule.service';
     ObservabilityModule,
     AuthModule,
     EventsModule,
+    CoordinationModule,
     StorageModule,
     DbModule,
   ],

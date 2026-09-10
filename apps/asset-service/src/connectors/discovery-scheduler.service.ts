@@ -1,6 +1,14 @@
-import { Injectable, OnApplicationBootstrap } from '@nestjs/common';
+import { Inject, Injectable, OnApplicationBootstrap, OnModuleDestroy, Optional } from '@nestjs/common';
 import { PrismaService } from '@ctem/db';
 import { rootLogger } from '@ctem/observability';
+import {
+  DISCOVERY_SCHEDULE_LEASE_KEY,
+  LeaderLease,
+  RedisClient,
+  UnavailableLeaseStore,
+  runIfLeader,
+  type LeaseStore,
+} from '@ctem/coordination';
 import { AssetsService } from '../assets/assets.service';
 import { ConnectorRegistry } from './connector.registry';
 
@@ -22,27 +30,45 @@ export interface SyncResult {
   error: string | null;
 }
 
+/** Interval between discovery sweeps. Unchanged by leader election. */
+export const DISCOVERY_SCHEDULE_TICK_MS = 15 * 60_000;
+
 /**
  * Continuous discovery — the "C" in CTEM. Every enabled integration is re-synced
  * on an interval; assets that stop appearing are archived so the inventory
  * reflects reality rather than accumulating ghosts.
+ *
+ * The interval path is Redis-lease gated so two asset-service replicas do not
+ * both sync the same window. {@link syncOrg} / {@link syncIntegration} stay
+ * ungated — they are the manual / API kick.
  */
 @Injectable()
-export class DiscoverySchedulerService implements OnApplicationBootstrap {
+export class DiscoverySchedulerService implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly log = rootLogger.child({ component: 'discovery' });
   private timer?: NodeJS.Timeout;
+  private readonly lease: LeaderLease;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly registry: ConnectorRegistry,
     private readonly assets: AssetsService,
-  ) {}
+    @Optional() @Inject(RedisClient) store?: LeaseStore,
+  ) {
+    this.lease = new LeaderLease(store ?? new UnavailableLeaseStore(), DISCOVERY_SCHEDULE_LEASE_KEY);
+  }
 
   onApplicationBootstrap(): void {
-    // TODO: replace the naive interval with a distributed scheduler (leader
-    // election or a NATS-backed work queue) before running multiple replicas.
-    this.timer = setInterval(() => void this.tick(), 15 * 60_000);
-    this.log.info('discovery scheduler started');
+    this.lease.start();
+    this.timer = setInterval(() => void this.runScheduledTick(), DISCOVERY_SCHEDULE_TICK_MS);
+    this.log.info(
+      { intervalMs: DISCOVERY_SCHEDULE_TICK_MS, leaseKey: DISCOVERY_SCHEDULE_LEASE_KEY },
+      'discovery scheduler started',
+    );
+  }
+
+  /** Interval entrypoint. Only the Redis lease holder runs the sweep. */
+  async runScheduledTick(): Promise<void> {
+    await runIfLeader(this.lease, this.log, () => this.tick());
   }
 
   private async tick(): Promise<void> {
@@ -117,7 +143,8 @@ export class DiscoverySchedulerService implements OnApplicationBootstrap {
     }
   }
 
-  onModuleDestroy(): void {
+  async onModuleDestroy(): Promise<void> {
     if (this.timer) clearInterval(this.timer);
+    await this.lease.stop();
   }
 }

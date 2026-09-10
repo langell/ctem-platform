@@ -32,6 +32,9 @@
       "path": "../../libs/events"
     },
     {
+      "path": "../../libs/coordination"
+    },
+    {
       "path": "../../libs/storage"
     },
     {

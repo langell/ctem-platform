@@ -26,6 +26,7 @@
       "@ctem/config": ["libs/config/src/index.ts"],
       "@ctem/observability": ["libs/observability/src/index.ts"],
       "@ctem/events": ["libs/events/src/index.ts"],
+      "@ctem/coordination": ["libs/coordination/src/index.ts"],
       "@ctem/db": ["libs/db/src/index.ts"],
       "@ctem/auth": ["libs/auth/src/index.ts"],
       "@ctem/storage": ["libs/storage/src/index.ts"],
