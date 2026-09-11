@@ -23,7 +23,7 @@ describe('existing routes only', () => {
     expect(app.match(/path="/g)?.length).toBe(10);
   });
 
-  it('keeps login outside Layout so Owner Dock does not own login chrome', () => {
+  it('keeps login outside Layout so the login route has no dock', () => {
     expect(app.indexOf('path="/login"')).toBeLessThan(app.indexOf('<Layout'));
     expect(app.indexOf('path="/login/callback"')).toBeLessThan(app.indexOf('<Layout'));
   });

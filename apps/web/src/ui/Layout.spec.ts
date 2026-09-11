@@ -35,5 +35,6 @@ describe('session chrome', () => {
     expect(login).not.toMatch(/className="bleed"/);
     expect(login).toMatch(/className="login-brand"/);
     expect(login).toMatch(/Sign in with Keycloak/);
+    expect(login).toMatch(/className="muted lede"/);
   });
 });

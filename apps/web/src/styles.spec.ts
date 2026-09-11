@@ -92,6 +92,9 @@ describe("Designer's Signal First suite restyle", () => {
       /\.page-title\s*\{[\s\S]*border-left:\s*4px solid var\(--accent\)[\s\S]*padding-left:\s*12px/,
     );
     expect(css).toMatch(/\.login-brand::after\s*\{[\s\S]*background:\s*var\(--accent\)/);
+    expect(css).toMatch(/\.login-brand\s*\{[\s\S]*color:\s*var\(--accent\)/);
+    expect(css).toMatch(/\.login-brand\s*\{[\s\S]*font-weight:\s*700/);
+    expect(css).toMatch(/\.login-brand\s*\{[\s\S]*letter-spacing:\s*0\.08em/);
     expect(css).toMatch(/button\.cta-loud\s*\{[\s\S]*font-weight:\s*700[\s\S]*font-size:\s*15px/);
     expect(css).toMatch(/\.brand\s*\{[\s\S]*color:\s*var\(--accent\)/);
     expect(css).toMatch(/--accent:\s*#6CB6FF/);
@@ -115,6 +118,8 @@ describe("Designer's Owner Dock shell", () => {
     expect(css).toMatch(/\.session\s*\{[\s\S]*margin-top:\s*auto/);
     expect(css).not.toMatch(/\.topbar\s*\{/);
     expect(css).not.toMatch(/max-width:\s*1120px/);
+    expect(css).toMatch(/\.login-card\s*\{[\s\S]*inset 3px 0 0 0 var\(--accent\)/);
+    expect(css).toMatch(/\.login\s*\{[\s\S]*place-items:\s*center/);
     expect(css).toMatch(/--bg:\s*#0B1016/);
     expect(css).toMatch(/--panel:\s*#141B24/);
     expect(css).toMatch(/--accent:\s*#6CB6FF/);
