@@ -470,10 +470,12 @@ describe('KubernetesConnector.discover', () => {
   });
 
   it('does not shell out to kubectl and does not dial kube-apiserver hosts', () => {
-    const src = readFileSync(join(__dirname, 'kubernetes.connector.ts'), 'utf8');
+    const connector = readFileSync(join(__dirname, 'kubernetes.connector.ts'), 'utf8');
+    const egress = readFileSync(join(__dirname, 'kubernetes.egress.ts'), 'utf8');
+    const src = `${connector}\n${egress}`;
     expect(src).not.toMatch(/kubectl|child_process|spawn\(|execFile|execSync|helm /);
     expect(src).not.toMatch(/dkr\.ecr|\/blobs\/|admission/);
-    expect(src).toMatch(/api\.eks|container\.googleapis\.com|management\.azure\.com/);
+    expect(egress).toMatch(/api\.eks|container\.googleapis\.com|management\.azure\.com/);
     expect(src).toMatch(/Never read|Never dial|kube-apiserver/);
   });
 });
