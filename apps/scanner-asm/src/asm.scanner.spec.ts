@@ -77,6 +77,7 @@ describe('AsmScanner.execute findings + completeness', () => {
 
   it('emits open-port, tls-* and missing-header findings with unique externalIds (no dangling CNAME collision)', async () => {
     const mockProbe = {
+      enumerate: vi.fn(async () => []),
       probe: vi.fn(async () =>
         ({
           host: 'example.com',
@@ -156,6 +157,7 @@ describe('AsmScanner.execute findings + completeness', () => {
     vi.setSystemTime(now);
 
     const mockProbe = {
+      enumerate: vi.fn(async () => []),
       probe: vi.fn(async () =>
         ({
           host: 'example.com',
@@ -181,6 +183,140 @@ describe('AsmScanner.execute findings + completeness', () => {
     );
 
     vi.useRealTimers();
+  });
+
+  it('enumerates only for domain assets and probes discovered names additively', async () => {
+    const empty = (host: string): ProbeResult => ({
+      host,
+      addresses: ['93.184.216.34'],
+      cnames: [],
+      danglingCname: false,
+      openPorts: [],
+      tls: null,
+      httpRoot: null,
+      headers: {},
+    });
+
+    const mockProbe = {
+      enumerate: vi.fn(async () => ['www.example.com', 'example.com']),
+      probe: vi.fn(async (_ctx: ScanContext, target: { externalKey?: string }) => {
+        const key = String(target.externalKey ?? '');
+        return empty(key.includes('www') ? 'www.example.com' : 'example.com');
+      }),
+    };
+
+    const scanner = new AsmScanner(mockProbe as any);
+    const domainOutcome = await scanner.execute(
+      ctx({ target: { kind: 'domain', externalKey: 'domain:example.com' } }),
+    );
+    expect(mockProbe.enumerate).toHaveBeenCalledTimes(1);
+    expect(mockProbe.enumerate).toHaveBeenCalledWith('example.com', expect.anything());
+    expect(mockProbe.probe).toHaveBeenCalledTimes(2);
+    expect(domainOutcome.stats?.enumerated).toBe(2);
+    expect(domainOutcome.stats?.probed).toBe(2);
+
+    mockProbe.enumerate.mockClear();
+    mockProbe.probe.mockClear();
+    await scanner.execute(ctx({ target: { kind: 'host', externalKey: 'host:example.com' } }));
+    expect(mockProbe.enumerate).not.toHaveBeenCalled();
+    expect(mockProbe.probe).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps dangling-CNAME fingerprints isolated per host on the apex asset', async () => {
+    const mockProbe = {
+      enumerate: vi.fn(async () => ['www.example.com']),
+      probe: vi.fn(async (_ctx: ScanContext, target: { externalKey?: string }) => {
+        const host = String(target.externalKey ?? '').includes('www') ? 'www.example.com' : 'example.com';
+        return {
+          host,
+          addresses: [],
+          cnames: [`${host}.unclaimed.example`],
+          danglingCname: true,
+          openPorts: [],
+          tls: null,
+          httpRoot: null,
+          headers: {},
+        } satisfies ProbeResult;
+      }),
+    };
+
+    const scanner = new AsmScanner(mockProbe as any);
+    const outcome = await scanner.execute(
+      ctx({ target: { kind: 'domain', externalKey: 'domain:example.com' } }),
+    );
+    const ids = outcome.findings.map((f) => f.externalId);
+    expect(ids).toEqual(
+      expect.arrayContaining(['asm.dangling-cname:example.com', 'asm.dangling-cname:www.example.com']),
+    );
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(outcome.findings.find((f) => f.externalId === 'asm.dangling-cname:www.example.com')?.location.url).toBe(
+      'www.example.com',
+    );
+  });
+
+  it('fails the job when a discovered name resolves to a private IP', async () => {
+    resolve4Mock.mockImplementation(async (host: string) => {
+      if (host === 'crt.sh' || host === 'example.com') return ['93.184.216.34'];
+      if (host === 'internal.example.com') return ['10.1.1.1'];
+      return [];
+    });
+    resolve6Mock.mockResolvedValue([]);
+    resolveCnameMock.mockResolvedValue([]);
+    resolveNsMock.mockResolvedValue([]);
+
+    netConnectMock.mockImplementation(() => {
+      const sock = new EventEmitter() as any;
+      sock.destroy = () => sock.emit('close');
+      process.nextTick(() => sock.emit('error', new Error('refused')));
+      return sock;
+    });
+
+    httpsRequestMock.mockImplementation((_options: any, cb: any) => {
+      const res = new EventEmitter() as any;
+      res.statusCode = 200;
+      res.headers = {};
+      res.setEncoding = () => undefined;
+      process.nextTick(() => {
+        cb(res);
+        process.nextTick(() => {
+          res.emit('data', JSON.stringify([{ name_value: 'internal.example.com' }]));
+          res.emit('end');
+        });
+      });
+      const req = new EventEmitter() as any;
+      req.setTimeout = () => undefined;
+      req.destroy = () => undefined;
+      req.end = () => undefined;
+      return req;
+    });
+
+    const scanner = new AsmScanner(new SurfaceProbe());
+    await expect(
+      scanner.execute(ctx({ target: { kind: 'domain', externalKey: 'domain:example.com' } })),
+    ).rejects.toThrow(/refused non-public resolved IP/i);
+    expect(netConnectMock).toHaveBeenCalled();
+  });
+
+  it('does not enumerate for web_application / api_endpoint / ip_range', async () => {
+    const mockProbe = {
+      enumerate: vi.fn(async () => ['should-not-run.example.com']),
+      probe: vi.fn(async () => ({
+        host: 'example.com',
+        addresses: ['93.184.216.34'],
+        cnames: [],
+        danglingCname: false,
+        openPorts: [],
+        tls: null,
+        httpRoot: null,
+        headers: {},
+      })),
+    };
+    const scanner = new AsmScanner(mockProbe as any);
+    for (const kind of ['web_application', 'api_endpoint', 'ip_range'] as const) {
+      mockProbe.enumerate.mockClear();
+      await scanner.execute(ctx({ target: { kind, externalKey: 'example.com' } }));
+      expect(mockProbe.enumerate).not.toHaveBeenCalled();
+    }
   });
 });
 

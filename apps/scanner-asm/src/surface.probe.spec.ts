@@ -41,6 +41,7 @@ vi.mock('node:https', () => ({
 }));
 
 import { SurfaceProbe } from './surface.probe';
+import { ASM_CT_MAX_PAGES, ASM_CT_MAX_RESPONSE_BYTES, CRT_SH_HOST } from './ct.egress';
 
 function ctx(checkDeadline: () => boolean): ScanContext {
   return {
@@ -412,6 +413,179 @@ describe('SurfaceProbe.probe SSRF + completeness bars', () => {
     expect(out.openPorts).toEqual([]);
     expect(out.tls).toBeNull();
     expect(Object.keys(out.headers)).toEqual([]);
+  });
+});
+
+const CRT_SH_IP = '93.184.216.34';
+
+function mockCrtShResolve(ip = CRT_SH_IP): void {
+  resolve4Mock.mockImplementation(async (host: string) => (host === CRT_SH_HOST ? [ip] : []));
+  resolve6Mock.mockResolvedValue([]);
+  resolveCnameMock.mockResolvedValue([]);
+}
+
+function mockHttpsJson(body: unknown, headers: Record<string, string> = {}): void {
+  mockHttpsBody(typeof body === 'string' ? body : JSON.stringify(body), { statusCode: 200, headers });
+}
+
+function mockHttpsBody(
+  body: string,
+  opts: { statusCode?: number; headers?: Record<string, string>; chunks?: string[] } = {},
+): void {
+  httpsRequestMock.mockImplementation((options: any, cb: any) => {
+    const res = new EventEmitter() as any;
+    res.statusCode = opts.statusCode ?? 200;
+    res.headers = opts.headers ?? {};
+    res.setEncoding = () => undefined;
+    process.nextTick(() => {
+      cb(res);
+      process.nextTick(() => {
+        for (const chunk of opts.chunks ?? [body]) res.emit('data', chunk);
+        res.emit('end');
+      });
+    });
+    const req = new EventEmitter() as any;
+    req.setTimeout = () => undefined;
+    req.destroy = () => {
+      process.nextTick(() => res.emit('end'));
+    };
+    req.end = () => undefined;
+    return req;
+  });
+}
+
+describe('SurfaceProbe.enumerate CT/DNS allowlist + completeness', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resolve4Mock.mockResolvedValue([]);
+    resolve6Mock.mockResolvedValue([]);
+    resolveCnameMock.mockResolvedValue([]);
+    resolveNsMock.mockResolvedValue([]);
+  });
+
+  it('refuses a non-crt.sh CT next URL and does not connect to it', async () => {
+    mockCrtShResolve();
+    mockHttpsJson([{ name_value: 'www.example.com' }], {
+      link: '<https://evil.example/ct?q=%25.example.com>; rel="next"',
+    });
+
+    const s = new SurfaceProbe();
+    await expect(s.enumerate('example.com', ctx(() => true))).rejects.toThrow(/only crt\.sh/i);
+    const connectHosts = httpsRequestMock.mock.calls.map((c: any[]) => c[0]?.headers?.host);
+    expect(connectHosts.every((h) => h === CRT_SH_HOST)).toBe(true);
+    expect(httpsRequestMock.mock.calls.map((c: any[]) => c[0]?.port)).toEqual([443]);
+  });
+
+  it('refuses a private resolved IP for crt.sh before any CT HTTPS connect', async () => {
+    mockCrtShResolve('10.0.0.1');
+    const s = new SurfaceProbe();
+    await expect(s.enumerate('example.com', ctx(() => true))).rejects.toThrow(
+      /refused non-public resolved IP/i,
+    );
+    expect(httpsRequestMock).not.toHaveBeenCalled();
+  });
+
+  it('fails the job when CT JSON is truncated / incomplete', async () => {
+    mockCrtShResolve();
+    mockHttpsBody('[{"name_value":"www.example.com"');
+    const s = new SurfaceProbe();
+    await expect(s.enumerate('example.com', ctx(() => true))).rejects.toThrow(/incomplete scope/i);
+  });
+
+  it('fails the job when the CT body hits the size cap', async () => {
+    mockCrtShResolve();
+    mockHttpsBody('', { chunks: ['x'.repeat(ASM_CT_MAX_RESPONSE_BYTES + 1)] });
+    const s = new SurfaceProbe();
+    await expect(s.enumerate('example.com', ctx(() => true))).rejects.toThrow(
+      /truncated at response size cap/i,
+    );
+  });
+
+  it('fails the job when CT paging is truncated at the page cap', async () => {
+    mockCrtShResolve();
+    httpsRequestMock.mockImplementation((_options: any, cb: any) => {
+      const res = new EventEmitter() as any;
+      res.statusCode = 200;
+      res.headers = { link: '<https://crt.sh/?q=%25.example.com&output=json&id=2>; rel="next"' };
+      res.setEncoding = () => undefined;
+      process.nextTick(() => {
+        cb(res);
+        process.nextTick(() => {
+          res.emit('data', '[]');
+          res.emit('end');
+        });
+      });
+      const req = new EventEmitter() as any;
+      req.setTimeout = () => undefined;
+      req.destroy = () => undefined;
+      req.end = () => undefined;
+      return req;
+    });
+
+    const s = new SurfaceProbe();
+    await expect(s.enumerate('example.com', ctx(() => true))).rejects.toThrow(/truncated at page cap/i);
+    expect(httpsRequestMock).toHaveBeenCalledTimes(ASM_CT_MAX_PAGES);
+  });
+
+  it('drops names that are not under the apex suffix', async () => {
+    mockCrtShResolve();
+    resolveNsMock.mockResolvedValue(['ns1.example.com', 'ns1.other.net']);
+    mockHttpsJson([
+      { name_value: 'www.example.com\napi.example.com', common_name: 'example.com' },
+      { name_value: 'evil.com' },
+      { name_value: 'example.com.evil.net' },
+      { name_value: 'notexample.com' },
+      { name_value: '*.staging.example.com' },
+    ]);
+
+    const s = new SurfaceProbe();
+    const names = await s.enumerate('example.com', ctx(() => true));
+    expect(names).toEqual(['api.example.com', 'example.com', 'ns1.example.com', 'staging.example.com', 'www.example.com']);
+    expect(names).not.toContain('evil.com');
+    expect(names).not.toContain('example.com.evil.net');
+    expect(names).not.toContain('notexample.com');
+  });
+
+  it('refuses an IP-literal apex for enumeration', async () => {
+    const s = new SurfaceProbe();
+    await expect(s.enumerate('8.8.8.8', ctx(() => true))).rejects.toThrow(/IP-literal apex/i);
+    expect(httpsRequestMock).not.toHaveBeenCalled();
+  });
+
+  it('ignores tenant CT URL / wordlist options and still queries allowlisted crt.sh', async () => {
+    mockCrtShResolve();
+    mockHttpsJson([]);
+    const s = new SurfaceProbe();
+    const jobCtx = ctx(() => true);
+    jobCtx.job.options = {
+      ctUrl: 'https://evil.example/ct',
+      wordlist: ['www', 'mail'],
+      ports: [22],
+    };
+    const names = await s.enumerate('example.com', jobCtx);
+    expect(names).toEqual([]);
+    expect(httpsRequestMock).toHaveBeenCalledTimes(1);
+    const opts = httpsRequestMock.mock.calls[0][0];
+    expect(opts.host).toBe(CRT_SH_IP);
+    expect(opts.port).toBe(443);
+    expect(opts.headers.host).toBe(CRT_SH_HOST);
+    expect(opts.servername).toBe(CRT_SH_HOST);
+    expect(String(opts.path)).toContain('output=json');
+    expect(String(opts.path)).toContain(encodeURIComponent('%.example.com'));
+  });
+
+  it('connects to the vetted crt.sh IP with Host/SNI crt.sh on port 443', async () => {
+    mockCrtShResolve();
+    mockHttpsJson([{ common_name: 'www.example.com' }]);
+    const s = new SurfaceProbe();
+    const names = await s.enumerate('domain:example.com', ctx(() => true));
+    expect(names).toEqual(['www.example.com']);
+    const opts = httpsRequestMock.mock.calls[0][0];
+    expect(opts.method).toBe('GET');
+    expect(opts.host).toBe(CRT_SH_IP);
+    expect(opts.port).toBe(443);
+    expect(opts.headers.host).toBe(CRT_SH_HOST);
+    expect(opts.servername).toBe(CRT_SH_HOST);
   });
 });
 
