@@ -11,7 +11,10 @@ export const DEMO_PASSWORD = process.env.DEMO_PASSWORD ?? 'demo';
  */
 export async function expectCtemLoginHasNoSecretFields(page: Page): Promise<void> {
   await expect(page.getByRole('heading', { name: 'CTEM' })).toBeVisible();
+  await expect(page.getByText('Sign in to continue')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Sign in with Keycloak' })).toHaveCount(1);
+  await expect(page.locator('aside.dock')).toHaveCount(0);
+  await expect(page.getByRole('link')).toHaveCount(0);
   await expect(page.locator('input[type="password"]')).toHaveCount(0);
   await expect(page.locator('textarea')).toHaveCount(0);
   await expect(page.getByPlaceholder(/eyJ/)).toHaveCount(0);
