@@ -19,6 +19,8 @@ function RequireToken({ children }: { children: ReactNode }) {
 export function App() {
   return (
     <Routes>
+      {/* Login stays outside Owner Dock so a later login rebrand can change
+          chrome without unwinding the authenticated shell. */}
       <Route path="/login" element={<LoginPage />} />
       <Route path="/login/callback" element={<CallbackPage />} />
       <Route

@@ -36,7 +36,6 @@ describe("Designer's first-pass UI tokens", () => {
     expect(css).toMatch(/font-size:\s*13px/);
     expect(css).toMatch(/font-size:\s*11px/);
     expect(css).not.toMatch(/max-width:\s*1120px/);
-    expect(css).toMatch(/width:\s*min\(440px, 100%\)/);
     expect(css).toMatch(/max-width:\s*72ch/);
     expect(css).toMatch(/\.badge-ok\s*\{/);
     expect(css).toMatch(/\.form-actions\s*\{/);
@@ -116,7 +115,6 @@ describe("Designer's Owner Dock shell", () => {
     expect(css).toMatch(/\.session\s*\{[\s\S]*margin-top:\s*auto/);
     expect(css).not.toMatch(/\.topbar\s*\{/);
     expect(css).not.toMatch(/max-width:\s*1120px/);
-    expect(css).toMatch(/\.login-card\s*\{[\s\S]*width:\s*min\(440px, 100%\)/);
     expect(css).toMatch(/--bg:\s*#0B1016/);
     expect(css).toMatch(/--panel:\s*#141B24/);
     expect(css).toMatch(/--accent:\s*#6CB6FF/);

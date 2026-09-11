@@ -16,8 +16,8 @@ test.describe('Owner Dock', () => {
   test('login has no dock; Ops then Admin navigate existing routes', async ({ page }) => {
     await page.goto('/login');
     await expect(page.locator('aside.dock')).toHaveCount(0);
-    await expect(page.locator('.login-card')).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'CTEM' })).toBeVisible();
+    await expect(page.locator('header.topbar')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Sign in with Keycloak' })).toBeVisible();
 
     await loginAsDemoAnalyst(page);
     const dock = ownerDock(page);
