@@ -13,12 +13,16 @@ export const GCP_OAUTH_SCOPE = [
  * RS256 service-account JWT. Audience is hardcoded to Google's token URL —
  * never a tenant- or JSON-supplied token_uri.
  */
-export function signServiceAccountJwt(creds: GcpCredentials, now = new Date()): string {
+export function signServiceAccountJwt(
+  creds: GcpCredentials,
+  now = new Date(),
+  scope = GCP_OAUTH_SCOPE,
+): string {
   const header = { alg: 'RS256', typ: 'JWT' };
   const iat = Math.floor(now.getTime() / 1000);
   const payload = {
     iss: creds.clientEmail,
-    scope: GCP_OAUTH_SCOPE,
+    scope,
     aud: GCP_TOKEN_URL,
     iat,
     exp: iat + 3600,
@@ -35,8 +39,11 @@ export function signServiceAccountJwt(creds: GcpCredentials, now = new Date()): 
  * Exchange the assertion at oauth2.googleapis.com only. Keys never leave
  * the Google host allowlist.
  */
-export async function exchangeGcpAccessToken(creds: GcpCredentials): Promise<string> {
-  const assertion = signServiceAccountJwt(creds);
+export async function exchangeGcpAccessToken(
+  creds: GcpCredentials,
+  scope = GCP_OAUTH_SCOPE,
+): Promise<string> {
+  const assertion = signServiceAccountJwt(creds, new Date(), scope);
   const url = allowlistedGcpUrl(GCP_TOKEN_URL);
   const body = new URLSearchParams({
     grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',

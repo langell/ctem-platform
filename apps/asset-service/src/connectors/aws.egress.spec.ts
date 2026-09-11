@@ -64,6 +64,13 @@ describe('awsServiceUrl', () => {
     );
   });
 
+  it('derives the EKS management API host, never a cluster kube-apiserver', () => {
+    expect(awsServiceUrl('eks', 'us-east-1')).toBe('https://api.eks.us-east-1.amazonaws.com/');
+    expect(awsServiceUrl('eks', 'us-gov-west-1')).toBe(
+      'https://api.eks.us-gov-west-1.amazonaws.com/',
+    );
+  });
+
   it('refuses a region that is not an AWS region identifier', () => {
     expect(() => awsServiceUrl('ec2', 'us-east-1.evil.example')).toThrow(/region/);
     expect(() => awsServiceUrl('ec2', 'https://evil.example')).toThrow(/region/);
