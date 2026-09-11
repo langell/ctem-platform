@@ -6,6 +6,18 @@ import { connect as tlsConnect } from 'node:tls';
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { rootLogger } from '@ctem/observability';
+import {
+  ASM_CT_MAX_PAGES,
+  ASM_CT_MAX_RESPONSE_BYTES,
+  ASM_CT_TIMEOUT_MS,
+  ASM_ENUM_BUDGET_MS,
+  ASM_ENUM_MAX_NAMES,
+  CRT_SH_HOST,
+  allowlistedCrtShUrl,
+  crtShQueryUrl,
+  ignoredTenantEnumKeys,
+  nextRelFromLinkHeader,
+} from './ct.egress';
 
 type HttpMethod = 'HEAD' | 'GET';
 
@@ -95,11 +107,98 @@ export class SurfaceProbe {
     return { host, addresses, cnames, danglingCname, openPorts, tls, headers, httpRoot };
   }
 
-  /** Enumerates subdomains from certificate transparency logs and DNS. */
-  async enumerate(apexDomain: string): Promise<string[]> {
-    // TODO: crt.sh / CT log query + NS record walk + optional wordlist.
-    await resolveNs(apexDomain).catch(() => []);
-    return [];
+  /**
+   * Certificate Transparency + apex NS discovery. Returns deduped names under
+   * the apex suffix (including the apex when CT lists it). Does not mint assets.
+   * Truncated CT without a complete signal fails the job.
+   *
+   * Sources are crt.sh JSON (`%.apex`) and OS `resolveNs` on the apex. There is
+   * no brute-force wordlist. Tenant CT URLs / wordlists / port lists are ignored.
+   */
+  async enumerate(apexDomain: string, ctx?: ScanContext): Promise<string[]> {
+    const apex = normalizeApexForEnum(apexDomain);
+    this.ignoreTenantEnumOverrides(ctx);
+
+    const start = Date.now();
+    const mustHaveDeadline = () => {
+      if (ctx && !ctx.checkDeadline()) throw new Error('Job deadline exceeded');
+      if (Date.now() - start > ASM_ENUM_BUDGET_MS) {
+        throw new Error('ASM enum budget exhausted — refusing incomplete scope');
+      }
+    };
+
+    mustHaveDeadline();
+
+    const fromCt = await this.collectCrtShNames(apex, mustHaveDeadline);
+    mustHaveDeadline();
+    const fromNs = await this.collectApexNsNames(apex);
+
+    const names = new Set<string>();
+    for (const raw of [...fromCt, ...fromNs]) {
+      const name = normalizeDiscoveredName(raw, apex);
+      if (name) names.add(name);
+    }
+
+    return [...names].sort((a, b) => a.localeCompare(b)).slice(0, ASM_ENUM_MAX_NAMES);
+  }
+
+  private ignoreTenantEnumOverrides(ctx?: ScanContext): void {
+    if (!ctx) return;
+    const options = (ctx.job.options ?? {}) as Record<string, unknown>;
+    const target = ctx.job.target as Record<string, unknown> | undefined;
+    const attrs =
+      target?.attributes && typeof target.attributes === 'object' && !Array.isArray(target.attributes)
+        ? (target.attributes as Record<string, unknown>)
+        : {};
+    const ignored = ignoredTenantEnumKeys({ ...attrs, ...options });
+    if (ignored.length) {
+      this.log.warn({ ignored }, 'ignoring tenant ASM enum overrides');
+    }
+  }
+
+  private async collectApexNsNames(apex: string): Promise<string[]> {
+    return await resolveNs(apex).catch(() => [] as string[]);
+  }
+
+  private async collectCrtShNames(apex: string, mustHaveDeadline: () => void): Promise<string[]> {
+    const [addresses] = await this.resolveVettedHost(CRT_SH_HOST, false);
+    if (!addresses.length) {
+      throw new Error('ASM CT lookup failed — crt.sh did not resolve; refusing incomplete scope');
+    }
+
+    const names: string[] = [];
+    let url = crtShQueryUrl(apex);
+
+    for (let page = 1; page <= ASM_CT_MAX_PAGES; page++) {
+      mustHaveDeadline();
+      const allowlisted = allowlistedCrtShUrl(url);
+      const parsed = new URL(allowlisted);
+      const path = `${parsed.pathname}${parsed.search}`;
+
+      const res = await httpsGetCrtSh({
+        connectIp: addresses[0],
+        path,
+        timeoutMs: ASM_CT_TIMEOUT_MS,
+        maxBytes: ASM_CT_MAX_RESPONSE_BYTES,
+      });
+
+      if (res.truncated) {
+        throw new Error('ASM CT listing truncated at response size cap — refusing incomplete scope');
+      }
+      if (res.statusCode !== 200) {
+        throw new Error(`ASM CT listing HTTP ${res.statusCode} — refusing incomplete scope`);
+      }
+      names.push(...namesFromCrtShBody(res.body));
+
+      const next = nextRelFromLinkHeader(headerValue(res.headers, 'link'));
+      if (!next) return names;
+      if (page === ASM_CT_MAX_PAGES) {
+        throw new Error('ASM CT listing truncated at page cap — refusing incomplete scope');
+      }
+      url = next;
+    }
+
+    return names;
   }
 
   private async resolveVettedHost(host: string, isIpLiteral: boolean): Promise<[addresses: string[], cnames: string[]]> {
@@ -237,6 +336,47 @@ const HTTP_SECURITY_HEADER_REQUIREMENTS = [
   'permissions-policy',
   'cross-origin-resource-policy',
 ] as const;
+
+function normalizeApexForEnum(apexDomain: string): string {
+  const { host, isIpLiteral: literal } = normalizeHostTarget('domain', apexDomain);
+  if (literal) throw new Error(`ASM refused IP-literal apex for enumeration: ${host}`);
+  return host;
+}
+
+function normalizeDiscoveredName(raw: string, apex: string): string | null {
+  let name = raw.trim().toLowerCase();
+  if (!name) return null;
+  while (name.startsWith('*.')) name = name.slice(2);
+  if (name.endsWith('.')) name = name.slice(0, -1);
+  if (!name) return null;
+  if (name.includes('@') || name.includes('%')) return null;
+  if (isIpLiteral(name)) return null;
+  if (!isValidHostname(name)) return null;
+  if (name !== apex && !name.endsWith(`.${apex}`)) return null;
+  return name;
+}
+
+function namesFromCrtShBody(body: string): string[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    throw new Error('ASM CT response was not JSON — refusing incomplete scope');
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error('ASM CT response was not a JSON array — refusing incomplete scope');
+  }
+  const names: string[] = [];
+  for (const row of parsed) {
+    if (!row || typeof row !== 'object') continue;
+    const rec = row as Record<string, unknown>;
+    for (const key of ['name_value', 'common_name'] as const) {
+      const v = rec[key];
+      if (typeof v === 'string') names.push(...v.split(/[\s,;]+/));
+    }
+  }
+  return names;
+}
 
 function normalizeHostTarget(kind: string, externalKey: string): { host: string; isIpLiteral: boolean } {
   const s = externalKey.trim();
@@ -670,6 +810,106 @@ function normalizeSecurityHeaders(headers: Record<string, string | string[] | un
     else if (Array.isArray(v)) out[key] = v.join(', ');
   }
   return out;
+}
+
+function headerValue(
+  headers: NodeJS.Dict<string | string[] | undefined>,
+  name: string,
+): string | undefined {
+  const raw = headers[name] ?? headers[name.toLowerCase()];
+  if (typeof raw === 'string') return raw;
+  if (Array.isArray(raw)) return raw.join(', ');
+  return undefined;
+}
+
+async function httpsGetCrtSh(args: {
+  connectIp: string;
+  path: string;
+  timeoutMs: number;
+  maxBytes: number;
+}): Promise<{
+  statusCode: number;
+  headers: NodeJS.Dict<string | string[] | undefined>;
+  body: string;
+  truncated: boolean;
+}> {
+  const { connectIp, path, timeoutMs, maxBytes } = args;
+
+  return await new Promise((resolve, reject) => {
+    let settled = false;
+    let timer: NodeJS.Timeout | undefined;
+    const settle = (
+      value:
+        | {
+            statusCode: number;
+            headers: NodeJS.Dict<string | string[] | undefined>;
+            body: string;
+            truncated: boolean;
+          }
+        | Error,
+    ) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      if (value instanceof Error) reject(value);
+      else resolve(value);
+    };
+
+    const req = httpsRequest(
+      {
+        method: 'GET',
+        host: connectIp,
+        port: 443,
+        path,
+        headers: {
+          host: CRT_SH_HOST,
+          accept: 'application/json',
+          'accept-encoding': 'identity',
+        },
+        servername: CRT_SH_HOST,
+        rejectUnauthorized: true,
+      },
+      (res) => {
+        res.setEncoding('utf8');
+        let body = '';
+        res.on('data', (chunk: string) => {
+          body += chunk;
+          if (body.length > maxBytes) {
+            req.destroy();
+            settle({
+              statusCode: res.statusCode ?? 0,
+              headers: res.headers,
+              body,
+              truncated: true,
+            });
+          }
+        });
+        res.on('end', () => {
+          settle({
+            statusCode: res.statusCode ?? 0,
+            headers: res.headers,
+            body,
+            truncated: false,
+          });
+        });
+        res.on('error', () => {
+          settle(new Error('ASM CT response failed — refusing incomplete scope'));
+        });
+      },
+    );
+
+    timer = setTimeout(() => {
+      req.destroy();
+      settle(new Error('ASM CT request timed out — refusing incomplete scope'));
+    }, timeoutMs);
+
+    req.on('error', () => settle(new Error('ASM CT request failed — refusing incomplete scope')));
+    req.setTimeout(timeoutMs, () => {
+      req.destroy();
+      settle(new Error('ASM CT request timed out — refusing incomplete scope'));
+    });
+    req.end();
+  });
 }
 
 function formatCertName(input: Record<string, unknown>): string | null {
