@@ -13,6 +13,7 @@ import { ScanPlannerService } from './scans/scan-planner.service';
 import { ScanDispatcherService } from './scans/scan-dispatcher.service';
 import { ScanLifecycleConsumer } from './scans/scan-lifecycle.consumer';
 import { ScanScheduleService } from './scans/scan-schedule.service';
+import { GithubChecksPublisher } from './scans/github-checks.publisher';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { ScanScheduleService } from './scans/scan-schedule.service';
     ScanDispatcherService,
     ScanLifecycleConsumer,
     ScanScheduleService,
+    GithubChecksPublisher,
     { provide: APP_GUARD, useClass: InternalAuthGuard },
   ],
 })

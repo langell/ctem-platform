@@ -124,6 +124,18 @@ Every tenant table carries `orgId` and has RLS enabled with `FORCE`. The app con
 
 `ScanScheduleService` (orchestrator, every 5 minutes) and `DiscoverySchedulerService` (asset-service, every 15 minutes) take a Redis leader lease before running `tick()`. A second replica of either service is only safe when Redis is reachable — the lease keys are `ctem:leader:scan-schedule` and `ctem:leader:discovery-schedule`. The holder renews the TTL while it is alive and releases on shutdown. If Redis is down, the interval path fails closed (skip the tick, log) so two replicas cannot both dispatch the same window; manual `createScan`, webhook/CI ingest, and `POST /v1/assets/discover` (`syncOrg`) are not gated.
 
+## GitHub Checks (optional, additive)
+
+Policy `fail_build` is still the CI-facing scan `conclusion` on `GET /v1/scans/:id` (`concludeScan`). GitHub Checks do **not** replace that field. After a scan is terminal (`ctem.scan.completed`, or an already-terminal create with no jobs), orchestrator may create or PATCH **one** Check Run on `https://api.github.com` (HTTPS only — no GitHub Enterprise / tenant `baseUrl`).
+
+Publish requires Checks context on the scan options (`options.github` or the same top-level keys):
+
+- `repository` — `owner/name` (or `owner` + `repo`)
+- `sha` — full 40-char commit SHA
+- optional `checkName` (default `CTEM`) and `detailsUrl` (must be a CTEM URL under platform `CTEM_PUBLIC_URL`, or omit)
+
+Missing `repository`+`sha` skips Checks (log) and is not a scan failure. GET conclusion is unchanged. Credentials are platform `env:GITHUB_*` (same class as GHCR): prefer the scan/asset integration `credentialRef` when it is a usable `env:GITHUB_*` pointer; otherwise the platform default `env:GITHUB_TOKEN` (Checks only, still `GITHUB_*`). Unusable credentials fail closed (no Check call). Check API errors are soft-fail (log; do not roll back scan status or poison GET). Idempotency: `external_id = scanId` plus stable `name`+`sha` — list then PATCH, so the same scan does not create unbounded Check Runs. A second orchestrator replica that should publish Checks still needs `GITHUB_*` and context.
+
 ## Not yet built
 
 Scanner internals beyond SCA SBOM ingest and lockfile resolution (IaC parsing is live; container image scanning pulls allowlisted `ghcr.io` digests in-process), remaining discovery connectors (Kubernetes, DNS), and Redis-backed rate limiting. SCA clones allowlisted `github.com` / `gitlab.com` sources (`cloneUrl` or `github:` / `gitlab:` externalKey), or a self-hosted GitLab host from explicit connector `baseUrl` (https only; clone/API that host, not `http_url_to_repo`). A failed checkout or unusable private-repo credential fails the job. AWS discovery talks only to allowlisted `*.amazonaws.com` via platform `env:AWS_*`; GCP discovery talks only to allowlisted `*.googleapis.com` via platform `env:GCP_*`; Azure discovery talks only to allowlisted `login.microsoftonline.com` + `management.azure.com` via platform `env:AZURE_*`; GHCR discovery talks only to allowlisted `api.github.com` via platform `env:GITHUB_*`; ECR discovery talks only to allowlisted `api.ecr.{region}.amazonaws.com` (plus STS) via platform `env:AWS_*` and does not pull layers; container scanning pulls layer blobs only from allowlisted `ghcr.io` (HTTPS/443) for `ghcr:owner/name@sha256:<digest>` identities — tenant config cannot set an endpoint, and a truncated listing or incomplete layer inventory does not archive or auto-resolve. `pom.xml`, `*.csproj` and `requirements.txt` are pinned-manifest fallbacks, not dependency graphs.

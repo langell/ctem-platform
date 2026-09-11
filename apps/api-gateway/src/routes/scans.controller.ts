@@ -7,8 +7,8 @@ import { ServiceProxy } from '../proxy/service-proxy';
 /**
  * CI polls GET /v1/scans/:id with a PAT. Conclusion is computed upstream from
  * matching fail_build rules — this proxy has no POST/PATCH for it and does not
- * call GitHub Checks. Org comes from the token. CORS and unknown query
- * forwarding stay comments.
+ * call GitHub Checks (orchestrator publishes Checks on scanCompleted, additive).
+ * Org comes from the token. CORS and unknown query forwarding stay comments.
  */
 @ApiTags('scans')
 @ApiBearerAuth()
