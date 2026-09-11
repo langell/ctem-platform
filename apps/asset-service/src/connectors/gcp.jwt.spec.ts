@@ -40,6 +40,17 @@ describe('signServiceAccountJwt', () => {
     expect(payload.iat).toBe(iat);
     expect(payload.exp).toBe(iat + 3600);
   });
+
+  it('accepts an explicit readonly scope without changing the token audience', () => {
+    const jwt = signServiceAccountJwt(
+      creds,
+      new Date('2026-09-02T00:00:00.000Z'),
+      'https://www.googleapis.com/auth/container.readonly',
+    );
+    const { payload } = decodeJwt(jwt);
+    expect(payload.aud).toBe(GCP_TOKEN_URL);
+    expect(payload.scope).toBe('https://www.googleapis.com/auth/container.readonly');
+  });
 });
 
 describe('exchangeGcpAccessToken', () => {

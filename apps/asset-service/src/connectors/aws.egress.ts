@@ -72,7 +72,7 @@ export function allowlistedAwsUrl(raw: string): string {
   return `https://${parsed.hostname.toLowerCase()}${path}${parsed.search}`;
 }
 
-export type AwsService = 'ec2' | 'sts' | 's3' | 'ecr';
+export type AwsService = 'ec2' | 'sts' | 's3' | 'ecr' | 'eks';
 
 /** Build the platform host for a service. Region is an id, never a host. */
 export function awsServiceUrl(service: AwsService, region: string): string {
@@ -87,6 +87,11 @@ export function awsServiceUrl(service: AwsService, region: string): string {
   // ECR JSON API is api.ecr.{region}.amazonaws.com — never dkr.ecr (layer pull).
   if (service === 'ecr') {
     return allowlistedAwsUrl(`https://api.ecr.${region}.${AWS_API_SUFFIX}/`);
+  }
+  // EKS management API is api.eks.{region}.amazonaws.com — never the
+  // cluster kube-apiserver ({id}.gr7.{region}.eks.amazonaws.com).
+  if (service === 'eks') {
+    return allowlistedAwsUrl(`https://api.eks.${region}.${AWS_API_SUFFIX}/`);
   }
   return allowlistedAwsUrl(`https://${service}.${region}.${AWS_API_SUFFIX}/`);
 }
