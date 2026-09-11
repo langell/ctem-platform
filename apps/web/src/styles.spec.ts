@@ -26,8 +26,6 @@ describe("Designer's first-pass UI tokens", () => {
     expect(css).toMatch(/\.score-high\s*\{/);
     expect(css).toMatch(/\.score-mid\s*\{/);
     expect(css).toMatch(/\.score-low\s*\{/);
-    expect(css).toMatch(/max-width:\s*1120px/);
-    expect(css).toMatch(/margin:\s*0 auto/);
     expect(css).toMatch(/:focus-visible\s*\{/);
     expect(css).toMatch(/tbody tr:hover\s*\{/);
     expect(css).toMatch(/position:\s*sticky/);
@@ -37,6 +35,8 @@ describe("Designer's first-pass UI tokens", () => {
     expect(css).toMatch(/font-size:\s*14px/);
     expect(css).toMatch(/font-size:\s*13px/);
     expect(css).toMatch(/font-size:\s*11px/);
+    expect(css).not.toMatch(/max-width:\s*1120px/);
+    expect(css).toMatch(/max-width:\s*72ch/);
     expect(css).toMatch(/\.badge-ok\s*\{/);
     expect(css).toMatch(/\.form-actions\s*\{/);
     expect(css).toMatch(/tr\.editing/);
@@ -91,11 +91,48 @@ describe("Designer's Signal First suite restyle", () => {
     expect(css).toMatch(
       /\.page-title\s*\{[\s\S]*border-left:\s*4px solid var\(--accent\)[\s\S]*padding-left:\s*12px/,
     );
+    expect(css).toMatch(/\.login-brand::after\s*\{[\s\S]*width:\s*48px/);
+    expect(css).toMatch(/\.login-brand::after\s*\{[\s\S]*height:\s*3px/);
     expect(css).toMatch(/\.login-brand::after\s*\{[\s\S]*background:\s*var\(--accent\)/);
+    expect(css).toMatch(/\.login-brand\s*\{[\s\S]*color:\s*var\(--accent\)/);
+    expect(css).toMatch(/\.login-brand\s*\{[\s\S]*font-size:\s*32px/);
+    expect(css).toMatch(/\.login-brand\s*\{[\s\S]*font-weight:\s*700/);
+    expect(css).toMatch(/\.login-brand\s*\{[\s\S]*letter-spacing:\s*0\.08em/);
     expect(css).toMatch(/button\.cta-loud\s*\{[\s\S]*font-weight:\s*700[\s\S]*font-size:\s*15px/);
     expect(css).toMatch(/\.brand\s*\{[\s\S]*color:\s*var\(--accent\)/);
     expect(css).toMatch(/--accent:\s*#6CB6FF/);
     expect(css).toMatch(/--bg:\s*#0B1016/);
     expect(css).toMatch(/IBM Plex Sans/);
+  });
+});
+
+describe("Designer's Owner Dock shell", () => {
+  it('declares a labeled left dock and full-bleed main without a top bar cage', () => {
+    expect(css).toMatch(/\.dock\s*\{[\s\S]*width:\s*220px/);
+    expect(css).toMatch(/\.dock\s*\{[\s\S]*flex-shrink:\s*0/);
+    expect(css).toMatch(/\.dock\s*\{[\s\S]*background:\s*var\(--panel\)/);
+    expect(css).toMatch(/\.dock\s*\{[\s\S]*border-right:\s*1px solid var\(--line\)/);
+    expect(css).toMatch(/\.dock \.nav-group-label\s*\{[\s\S]*font-size:\s*10px/);
+    expect(css).toMatch(
+      /\.dock \.nav-group-admin \.nav-group-label\s*\{[\s\S]*color:\s*var\(--accent\)/,
+    );
+    expect(css).toMatch(/\.dock nav a\.active\s*\{[\s\S]*inset 3px 0 0 0 var\(--accent\)/);
+    expect(css).toMatch(/\.bleed\s*\{[\s\S]*flex:\s*1[\s\S]*min-width:\s*0/);
+    expect(css).toMatch(/\.session\s*\{[\s\S]*margin-top:\s*auto/);
+    expect(css).not.toMatch(/\.topbar\s*\{/);
+    expect(css).not.toMatch(/max-width:\s*1120px/);
+    expect(css).toMatch(/\.login\s*\{[\s\S]*min-height:\s*100vh/);
+    expect(css).toMatch(/\.login\s*\{[\s\S]*place-items:\s*center/);
+    expect(css).toMatch(/\.login\s*\{[\s\S]*background:\s*var\(--bg\)/);
+    expect(css).toMatch(/\.login-card\s*\{[\s\S]*width:\s*min\(440px, 100%\)/);
+    expect(css).toMatch(/\.login-card\s*\{[\s\S]*padding:\s*var\(--space-6\)/);
+    expect(css).toMatch(/\.login-card\s*\{[\s\S]*border-radius:\s*12px/);
+    expect(css).toMatch(/\.login-card\s*\{[\s\S]*0 8px 28px rgba\(0, 0, 0, 0\.45\)/);
+    expect(css).toMatch(
+      /\.login-card\s*\{[\s\S]*color-mix\(in srgb, var\(--accent\) 12%, transparent\)/,
+    );
+    expect(css).toMatch(/--bg:\s*#0B1016/);
+    expect(css).toMatch(/--panel:\s*#141B24/);
+    expect(css).toMatch(/--accent:\s*#6CB6FF/);
   });
 });

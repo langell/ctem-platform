@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page, type Response } from '@playwright/test';
 import { loginAsDemoAnalyst } from './helpers/auth';
+import { clickOwnerDockLink } from './helpers/nav';
 import { expectJwtSession, isJwtAccessToken } from './helpers/session';
 
 /** Role / status badges — not the Actions <select> options that repeat the same labels. */
@@ -30,7 +31,7 @@ function isMemberDisable(response: Response): boolean {
 }
 
 async function openMembers(page: Page): Promise<void> {
-  await page.getByRole('link', { name: 'Members' }).click();
+  await clickOwnerDockLink(page, 'Members');
   await expect(page.getByRole('heading', { name: 'Members' })).toBeVisible();
   await expect(page.locator('tbody .skeleton')).toHaveCount(0, { timeout: 20_000 });
   const error = page.locator('section .banner.error');

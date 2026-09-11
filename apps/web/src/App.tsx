@@ -19,6 +19,7 @@ function RequireToken({ children }: { children: ReactNode }) {
 export function App() {
   return (
     <Routes>
+      {/* Login is a centered card outside Layout — no Owner Dock on this route. */}
       <Route path="/login" element={<LoginPage />} />
       <Route path="/login/callback" element={<CallbackPage />} />
       <Route

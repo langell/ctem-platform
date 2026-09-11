@@ -35,14 +35,24 @@ export function Layout() {
 
   return (
     <div className="app">
-      <header className="topbar">
+      <aside className="dock">
         <strong className="brand">CTEM</strong>
-        <nav>
-          <NavLink to="/assets">Assets</NavLink>
-          <NavLink to="/findings">Findings</NavLink>
-          <NavLink to="/scans">Scan</NavLink>
-          <NavLink to="/policies">Policies</NavLink>
-          <NavLink to="/members">Members</NavLink>
+        <nav aria-label="Primary">
+          <div className="nav-group" role="group" aria-labelledby="nav-ops">
+            <div id="nav-ops" className="nav-group-label">
+              Ops
+            </div>
+            <NavLink to="/assets">Assets</NavLink>
+            <NavLink to="/findings">Findings</NavLink>
+            <NavLink to="/scans">Scan</NavLink>
+          </div>
+          <div className="nav-group nav-group-admin" role="group" aria-labelledby="nav-admin">
+            <div id="nav-admin" className="nav-group-label">
+              Admin
+            </div>
+            <NavLink to="/policies">Policies</NavLink>
+            <NavLink to="/members">Members</NavLink>
+          </div>
         </nav>
         <div className="session">
           {session ? (
@@ -54,9 +64,9 @@ export function Layout() {
             Sign out
           </button>
         </div>
-      </header>
-      {error ? <p className="banner error">{error}</p> : null}
-      <main className="page">
+      </aside>
+      <main className="bleed">
+        {error ? <p className="banner error">{error}</p> : null}
         <Outlet />
       </main>
     </div>

@@ -32,7 +32,7 @@ export function LoginPage() {
     <div className="login">
       <div className="card login-card">
         <h1 className="login-brand">CTEM</h1>
-        <p className="muted">Sign in to continue</p>
+        <p className="muted lede">Sign in to continue</p>
         {error ? <p className="error">{error}</p> : null}
         <button type="button" className="cta-loud" onClick={onSignIn} disabled={busy}>
           {busy ? 'Redirecting…' : 'Sign in with Keycloak'}
