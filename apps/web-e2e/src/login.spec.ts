@@ -15,6 +15,7 @@ test.describe('OIDC login / PKCE callback', () => {
   }) => {
     await page.goto('/login');
     await expectCtemLoginHasNoSecretFields(page);
+    await expect(page.locator('aside.dock')).toHaveCount(0);
     await expect(page.locator('form')).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Sign in with Keycloak' })).toHaveCount(1);
     await expect(page.getByRole('button')).toHaveCount(1);
@@ -32,6 +33,8 @@ test.describe('OIDC login / PKCE callback', () => {
     await submitKeycloakLogin(page);
     await page.waitForURL(/\/findings/, { timeout: 30_000 });
     await expect(page.getByRole('heading', { name: 'Findings' })).toBeVisible();
+    await expect(page.locator('aside.dock')).toBeVisible();
+    await expect(page.locator('header.topbar')).toHaveCount(0);
 
     const jwt = await expectJwtSession(page);
     expect(jwt.split('.').length, 'session must be a three-part JWT, not a PAT').toBe(3);

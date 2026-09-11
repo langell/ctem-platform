@@ -26,8 +26,6 @@ describe("Designer's first-pass UI tokens", () => {
     expect(css).toMatch(/\.score-high\s*\{/);
     expect(css).toMatch(/\.score-mid\s*\{/);
     expect(css).toMatch(/\.score-low\s*\{/);
-    expect(css).toMatch(/max-width:\s*1120px/);
-    expect(css).toMatch(/margin:\s*0 auto/);
     expect(css).toMatch(/:focus-visible\s*\{/);
     expect(css).toMatch(/tbody tr:hover\s*\{/);
     expect(css).toMatch(/position:\s*sticky/);
@@ -37,6 +35,9 @@ describe("Designer's first-pass UI tokens", () => {
     expect(css).toMatch(/font-size:\s*14px/);
     expect(css).toMatch(/font-size:\s*13px/);
     expect(css).toMatch(/font-size:\s*11px/);
+    expect(css).not.toMatch(/max-width:\s*1120px/);
+    expect(css).toMatch(/width:\s*min\(440px, 100%\)/);
+    expect(css).toMatch(/max-width:\s*72ch/);
     expect(css).toMatch(/\.badge-ok\s*\{/);
     expect(css).toMatch(/\.form-actions\s*\{/);
     expect(css).toMatch(/tr\.editing/);
@@ -97,5 +98,27 @@ describe("Designer's Signal First suite restyle", () => {
     expect(css).toMatch(/--accent:\s*#6CB6FF/);
     expect(css).toMatch(/--bg:\s*#0B1016/);
     expect(css).toMatch(/IBM Plex Sans/);
+  });
+});
+
+describe("Designer's Owner Dock shell", () => {
+  it('declares a labeled left dock and full-bleed main without a top bar cage', () => {
+    expect(css).toMatch(/\.dock\s*\{[\s\S]*width:\s*220px/);
+    expect(css).toMatch(/\.dock\s*\{[\s\S]*flex-shrink:\s*0/);
+    expect(css).toMatch(/\.dock\s*\{[\s\S]*background:\s*var\(--panel\)/);
+    expect(css).toMatch(/\.dock\s*\{[\s\S]*border-right:\s*1px solid var\(--line\)/);
+    expect(css).toMatch(/\.dock \.nav-group-label\s*\{[\s\S]*font-size:\s*10px/);
+    expect(css).toMatch(
+      /\.dock \.nav-group-admin \.nav-group-label\s*\{[\s\S]*color:\s*var\(--accent\)/,
+    );
+    expect(css).toMatch(/\.dock nav a\.active\s*\{[\s\S]*inset 3px 0 0 0 var\(--accent\)/);
+    expect(css).toMatch(/\.bleed\s*\{[\s\S]*flex:\s*1[\s\S]*min-width:\s*0/);
+    expect(css).toMatch(/\.session\s*\{[\s\S]*margin-top:\s*auto/);
+    expect(css).not.toMatch(/\.topbar\s*\{/);
+    expect(css).not.toMatch(/max-width:\s*1120px/);
+    expect(css).toMatch(/\.login-card\s*\{[\s\S]*width:\s*min\(440px, 100%\)/);
+    expect(css).toMatch(/--bg:\s*#0B1016/);
+    expect(css).toMatch(/--panel:\s*#141B24/);
+    expect(css).toMatch(/--accent:\s*#6CB6FF/);
   });
 });

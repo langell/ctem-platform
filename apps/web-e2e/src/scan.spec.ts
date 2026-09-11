@@ -1,5 +1,6 @@
 import { expect, test, type Response } from '@playwright/test';
 import { loginAsDemoAnalyst } from './helpers/auth';
+import { clickOwnerDockLink } from './helpers/nav';
 import { expectJwtSession, isJwtAccessToken, readAllSessionStorage } from './helpers/session';
 
 function isScanCreate(response: Response): boolean {
@@ -17,7 +18,7 @@ test.describe('Scan kick smoke', () => {
     await loginAsDemoAnalyst(page);
     const jwt = await expectJwtSession(page);
 
-    await page.getByRole('link', { name: 'Scan' }).click();
+    await clickOwnerDockLink(page, 'Scan');
     await expect(page.getByRole('heading', { name: 'Scan' })).toBeVisible();
     await expect(page.locator('input[type="password"]')).toHaveCount(0);
     await expect(page.locator('textarea')).toHaveCount(0);
