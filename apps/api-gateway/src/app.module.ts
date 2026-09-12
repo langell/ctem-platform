@@ -4,6 +4,7 @@ import { CtemConfigModule } from '@ctem/config';
 import { ObservabilityModule, RequestContextMiddleware } from '@ctem/observability';
 import { AuthModule } from '@ctem/auth';
 import { EventsModule } from '@ctem/events';
+import { CoordinationModule } from '@ctem/coordination';
 import { HealthController } from '@ctem/service-kit';
 import { GatewayAuthGuard } from './auth/gateway-auth.guard';
 import { ServiceProxy } from './proxy/service-proxy';
@@ -21,7 +22,7 @@ import { RateLimitMiddleware } from './rate-limit.middleware';
  * never becomes the place features go to hide.
  */
 @Module({
-  imports: [CtemConfigModule, ObservabilityModule, AuthModule, EventsModule],
+  imports: [CtemConfigModule, ObservabilityModule, AuthModule, EventsModule, CoordinationModule],
   controllers: [
     HealthController,
     SessionController,
@@ -31,7 +32,7 @@ import { RateLimitMiddleware } from './rate-limit.middleware';
     PoliciesProxyController,
     OrgMembersProxyController,
   ],
-  providers: [ServiceProxy, { provide: APP_GUARD, useClass: GatewayAuthGuard }],
+  providers: [ServiceProxy, RateLimitMiddleware, { provide: APP_GUARD, useClass: GatewayAuthGuard }],
 })
 export class AppModule {
   configure(consumer: MiddlewareConsumer): void {
