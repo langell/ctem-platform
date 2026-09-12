@@ -21,7 +21,7 @@ import {
 import type { OsDnsResolver } from './dns.connector';
 
 const CRT_SH_IP = '93.184.216.34';
-const PUBLIC_IP = '203.0.113.10';
+const PUBLIC_IP = '8.8.8.8';
 
 const ctx = (
   config: Record<string, unknown>,
@@ -166,6 +166,7 @@ describe('DnsEnumConnector.discover', () => {
         if (h === 'example.com') return ['10.1.2.3'];
         return [];
       },
+      resolveNs: async () => [],
     });
     const assets = await collect(
       connector(async () => jsonResult([{ name_value: 'corp.internal' }]), dns).discover(
