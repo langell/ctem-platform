@@ -29,7 +29,7 @@ export const MAX_IMAGE_LAYERS = 128;
 /** Injection token for overriding the fetch implementation (tests, egress shims). */
 export const GHCR_FETCH = Symbol('GHCR_FETCH');
 
-const MANIFEST_ACCEPT = [
+export const MANIFEST_ACCEPT = [
   'application/vnd.oci.image.index.v1+json',
   'application/vnd.docker.distribution.manifest.list.v2+json',
   'application/vnd.oci.image.manifest.v1+json',
@@ -60,7 +60,7 @@ export interface ImagePuller {
   ): Promise<ImagePull>;
 }
 
-interface OciIndex {
+export interface OciIndex {
   mediaType?: string;
   manifests?: Array<{
     digest?: string;
@@ -69,7 +69,7 @@ interface OciIndex {
   }>;
 }
 
-interface OciManifest {
+export interface OciManifest {
   mediaType?: string;
   layers?: Array<{ digest?: string; mediaType?: string; size?: number }>;
   config?: { digest?: string; mediaType?: string };
@@ -277,7 +277,7 @@ export class GhcrRegistry implements ImagePuller {
   }
 }
 
-function pickPlatform(
+export function pickPlatform(
   manifests: NonNullable<OciIndex['manifests']>,
 ): NonNullable<OciIndex['manifests']>[number] | undefined {
   const linux = manifests.filter((m) => (m.platform?.os ?? 'linux') === 'linux');
@@ -289,7 +289,7 @@ function pickPlatform(
   );
 }
 
-function unpackLayer(digest: string, mediaType: string, blob: Buffer): LayerSnapshot {
+export function unpackLayer(digest: string, mediaType: string, blob: Buffer): LayerSnapshot {
   let entries: TarEntry[];
   try {
     const tar = decompressLayer(blob, mediaType);

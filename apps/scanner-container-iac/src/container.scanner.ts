@@ -2,15 +2,22 @@ import { Injectable } from '@nestjs/common';
 import { BaseScanner, type ScanContext, type ScanOutcome } from '@ctem/scanner-sdk';
 import type { RawFinding, ScanJob, ScannerType } from '@ctem/contracts';
 import { VulnMatcher } from '@ctem/vuln-intel';
-import { optionalGithubToken, requireGithubToken, ContainerCredentialError } from './container.credential';
+import {
+  optionalGithubToken,
+  requireAwsCredentials,
+  requireGithubToken,
+  ContainerCredentialError,
+} from './container.credential';
+import { AwsEgressError } from './aws.egress';
 import { ContainerEgressError } from './container.egress';
 import {
   isPrivateContainerImage,
-  parseGhcrImageRef,
+  parseContainerImageRef,
   ContainerIdentityError,
 } from './container.identity';
 import { inventoryImage, ContainerInventoryError, type ImagePackage } from './inventory/packages';
 import { ContainerPullError, GhcrRegistry } from './oci/registry';
+import { EcrRegistry } from './oci/ecr.registry';
 import { LayerUnpackError } from './oci/tar';
 
 export class ContainerScanError extends Error {
@@ -34,10 +41,12 @@ const TENANT_ANALYZER_KEYS = [
 ] as const;
 
 /**
- * Container image scanning over GHCR-discovered `container_image` assets.
+ * Container image scanning over GHCR- and ECR-discovered `container_image`
+ * assets.
  *
- * Pull allowlisted `ghcr.io` digests in-process (manifest + layer blobs),
- * inventory OS/app packages per layer, and match the shared vuln mirror.
+ * Pull allowlisted `ghcr.io` or `{account}.dkr.ecr.{region}.amazonaws.com`
+ * digests in-process (manifest + layer blobs), inventory OS/app packages
+ * per layer, and match the shared vuln mirror.
  * `kubernetes_workload` is not claimed by `supports()` and still throws if
  * execute is invoked for it. `repository` / `iac_stack` belong to IacScanner.
  */
@@ -50,6 +59,7 @@ export class ContainerScanner extends BaseScanner {
   constructor(
     private readonly matcher: VulnMatcher,
     private readonly registry: GhcrRegistry,
+    private readonly ecrRegistry: EcrRegistry,
   ) {
     super();
   }
@@ -92,6 +102,7 @@ export class ContainerScanner extends BaseScanner {
         err instanceof ContainerIdentityError ||
         err instanceof ContainerCredentialError ||
         err instanceof ContainerEgressError ||
+        err instanceof AwsEgressError ||
         err instanceof ContainerPullError ||
         err instanceof ContainerInventoryError ||
         err instanceof LayerUnpackError
@@ -105,13 +116,27 @@ export class ContainerScanner extends BaseScanner {
   }
 
   private async scanImage(ctx: ScanContext, ignored: string[]): Promise<ScanOutcome> {
-    const ref = parseGhcrImageRef(ctx.job.target, ctx.job.options);
-    const token = isPrivateContainerImage(ctx.job.target)
-      ? requireGithubToken(ctx.job.credentialRef)
-      : optionalGithubToken(ctx.job.credentialRef);
+    const ref = parseContainerImageRef(ctx.job.target, ctx.job.options);
+    const image =
+      ref.kind === 'ghcr'
+        ? `ghcr.io/${ref.owner}/${ref.name}@${ref.digest}`
+        : `${ref.accountId}.dkr.ecr.${ref.region}.amazonaws.com/${ref.repositoryName}@${ref.digest}`;
 
-    ctx.log(`pulling ghcr.io/${ref.owner}/${ref.name}@${ref.digest}`);
-    const pulled = await this.registry.pull(ref, token, ctx.checkDeadline);
+    ctx.log(`pulling ${image}`);
+    const pulled =
+      ref.kind === 'ghcr'
+        ? await this.registry.pull(
+            ref,
+            isPrivateContainerImage(ctx.job.target)
+              ? requireGithubToken(ctx.job.credentialRef)
+              : optionalGithubToken(ctx.job.credentialRef),
+            ctx.checkDeadline,
+          )
+        : await this.ecrRegistry.pull(
+            ref,
+            requireAwsCredentials(ctx.job.credentialRef),
+            ctx.checkDeadline,
+          );
 
     if (!ctx.checkDeadline()) {
       throw new ContainerScanError('Job deadline exceeded after pull — refusing incomplete inventory');
@@ -146,7 +171,7 @@ export class ContainerScanner extends BaseScanner {
     return {
       findings,
       rawOutput: {
-        image: `ghcr.io/${ref.owner}/${ref.name}@${ref.digest}`,
+        image,
         layers: pulled.layers.map((layer) => layer.digest),
         packages: packages.map((pkg) => ({
           name: pkg.name,
