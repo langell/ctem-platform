@@ -8,16 +8,20 @@ import { FindingNormalizer } from '../../findings-service/src/findings/finding-n
 import { ContainerScanError, ContainerScanner } from './container.scanner';
 import { ContainerCredentialError } from './container.credential';
 import { ContainerEgressError } from './container.egress';
-import { parseGhcrImageRef, ContainerIdentityError } from './container.identity';
+import { parseGhcrImageRef, parseContainerImageRef, ContainerIdentityError } from './container.identity';
 import { DEMO_CONTAINER_DIGEST, DEMO_CONTAINER_IMAGE } from '@ctem/testing';
 import { ContainerInventoryError } from './inventory/packages';
 import { ContainerPullError, type ImagePuller, type LayerSnapshot } from './oci/registry';
+import type { EcrImagePuller } from './oci/ecr.registry';
 import type { VulnMatcher } from '@ctem/vuln-intel';
 
 const DIGEST = `sha256:${'a'.repeat(64)}`;
 const LAYER_BASE = `sha256:${'b'.repeat(64)}`;
 const LAYER_APP = `sha256:${'c'.repeat(64)}`;
 const GHCR_KEY = `ghcr:acme/payments-api@${DIGEST}`;
+const ACCOUNT = '123456789012';
+const REGION = 'us-east-1';
+const ECR_KEY = `ecr:${ACCOUNT}/payments-api@${DIGEST}`;
 
 const APK_DB = ['P:openssl', 'V:1.1.1w', 'A:x86_64', '', 'P:busybox', 'V:1.36.1', '', ''].join('\n');
 const LODASH_JSON = JSON.stringify({ name: 'lodash', version: '4.17.21' });
@@ -99,15 +103,53 @@ function puller(layers: LayerSnapshot[], spy?: (ref: unknown) => void): ImagePul
   };
 }
 
-function scanner(matcher = matchingMatcher(), registry?: ImagePuller): ContainerScanner {
+function unusedEcr(): EcrImagePuller {
+  return {
+    pull: vi.fn(async () => {
+      throw new Error('ECR puller must not be called for GHCR identities');
+    }),
+  };
+}
+
+function ecrPuller(layers: LayerSnapshot[], spy?: (ref: unknown) => void): EcrImagePuller {
+  return {
+    pull: vi.fn(async (ref, _creds, checkDeadline) => {
+      spy?.(ref);
+      if (!checkDeadline()) throw new ContainerPullError('Job deadline exceeded mid-pull');
+      return { digest: DIGEST, owner: ACCOUNT, name: 'payments-api', layers };
+    }),
+  };
+}
+
+function scanner(
+  matcher = matchingMatcher(),
+  registry?: ImagePuller,
+  ecr?: EcrImagePuller,
+): ContainerScanner {
   return new ContainerScanner(
     matcher as unknown as VulnMatcher,
     (registry ?? puller([layer(LAYER_BASE, { 'lib/apk/db/installed': APK_DB })])) as never,
+    (ecr ?? unusedEcr()) as never,
   );
+}
+
+function ecrTarget(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    kind: 'container_image',
+    externalKey: ECR_KEY,
+    accountId: ACCOUNT,
+    region: REGION,
+    repository: 'payments-api',
+    digest: DIGEST,
+    ...overrides,
+  };
 }
 
 afterEach(() => {
   delete process.env.GITHUB_TOKEN;
+  delete process.env.AWS_ACCESS_KEY_ID;
+  delete process.env.AWS_SECRET_ACCESS_KEY;
+  delete process.env.AWS_SESSION_TOKEN;
 });
 
 describe('ContainerScanner.supports', () => {
@@ -178,11 +220,21 @@ describe('ContainerScanner.execute', () => {
         ctx({
           target: {
             kind: 'container_image',
-            externalKey: `ecr:123456789012/payments-api@${DIGEST}`,
+            externalKey: `gcr.io/proj/app@${DIGEST}`,
           },
         }),
       ),
-    ).rejects.toThrow(/ghcr:owner\/name@sha256|non-digest|malformed/);
+    ).rejects.toThrow(/non-digest|malformed/);
+    await expect(
+      s.execute(
+        ctx({
+          target: {
+            kind: 'container_image',
+            externalKey: `acr:acct/app@${DIGEST}`,
+          },
+        }),
+      ),
+    ).rejects.toThrow(/non-digest|malformed/);
     await expect(
       s.execute(
         ctx({
@@ -208,6 +260,114 @@ describe('ContainerScanner.execute', () => {
       name: 'payments-api',
       digest: DEMO_CONTAINER_DIGEST,
     });
+    expect(
+      parseContainerImageRef({
+        kind: DEMO_CONTAINER_IMAGE.kind,
+        externalKey: DEMO_CONTAINER_IMAGE.externalKey,
+        ...DEMO_CONTAINER_IMAGE.attributes,
+      }),
+    ).toEqual({
+      kind: 'ghcr',
+      owner: 'demo',
+      name: 'payments-api',
+      digest: DEMO_CONTAINER_DIGEST,
+    });
+  });
+
+  it('accepts an ECR digest identity and refuses a tag or missing region', () => {
+    expect(parseContainerImageRef(ecrTarget())).toEqual({
+      kind: 'ecr',
+      accountId: ACCOUNT,
+      repositoryName: 'payments-api',
+      digest: DIGEST,
+      region: REGION,
+    });
+    expect(() =>
+      parseContainerImageRef({
+        kind: 'container_image',
+        externalKey: `ecr:${ACCOUNT}/payments-api:latest`,
+        region: REGION,
+      }),
+    ).toThrow(ContainerIdentityError);
+    expect(() =>
+      parseContainerImageRef({
+        kind: 'container_image',
+        externalKey: ECR_KEY,
+      }),
+    ).toThrow(/region/);
+  });
+
+  it('scans an ECR-discovered digest through the same inventory + vuln match', async () => {
+    process.env.AWS_ACCESS_KEY_ID = 'AKIATEST';
+    process.env.AWS_SECRET_ACCESS_KEY = 'secret';
+    const layers = [
+      layer(LAYER_BASE, { 'lib/apk/db/installed': APK_DB }),
+      layer(LAYER_APP, { 'app/node_modules/lodash/package.json': LODASH_JSON }),
+    ];
+    const ecr = ecrPuller(layers);
+    const matcher = matchingMatcher(['openssl', 'lodash']);
+    const outcome = await scanner(matcher, unusedEcr() as never, ecr).execute(
+      ctx({
+        target: ecrTarget(),
+        credentialRef: 'env:AWS_ACCESS_KEY_ID',
+      }),
+    );
+    expect(ecr.pull).toHaveBeenCalledOnce();
+    expect(outcome.findings.length).toBeGreaterThanOrEqual(2);
+    expect((outcome.rawOutput as { image: string }).image).toBe(
+      `${ACCOUNT}.dkr.ecr.${REGION}.amazonaws.com/payments-api@${DIGEST}`,
+    );
+    expect((outcome.rawOutput as { complete: boolean; truncated: boolean }).complete).toBe(true);
+    expect((outcome.rawOutput as { truncated: boolean }).truncated).toBe(false);
+  });
+
+  it('fails an ECR pull when AWS_* credentials are missing or not env:AWS_*', async () => {
+    const ecr = ecrPuller([]);
+    const s = scanner(matchingMatcher(), unusedEcr() as never, ecr);
+    await expect(
+      s.execute(ctx({ target: ecrTarget(), credentialRef: null })),
+    ).rejects.toThrow(ContainerCredentialError);
+    await expect(
+      s.execute(ctx({ target: ecrTarget(), credentialRef: 'env:AWS_ACCESS_KEY_ID' })),
+    ).rejects.toThrow(/cannot be used/);
+    process.env.GITHUB_TOKEN = 'ghp_test';
+    await expect(
+      s.execute(ctx({ target: ecrTarget(), credentialRef: 'env:GITHUB_TOKEN' })),
+    ).rejects.toThrow(/env:AWS_\*/);
+    expect(ecr.pull).not.toHaveBeenCalled();
+  });
+
+  it('fails an ECR pull that is incomplete or hits the deadline mid-pull', async () => {
+    process.env.AWS_ACCESS_KEY_ID = 'AKIATEST';
+    process.env.AWS_SECRET_ACCESS_KEY = 'secret';
+    const failPull: EcrImagePuller = {
+      pull: vi.fn(async () => {
+        throw new ContainerPullError('ECR blob GET returned 502 — refusing pull');
+      }),
+    };
+    await expect(
+      scanner(matchingMatcher(), unusedEcr() as never, failPull).execute(
+        ctx({ target: ecrTarget(), credentialRef: 'env:AWS_ACCESS_KEY_ID' }),
+      ),
+    ).rejects.toThrow(ContainerPullError);
+
+    const midPull: EcrImagePuller = {
+      pull: vi.fn(async (_ref, _creds, checkDeadline) => {
+        if (!checkDeadline()) throw new ContainerPullError('Job deadline exceeded mid-pull');
+        return { digest: DIGEST, owner: ACCOUNT, name: 'payments-api', layers: [] };
+      }),
+    };
+    let allow = true;
+    await expect(
+      scanner(matchingMatcher(), unusedEcr() as never, midPull).execute({
+        ...ctx({ target: ecrTarget(), credentialRef: 'env:AWS_ACCESS_KEY_ID' }),
+        checkDeadline: () => {
+          const ok = allow;
+          allow = false;
+          return ok;
+        },
+      }),
+    ).rejects.toThrow(/deadline/);
   });
 
   it('fails a private pull when GITHUB_* credentials are missing — no empty success', async () => {
@@ -362,7 +522,10 @@ describe('ContainerScanner.execute', () => {
       'container.egress.ts',
       'container.identity.ts',
       'container.credential.ts',
+      'aws.egress.ts',
+      'aws.sigv4.ts',
       'oci/registry.ts',
+      'oci/ecr.registry.ts',
       'oci/tar.ts',
       'inventory/packages.ts',
     ]
