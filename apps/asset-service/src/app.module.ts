@@ -19,6 +19,7 @@ import { EcrConnector } from './connectors/ecr.connector';
 import { GhcrConnector } from './connectors/ghcr.connector';
 import { GitHubConnector } from './connectors/github.connector';
 import { GitLabConnector } from './connectors/gitlab.connector';
+import { DnsEnumConnector } from './connectors/dns.connector';
 import { KubernetesConnector } from './connectors/kubernetes.connector';
 
 @Module({
@@ -37,6 +38,7 @@ import { KubernetesConnector } from './connectors/kubernetes.connector';
     GhcrConnector,
     EcrConnector,
     KubernetesConnector,
+    DnsEnumConnector,
     { provide: APP_GUARD, useClass: InternalAuthGuard },
   ],
 })
@@ -51,6 +53,7 @@ export class AppModule implements OnModuleInit {
     private readonly ghcr: GhcrConnector,
     private readonly ecr: EcrConnector,
     private readonly kubernetes: KubernetesConnector,
+    private readonly dnsEnum: DnsEnumConnector,
   ) {}
 
   /** Connector registration is explicit and lives in one greppable place. */
@@ -63,6 +66,7 @@ export class AppModule implements OnModuleInit {
     this.registry.register(this.ghcr);
     this.registry.register(this.ecr);
     this.registry.register(this.kubernetes);
+    this.registry.register(this.dnsEnum);
   }
 
   configure(consumer: MiddlewareConsumer): void {
