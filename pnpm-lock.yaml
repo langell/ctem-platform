@@ -66,6 +66,9 @@ importers:
       '@ctem/contracts':
         specifier: workspace:*
         version: link:../../libs/contracts
+      '@ctem/coordination':
+        specifier: workspace:*
+        version: link:../../libs/coordination
       '@ctem/events':
         specifier: workspace:*
         version: link:../../libs/events

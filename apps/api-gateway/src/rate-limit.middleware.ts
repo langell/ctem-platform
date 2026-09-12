@@ -1,40 +1,83 @@
-import { HttpStatus, Injectable, NestMiddleware } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable, NestMiddleware, Optional } from '@nestjs/common';
 import type { NextFunction, Request, Response } from 'express';
+import {
+  RedisClient,
+  UnavailableRateLimitStore,
+  gatewayRateLimitRedisKey,
+  type RateLimitStore,
+} from '@ctem/coordination';
+import { rootLogger } from '@ctem/observability';
+
+/** Requests allowed per IP per window. Unchanged from the in-memory limiter. */
+export const GATEWAY_RATE_LIMIT_CAPACITY = 600;
+/** Window length in ms. Unchanged from the in-memory limiter. */
+export const GATEWAY_RATE_LIMIT_WINDOW_MS = 60_000;
 
 /**
- * Placeholder token bucket, per org. In-memory only — swap the store for Redis
- * before running more than one gateway replica.
+ * GET /health, /health/live, and /health/ready must not consume the shared
+ * budget or 429 from this limiter — probes have to stay up when Redis is down.
+ */
+export function isGatewayHealthProbe(req: Pick<Request, 'method' | 'path'>): boolean {
+  if (req.method !== 'GET') return false;
+  const path = normalizePath(req.path);
+  return path === '/health' || path === '/health/live' || path === '/health/ready';
+}
+
+function normalizePath(path: string | undefined): string {
+  if (!path) return '/';
+  const trimmed = path.replace(/\/+$/, '');
+  return trimmed.length === 0 ? '/' : trimmed;
+}
+
+/**
+ * Redis-backed token bucket, keyed by `req.ip` (Express trust-proxy when set).
+ * Two api-gateway replicas share one counter per IP. Redis unavailable or a
+ * command error fails closed with 429 — same class of dependency as scheduler
+ * leader leases. Never keyed by org header, body, query, or JWT.
  */
 @Injectable()
 export class RateLimitMiddleware implements NestMiddleware {
-  private readonly buckets = new Map<string, { tokens: number; refilledAt: number }>();
-  private readonly capacity = 600; // requests
-  private readonly windowMs = 60_000;
+  private readonly capacity = GATEWAY_RATE_LIMIT_CAPACITY;
+  private readonly windowMs = GATEWAY_RATE_LIMIT_WINDOW_MS;
+  private readonly store: RateLimitStore;
+  private readonly log = rootLogger.child({ component: 'rate-limit' });
 
-  use(req: Request, res: Response, next: NextFunction): void {
-    // Key by IP, never by a client-supplied org header — org comes from the JWT.
-    const key = req.ip ?? 'anonymous';
-    const now = Date.now();
-    const bucket = this.buckets.get(key) ?? { tokens: this.capacity, refilledAt: now };
+  constructor(@Optional() @Inject(RedisClient) store?: RateLimitStore) {
+    this.store = store ?? new UnavailableRateLimitStore();
+  }
 
-    const elapsed = now - bucket.refilledAt;
-    if (elapsed > this.windowMs) {
-      bucket.tokens = this.capacity;
-      bucket.refilledAt = now;
-    }
-
-    if (bucket.tokens <= 0) {
-      res.status(HttpStatus.TOO_MANY_REQUESTS).json({
-        type: 'about:blank',
-        title: 'Rate limit exceeded',
-        status: 429,
-      });
+  async use(req: Request, res: Response, next: NextFunction): Promise<void> {
+    if (isGatewayHealthProbe(req)) {
+      next();
       return;
     }
 
-    bucket.tokens -= 1;
-    this.buckets.set(key, bucket);
-    res.setHeader('x-ratelimit-remaining', String(bucket.tokens));
+    const ip = req.ip ?? 'anonymous';
+    const key = gatewayRateLimitRedisKey(ip);
+
+    let remaining: number;
+    try {
+      remaining = await this.store.consume(key, this.capacity, this.windowMs);
+    } catch (err) {
+      this.log.warn({ err, key }, 'gateway rate limit redis unavailable; failing closed');
+      this.reject(res);
+      return;
+    }
+
+    if (remaining < 0) {
+      this.reject(res);
+      return;
+    }
+
+    res.setHeader('x-ratelimit-remaining', String(remaining));
     next();
+  }
+
+  private reject(res: Response): void {
+    res.status(HttpStatus.TOO_MANY_REQUESTS).json({
+      type: 'about:blank',
+      title: 'Rate limit exceeded',
+      status: 429,
+    });
   }
 }
