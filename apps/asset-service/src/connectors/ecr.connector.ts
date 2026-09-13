@@ -201,7 +201,8 @@ function jsonArrayField(obj: Record<string, unknown>, field: string, label: stri
  *
  * Identity is the image digest. Tags live in attributes so a retag does not
  * fork assets. This connector does not pull layers or fetch OCI blobs —
- * inventory is the ECR JSON API only. Container scanning stays ghcr.io-only.
+ * inventory is the ECR JSON API only. Layer pull is scanner-container-iac
+ * for `ecr:{account}/{repo}@{digest}` identities.
  *
  * This connector always full-scans. `ctx.orgId` is unused (tenancy is applied
  * by the scheduler on persist) and `ctx.since` is unused — ECR list APIs do

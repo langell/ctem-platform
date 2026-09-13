@@ -1,11 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import {
   GHCR_REGISTRY_HOST,
+  allowlistedEcrApiUrl,
+  allowlistedEcrBlobRedirect,
+  allowlistedEcrRegistryUrl,
   allowlistedGhcrBlobRedirect,
   allowlistedGhcrUrl,
+  ecrApiUrl,
+  ecrBlobUrl,
+  ecrManifestUrl,
+  ecrRegistryHost,
   ghcrBlobUrl,
   ghcrManifestUrl,
   ghcrTokenUrl,
+  isEcrApiHost,
+  isEcrBlobS3Host,
+  isEcrRegistryHost,
   isGhcrRegistryHost,
   refuseTenantWritableRegistry,
 } from './container.egress';
@@ -98,5 +108,134 @@ describe('refuseTenantWritableRegistry', () => {
       /tenant-writable/,
     );
     expect(() => refuseTenantWritableRegistry({ owner: 'https://evil.example' })).toThrow(/tenant-writable/);
+  });
+
+  it('refuses ECR/AWS tenant registry fields and a URL-shaped region', () => {
+    expect(() =>
+      refuseTenantWritableRegistry({
+        region: 'us-east-1',
+        ecrHost: '123456789012.dkr.ecr.us-east-1.amazonaws.com',
+      }),
+    ).toThrow(/tenant-writable/);
+    expect(() =>
+      refuseTenantWritableRegistry({
+        region: 'us-east-1',
+        proxyEndpoint: 'https://123456789012.dkr.ecr.us-east-1.amazonaws.com',
+      }),
+    ).toThrow(/tenant-writable/);
+    expect(() =>
+      refuseTenantWritableRegistry({
+        region: 'us-east-1',
+        awsEndpoint: 'https://api.ecr.us-east-1.amazonaws.com',
+      }),
+    ).toThrow(/tenant-writable/);
+    expect(() => refuseTenantWritableRegistry({ region: 'https://evil.example' })).toThrow(/region is an id/);
+    expect(() =>
+      refuseTenantWritableRegistry({ region: 'us-east-1', accountId: '123456789012' }),
+    ).not.toThrow();
+  });
+});
+
+const ACCOUNT = '123456789012';
+const REGION = 'us-east-1';
+
+describe('allowlistedEcrApiUrl / ecrApiUrl', () => {
+  it('accepts api.ecr.{region}.amazonaws.com including GovCloud', () => {
+    expect(allowlistedEcrApiUrl('https://api.ecr.us-east-1.amazonaws.com/')).toBe(
+      'https://api.ecr.us-east-1.amazonaws.com/',
+    );
+    expect(ecrApiUrl('us-gov-west-1')).toBe('https://api.ecr.us-gov-west-1.amazonaws.com/');
+  });
+
+  it('refuses dkr.ecr, Docker Hub, GHCR, and lookalikes for the signed API', () => {
+    expect(() =>
+      allowlistedEcrApiUrl('https://123456789012.dkr.ecr.us-east-1.amazonaws.com/v2/'),
+    ).toThrow(/only api\.ecr/);
+    expect(() => allowlistedEcrApiUrl('https://ghcr.io/v2/acme/app/manifests/x')).toThrow(
+      /only amazonaws\.com|only api\.ecr/,
+    );
+    expect(() => allowlistedEcrApiUrl('https://docker.io/v2/library/nginx/manifests/latest')).toThrow();
+    expect(() =>
+      allowlistedEcrApiUrl('https://api.ecr.us-east-1.amazonaws.com.evil.example/'),
+    ).toThrow(/only amazonaws\.com/);
+    expect(() => ecrApiUrl('https://evil.example')).toThrow(/region/);
+  });
+});
+
+describe('isEcrApiHost / isEcrRegistryHost', () => {
+  it('pins API vs registry hosts and refuses suffix confusion', () => {
+    expect(isEcrApiHost('api.ecr.us-east-1.amazonaws.com')).toBe(true);
+    expect(isEcrApiHost('123456789012.dkr.ecr.us-east-1.amazonaws.com')).toBe(false);
+    expect(isEcrRegistryHost('123456789012.dkr.ecr.us-east-1.amazonaws.com', ACCOUNT, REGION)).toBe(
+      true,
+    );
+    expect(isEcrRegistryHost('999999999999.dkr.ecr.us-east-1.amazonaws.com', ACCOUNT, REGION)).toBe(
+      false,
+    );
+    expect(isEcrRegistryHost('123456789012.dkr.ecr.eu-west-1.amazonaws.com', ACCOUNT, REGION)).toBe(
+      false,
+    );
+    expect(isEcrRegistryHost('123456789012.dkr.ecr.us-east-1.amazonaws.com.evil.example')).toBe(false);
+    expect(isEcrRegistryHost('ghcr.io')).toBe(false);
+  });
+});
+
+describe('allowlistedEcrRegistryUrl / ecrManifestUrl', () => {
+  it('builds the account+region dkr.ecr host from ids, never a tenant URL', () => {
+    expect(ecrRegistryHost(ACCOUNT, REGION)).toBe(`${ACCOUNT}.dkr.ecr.${REGION}.amazonaws.com`);
+    expect(ecrManifestUrl(ACCOUNT, REGION, 'payments-api', DIGEST)).toBe(
+      `https://${ACCOUNT}.dkr.ecr.${REGION}.amazonaws.com/v2/payments-api/manifests/${DIGEST}`,
+    );
+    expect(ecrBlobUrl(ACCOUNT, REGION, 'team/app', DIGEST)).toBe(
+      `https://${ACCOUNT}.dkr.ecr.${REGION}.amazonaws.com/v2/team/app/blobs/${DIGEST}`,
+    );
+    expect(() =>
+      allowlistedEcrRegistryUrl(
+        'https://999999999999.dkr.ecr.us-east-1.amazonaws.com/v2/app/manifests/sha256:abc',
+        ACCOUNT,
+        REGION,
+      ),
+    ).toThrow(/only 123456789012\.dkr\.ecr/);
+    expect(() =>
+      allowlistedEcrRegistryUrl('https://ghcr.io/v2/acme/app/manifests/sha256:abc', ACCOUNT, REGION),
+    ).toThrow();
+    expect(() =>
+      allowlistedEcrRegistryUrl(
+        `http://${ACCOUNT}.dkr.ecr.${REGION}.amazonaws.com/v2/app/manifests/${DIGEST}`,
+        ACCOUNT,
+        REGION,
+      ),
+    ).toThrow(/non-https/);
+  });
+});
+
+describe('allowlistedEcrBlobRedirect', () => {
+  it('allows the same dkr.ecr host and regional S3, refuses everything else', () => {
+    expect(
+      allowlistedEcrBlobRedirect(
+        `https://${ACCOUNT}.dkr.ecr.${REGION}.amazonaws.com/v2/app/blobs/${DIGEST}`,
+        ACCOUNT,
+        REGION,
+      ),
+    ).toContain('dkr.ecr');
+    expect(
+      allowlistedEcrBlobRedirect(
+        'https://prod-us-east-1-starport-layer-bucket.s3.us-east-1.amazonaws.com/blob?X-Amz-Signature=1',
+        ACCOUNT,
+        REGION,
+      ),
+    ).toContain('s3.us-east-1.amazonaws.com');
+    expect(isEcrBlobS3Host('prod-us-east-1-starport-layer-bucket.s3.us-east-1.amazonaws.com', REGION)).toBe(
+      true,
+    );
+    expect(() => allowlistedEcrBlobRedirect('https://docker.io/v2/library/nginx/blobs/x', ACCOUNT, REGION)).toThrow(
+      /redirect host/,
+    );
+    expect(() => allowlistedEcrBlobRedirect('https://ghcr.io/v2/acme/app/blobs/x', ACCOUNT, REGION)).toThrow(
+      /redirect host/,
+    );
+    expect(() => allowlistedEcrBlobRedirect('https://evil.example/blob', ACCOUNT, REGION)).toThrow(
+      /redirect host/,
+    );
   });
 });

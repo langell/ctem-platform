@@ -1,11 +1,12 @@
 /**
- * Same allowlist as GHCR discovery (`apps/asset-service` credentials).
- * Platform-operated `env:GITHUB_*` only. A missing or unusable pointer must
- * fail a private pull — never empty-succeed.
+ * Same allowlist as GHCR / ECR discovery (`apps/asset-service` credentials).
+ * Platform-operated `env:GITHUB_*` (GHCR) and `env:AWS_*` (ECR). A missing
+ * or unusable pointer must fail the pull — never empty-succeed.
  */
 
 const ENV_ALLOWLIST = /^(GITHUB|GITLAB|AWS|GCP|AZURE)_[A-Z0-9_]+$/;
 const GITHUB_ENV_NAME = /^GITHUB_[A-Z0-9_]+$/;
+const AWS_ENV_NAME = /^AWS_[A-Z0-9_]+$/;
 
 export class ContainerCredentialError extends Error {
   constructor(message: string) {
@@ -71,4 +72,52 @@ export function requireGithubToken(credentialRef: string | null): string {
 export function optionalGithubToken(credentialRef: string | null): string | undefined {
   if (!credentialRef) return undefined;
   return requireGithubToken(credentialRef);
+}
+
+export interface AwsCredentials {
+  accessKeyId: string;
+  secretAccessKey: string;
+  sessionToken?: string;
+}
+
+/**
+ * ECR pulls have no unauthenticated path (same class as ECR discovery).
+ * The integration pointer must be `env:AWS_*`, and the platform-operated
+ * signing pair `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` must both be
+ * usable. A missing or unusable pointer must not empty-succeed.
+ */
+export function requireAwsCredentials(credentialRef: string | null): AwsCredentials {
+  if (!credentialRef) {
+    throw new ContainerCredentialError(
+      'ECR pull requires a usable credentialRef (env:AWS_*) — refusing unauthenticated pull',
+    );
+  }
+
+  const sep = credentialRef.indexOf(':');
+  const scheme = sep === -1 ? credentialRef : credentialRef.slice(0, sep);
+  const key = sep === -1 ? '' : credentialRef.slice(sep + 1);
+  if (scheme !== 'env' || !key || !AWS_ENV_NAME.test(key)) {
+    resolveCredential(credentialRef);
+    throw new ContainerCredentialError(
+      `credentialRef '${credentialRef}' is not an env:AWS_* pointer — ECR pulls only accept platform-operated AWS_* names`,
+    );
+  }
+
+  const pointed = resolveCredential(credentialRef);
+  if (!pointed) {
+    throw new ContainerCredentialError(
+      `credentialRef '${credentialRef}' is set but cannot be used — refusing to pull without usable AWS_* credentials`,
+    );
+  }
+
+  const accessKeyId = resolveCredential('env:AWS_ACCESS_KEY_ID');
+  const secretAccessKey = resolveCredential('env:AWS_SECRET_ACCESS_KEY');
+  if (!accessKeyId || !secretAccessKey) {
+    throw new ContainerCredentialError(
+      'ECR pull fails closed without usable AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY',
+    );
+  }
+
+  const sessionToken = resolveCredential('env:AWS_SESSION_TOKEN');
+  return { accessKeyId, secretAccessKey, ...(sessionToken ? { sessionToken } : {}) };
 }
