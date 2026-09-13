@@ -386,6 +386,9 @@ describe('client cannot write scan conclusion', () => {
     ).toEqual(['options.deployConclusion']);
     expect(() =>
       CreateScanRequest.parse({ scannerType: 'sca', deployConclusion: 'blocked' }),
+    ).toThrow();
+    expect(() =>
+      CreateScanRequest.parse({ scannerType: 'sca', options: { deployConclusion: 'blocked' } }),
     ).toThrow(/not client-writable/);
     expect(() =>
       CreateScanRequest.parse({ scannerType: 'sca', options: { deploy_conclusion: 'blocked' } }),
