@@ -27,6 +27,7 @@
     "@ctem/observability": "workspace:*",
     "@ctem/auth": "workspace:*",
     "@ctem/events": "workspace:*",
+    "@ctem/coordination": "workspace:*",
     "@ctem/service-kit": "workspace:*"
   },
   "devDependencies": {

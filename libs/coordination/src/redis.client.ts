@@ -3,6 +3,7 @@ import Redis from 'ioredis';
 import { loadEnv } from '@ctem/config';
 import { rootLogger } from '@ctem/observability';
 import type { LeaseStore } from './lease-store';
+import type { RateLimitStore } from './rate-limit-store';
 
 const RENEW_LUA = `
 if redis.call('GET', KEYS[1]) == ARGV[1] then
@@ -21,12 +22,32 @@ end
 `;
 
 /**
- * Shared Redis connection for leader leases. The process stays up if Redis is
- * down — commands fail and the lease helper skip-ticks rather than taking the
- * service (and its manual kick paths) with it.
+ * Atomic fixed-window token bucket: init remaining=capacity-1 with TTL, else
+ * DECR when tokens remain, else -1. Two gateway replicas share one counter.
+ */
+const CONSUME_LUA = `
+local capacity = tonumber(ARGV[1])
+local windowMs = tonumber(ARGV[2])
+local current = redis.call('GET', KEYS[1])
+if not current then
+  redis.call('SET', KEYS[1], capacity - 1, 'PX', windowMs)
+  return capacity - 1
+end
+current = tonumber(current)
+if current <= 0 then
+  return -1
+end
+return redis.call('DECR', KEYS[1])
+`;
+
+/**
+ * Shared Redis connection for leader leases and the gateway rate-limit bucket.
+ * The process stays up if Redis is down — commands throw. Lease helpers
+ * skip-ticks; the gateway limiter fails closed (429) so a replica cannot serve
+ * unlimited traffic. Manual kick paths stay ungated.
  */
 @Injectable()
-export class RedisClient implements LeaseStore, OnModuleDestroy {
+export class RedisClient implements LeaseStore, RateLimitStore, OnModuleDestroy {
   private readonly client: Redis;
   private readonly log = rootLogger.child({ component: 'redis' });
 
@@ -59,6 +80,17 @@ export class RedisClient implements LeaseStore, OnModuleDestroy {
   async delIfValue(key: string, value: string): Promise<boolean> {
     const result = await this.client.eval(RELEASE_LUA, 1, key, value);
     return Number(result) === 1;
+  }
+
+  async consume(key: string, capacity: number, windowMs: number): Promise<number> {
+    const result = await this.client.eval(
+      CONSUME_LUA,
+      1,
+      key,
+      String(capacity),
+      String(windowMs),
+    );
+    return Number(result);
   }
 
   async onModuleDestroy(): Promise<void> {

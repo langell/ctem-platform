@@ -6,7 +6,8 @@
 # Only Caddy publishes host ports. Postgres, Redis, NATS, MinIO and the service
 # ports stay on the compose network. Compose still runs one replica per app
 # service; a second replica of orchestrator or asset-service needs Redis for
-# the scheduler leader lease (see README "Distributed scheduling").
+# the scheduler leader lease, and a second api-gateway replica needs Redis
+# for the shared IP rate-limit bucket (see README "Distributed scheduling").
 name: ctem-prod
 
 x-app-image: &app-image

@@ -62,10 +62,12 @@ RLS script is written to be re-run).
   `ssh -L 9001:localhost:9001` after temporarily publishing the port if needed.
 - **A second replica needs Redis.** Scan and discovery interval ticks take a
   Redis leader lease (`ctem:leader:scan-schedule` /
-  `ctem:leader:discovery-schedule`). Compose still ships one replica per
+  `ctem:leader:discovery-schedule`). The api-gateway rate limit is a shared
+  Redis token bucket (`ctem:ratelimit:gw:{ip}`); without Redis every
+  non-health request 429s (fail closed). Compose still ships one replica per
   service; scaling orchestrator or asset-service without Redis will skip
-  scheduled ticks (fail closed) rather than double-fire. Manual kicks are
-  ungated. See README "Distributed scheduling".
+  scheduled ticks rather than double-fire. Manual kicks are ungated. See
+  README "Distributed scheduling".
 - **ASM probing** leaves the provider's IP space. Keep the allowlist tight and
   check the provider's acceptable-use policy.
 - **Secrets with quotes or backslashes** break the SQL/JSON interpolation;
