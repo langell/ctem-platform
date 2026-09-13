@@ -1,0 +1,2 @@
+# Should be ignored when uv.lock is present
+flask==2.3.0

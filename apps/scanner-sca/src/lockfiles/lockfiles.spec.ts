@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, open, writeFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,9 +11,11 @@ import { parseGradleLockfile, parsePomXml } from './maven';
 import { npmParser, parseNpmLock } from './npm';
 import { parseCsproj, parsePackagesLock } from './nuget';
 import { parseRequirementsTxt } from './pip';
+import { parsePipfileLock, pipfileParser } from './pipfile';
 import { parsePnpmLock, splitPnpmKey } from './pnpm';
 import { parsePoetryLock } from './poetry';
-import { filesToRead, LockfileResolutionError, resolveLockfiles } from './resolve';
+import { filesToRead, LockfileResolutionError, MAX_LOCKFILE_BYTES, resolveLockfiles } from './resolve';
+import { parseUvLock, uvParser } from './uv';
 import { listRepoFiles } from './walk';
 import { parseYarnClassic, yarnParser } from './yarn';
 
@@ -247,6 +249,89 @@ describe('requirements.txt', () => {
   });
 });
 
+describe('Pipfile.lock', () => {
+  it('uses Pipfile for directs and the lock graph for paths', () => {
+    const map = byName(
+      parsePipfileLock(load('pipenv', 'Pipfile.lock'), 'Pipfile.lock', load('pipenv', 'Pipfile')),
+    );
+    expect(map.requests).toMatchObject({
+      version: '2.31.0',
+      direct: true,
+      dependencyPath: ['requests'],
+      ecosystem: 'PyPI',
+      purl: 'pkg:pypi/requests@2.31.0',
+    });
+    expect(map.certifi).toMatchObject({
+      version: '2023.7.22',
+      direct: false,
+      dependencyPath: ['requests', 'certifi'],
+      ecosystem: 'PyPI',
+    });
+  });
+
+  it('marks Pipfile names as direct when the lock has no edges', () => {
+    const lock = JSON.stringify({
+      default: {
+        certifi: { version: '==2023.7.22' },
+        requests: { version: '==2.31.0' },
+      },
+    });
+    const map = byName(parsePipfileLock(lock, 'Pipfile.lock', '[packages]\nrequests = "==2.31.0"\n'));
+    expect(map.requests).toMatchObject({ direct: true, dependencyPath: ['requests'] });
+    expect(map.certifi).toMatchObject({ direct: false, dependencyPath: [] });
+  });
+});
+
+describe('uv.lock', () => {
+  it('uses workspace members as roots and the lock graph for paths', () => {
+    const map = byName(parseUvLock(load('uv', 'uv.lock'), 'uv.lock'));
+    expect(map['fixture-app']).toBeUndefined();
+    expect(map.requests).toMatchObject({
+      version: '2.31.0',
+      direct: true,
+      dependencyPath: ['requests'],
+      ecosystem: 'PyPI',
+      purl: 'pkg:pypi/requests@2.31.0',
+    });
+    expect(map.certifi).toMatchObject({
+      version: '2023.7.22',
+      direct: false,
+      dependencyPath: ['requests', 'certifi'],
+    });
+  });
+
+  it('treats [package.dev-dependencies] on the project as directs', () => {
+    const lock = [
+      '[[package]]',
+      'name = "app"',
+      'version = "0.1.0"',
+      'source = { editable = "." }',
+      'dependencies = [',
+      '    { name = "requests" },',
+      ']',
+      '',
+      '[package.dev-dependencies]',
+      'dev = [',
+      '    { name = "pytest" },',
+      ']',
+      '',
+      '[[package]]',
+      'name = "pytest"',
+      'version = "7.4.0"',
+      'source = { registry = "https://pypi.org/simple" }',
+      '',
+      '[[package]]',
+      'name = "requests"',
+      'version = "2.31.0"',
+      'source = { registry = "https://pypi.org/simple" }',
+      '',
+    ].join('\n');
+    const map = byName(parseUvLock(lock, 'uv.lock'));
+    expect(map.pytest.direct).toBe(true);
+    expect(map.requests.direct).toBe(true);
+  });
+});
+
 describe('Gemfile.lock', () => {
   it('uses DEPENDENCIES as directs and specs as the graph', () => {
     const map = byName(parseGemfileLock(load('gem', 'Gemfile.lock'), 'Gemfile.lock'));
@@ -386,9 +471,28 @@ describe('resolveLockfiles', () => {
     expect(map.libc).toMatchObject({ ecosystem: 'crates.io', version: '0.2.150', direct: true });
   });
 
-  it('prefers poetry.lock over requirements.txt in the same directory', async () => {
+  it('prefers poetry.lock over uv.lock, Pipfile.lock, and requirements.txt', async () => {
     const components = await resolveLockfiles(join(FIX, 'poetry'));
     expect(components.every((c) => c.manifestPath.endsWith('poetry.lock'))).toBe(true);
+  });
+
+  it('prefers uv.lock over Pipfile.lock and requirements.txt', async () => {
+    const components = await resolveLockfiles(join(FIX, 'uv'));
+    expect(components.every((c) => c.manifestPath.endsWith('uv.lock'))).toBe(true);
+    expect(components.some((c) => c.name === 'should-not-appear' || c.name === 'flask')).toBe(false);
+  });
+
+  it('prefers Pipfile.lock over requirements.txt', async () => {
+    const components = await resolveLockfiles(join(FIX, 'pipenv'));
+    expect(components.every((c) => c.manifestPath.endsWith('Pipfile.lock'))).toBe(true);
+    expect(components.some((c) => c.name === 'flask')).toBe(false);
+  });
+
+  it('keeps the pip fallback when only requirements.txt exists', async () => {
+    const components = await resolveLockfiles(join(FIX, 'pip'));
+    expect(components.every((c) => c.manifestPath.endsWith('requirements.txt'))).toBe(true);
+    expect(components.map((c) => c.name).sort()).toEqual(['certifi', 'requests']);
+    expect(components.every((c) => c.direct)).toBe(true);
   });
 
   it('keeps the same package from two manifests (monorepo) as separate components', async () => {
@@ -403,6 +507,12 @@ describe('resolveLockfiles', () => {
 
   it('throws when every selected lockfile fails to parse', async () => {
     await expect(resolveLockfiles(join(FIX, 'corrupt'))).rejects.toThrow(LockfileResolutionError);
+  });
+
+  it('fails closed when the only selected Python lock is malformed', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'ctem-bad-pipfile-'));
+    await writeFile(join(root, 'Pipfile.lock'), '{ this is not json');
+    await expect(resolveLockfiles(root)).rejects.toThrow(LockfileResolutionError);
   });
 
   it('caps the directory walk so a huge tree cannot list forever', async () => {
@@ -437,5 +547,26 @@ describe('resolveLockfiles', () => {
         ...dirFiles,
       ]).map((f) => f.fileName),
     ).toEqual(['package-lock.json']);
+    expect(
+      filesToRead(pipfileParser, 'Pipfile.lock', [
+        { absPath: '/r/Pipfile.lock', relPath: 'Pipfile.lock', fileName: 'Pipfile.lock' },
+        { absPath: '/r/Pipfile', relPath: 'Pipfile', fileName: 'Pipfile' },
+        { absPath: '/r/requirements.txt', relPath: 'requirements.txt', fileName: 'requirements.txt' },
+      ]).map((f) => f.fileName),
+    ).toEqual(['Pipfile.lock', 'Pipfile']);
+    expect(
+      filesToRead(uvParser, 'uv.lock', [
+        { absPath: '/r/uv.lock', relPath: 'uv.lock', fileName: 'uv.lock' },
+        { absPath: '/r/pyproject.toml', relPath: 'pyproject.toml', fileName: 'pyproject.toml' },
+      ]).map((f) => f.fileName),
+    ).toEqual(['uv.lock']);
+  });
+
+  it('refuses a lockfile over MAX_LOCKFILE_BYTES', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'ctem-huge-lock-'));
+    const handle = await open(join(root, 'uv.lock'), 'w');
+    await handle.truncate(MAX_LOCKFILE_BYTES + 1);
+    await handle.close();
+    await expect(resolveLockfiles(root)).rejects.toThrow(LockfileResolutionError);
   });
 });
