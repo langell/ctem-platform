@@ -192,6 +192,14 @@ describe('concludeScan remains source of truth for GET and Checks mapping', () =
         }),
       ),
     ).toBe('success');
+    expect(
+      checkConclusionFromScan(
+        concludeScan({
+          ...failBuild,
+          policies: [{ priority: 10, condition: { severityAtLeast: 'high' as const }, actions: ['block_deploy'] }],
+        }),
+      ),
+    ).toBe('success');
     expect(checkConclusionFromScan('pending')).toBeNull();
     expect(buildCheckRunBody(parseGithubChecksContext(githubOptions(), SCAN_ID)!, SCAN_ID, 'failure').conclusion).toBe(
       'failure',
@@ -321,6 +329,22 @@ describe('GithubChecksPublisher', () => {
     expect(body.conclusion).toBe('failure');
     expect(body.head_sha).toBe(SHA);
     expect(body.external_id).toBe(SCAN_ID);
+  });
+
+  it('matching block_deploy does not fail the Check — Checks stay on concludeScan', async () => {
+    process.env.GITHUB_TOKEN = 'ghp_test';
+    const fetchMock = stubFetch();
+    const { prisma } = prismaForScan({
+      scan: scanRow(),
+      findings: [matchingFinding],
+      policies: [
+        { enabled: true, priority: 10, condition: { severityAtLeast: 'high' }, actions: ['block_deploy'] },
+      ],
+    });
+    await new GithubChecksPublisher(prisma as never).publishForCompletedScan(ORG_A, SCAN_ID);
+    const post = fetchMock.mock.calls.find((call) => (call[1] as { method?: string })?.method === 'POST');
+    const body = JSON.parse(String((post![1] as { body: string }).body)) as { conclusion: string };
+    expect(body.conclusion).toBe('success');
   });
 
   it('no matching fail_build → success Check body', async () => {

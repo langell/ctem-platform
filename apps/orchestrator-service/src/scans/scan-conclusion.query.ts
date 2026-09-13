@@ -1,9 +1,17 @@
-import { concludeScan, type PolicyCondition, type ScanConclusion } from '@ctem/contracts';
+import {
+  concludeDeploy,
+  concludeScan,
+  type PolicyCondition,
+  type ScanConclusion,
+  type ScanDeployConclusion,
+} from '@ctem/contracts';
 import type { PrismaTransaction } from '@ctem/db';
 
 /**
- * Shared `concludeScan` loader for CI GET and GitHub Checks. Inputs must stay
- * identical so a Check conclusion cannot drift from `GET /v1/scans/:id`.
+ * Shared loaders for CI GET and GitHub Checks. Inputs must stay identical so
+ * a Check conclusion cannot drift from `GET /v1/scans/:id` `conclusion`.
+ * `deployConclusion` uses the same findings/policies/suppressed set and
+ * `concludeDeploy` — Checks still map `concludeScan` / fail_build only.
  */
 
 export interface ScanConclusionRow {
@@ -12,12 +20,12 @@ export interface ScanConclusionRow {
   jobs?: Array<{ assetId: string; findingCount: number | null }>;
 }
 
-export async function conclusionForScan(
-  tx: PrismaTransaction,
-  scan: ScanConclusionRow,
-): Promise<ScanConclusion> {
-  if (scan.status === 'queued' || scan.status === 'running') return 'pending';
+export interface ScanGates {
+  conclusion: ScanConclusion;
+  deployConclusion: ScanDeployConclusion;
+}
 
+async function loadScanPolicyMatchInput(tx: PrismaTransaction, scan: ScanConclusionRow) {
   const jobs = scan.jobs ?? [];
   const assetIds = [...new Set(jobs.map((job) => job.assetId))];
   const expectedFindingCount = jobs.reduce((n, job) => n + (job.findingCount ?? 0), 0);
@@ -58,7 +66,7 @@ export async function conclusionForScan(
     for (const row of exceptions) suppressedFindingIds.add(row.targetRef);
   }
 
-  return concludeScan({
+  return {
     status: scan.status,
     findings: findings.map((row) => ({
       id: row.id,
@@ -83,7 +91,31 @@ export async function conclusionForScan(
     })),
     suppressedFindingIds,
     expectedFindingCount,
-  });
+  };
+}
+
+/** Both GET gates from one load so they cannot see different findings/policies. */
+export async function scanGatesForScan(
+  tx: PrismaTransaction,
+  scan: ScanConclusionRow,
+): Promise<ScanGates> {
+  if (scan.status === 'queued' || scan.status === 'running') {
+    return { conclusion: 'pending', deployConclusion: 'pending' };
+  }
+  const input = await loadScanPolicyMatchInput(tx, scan);
+  return {
+    conclusion: concludeScan(input),
+    deployConclusion: concludeDeploy(input),
+  };
+}
+
+/** Shared `concludeScan` loader for CI GET and GitHub Checks. */
+export async function conclusionForScan(
+  tx: PrismaTransaction,
+  scan: ScanConclusionRow,
+): Promise<ScanConclusion> {
+  const { conclusion } = await scanGatesForScan(tx, scan);
+  return conclusion;
 }
 
 /** Terminal GET `passed`/`failed` → Checks API conclusion. `pending` is not published. */

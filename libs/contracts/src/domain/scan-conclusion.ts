@@ -1,6 +1,6 @@
 import { SEVERITY_ORDER, type Severity } from '../common';
 import type { PolicyCondition } from './policy';
-import type { ScanConclusion } from './scan';
+import type { ScanConclusion, ScanDeployConclusion } from './scan';
 
 /**
  * CI-facing scan gate, distinct from job `status`.
@@ -8,6 +8,9 @@ import type { ScanConclusion } from './scan';
  * Only a matching tenant `fail_build` policy can produce `failed`. Callers
  * (PAT/JWT) cannot POST or PATCH this field — GET computes it. GitHub Checks
  * reuse this function; they do not take a client conclusion.
+ *
+ * Deploy tooling polls `concludeDeploy` on the same inputs. That gate looks
+ * only for `block_deploy` and never overloads this function.
  */
 
 export interface PolicyMatchFinding {
@@ -68,19 +71,26 @@ export function matchesPolicyCondition(
   return true;
 }
 
-/**
- * First matching enabled policy wins per finding (same as the engine).
- * There is no `clientConclusion` argument — a POST body cannot fail the build.
- */
-export function concludeScan(input: {
+export interface ConcludePolicyInput {
   status: string;
   findings: PolicyMatchFinding[];
   policies: PolicyMatchRule[];
   suppressedFindingIds?: Iterable<string>;
   expectedFindingCount?: number;
-}): ScanConclusion {
-  if (input.status === 'queued' || input.status === 'running') return 'pending';
-  if ((input.expectedFindingCount ?? 0) > 0 && input.findings.length === 0) return 'pending';
+}
+
+/**
+ * Shared matching loop for GET gates. First matching enabled policy wins per
+ * finding (same as the engine). Parameterized by the winning action so
+ * `concludeScan` and `concludeDeploy` cannot drift.
+ */
+function concludeByAction<T extends string>(
+  input: ConcludePolicyInput,
+  action: string,
+  outcomes: { pending: T; matched: T; unmatched: T },
+): T {
+  if (input.status === 'queued' || input.status === 'running') return outcomes.pending;
+  if ((input.expectedFindingCount ?? 0) > 0 && input.findings.length === 0) return outcomes.pending;
 
   const suppressed = new Set(input.suppressedFindingIds ?? []);
   const policies = input.policies
@@ -92,9 +102,35 @@ export function concludeScan(input: {
     if (suppressed.has(finding.id)) continue;
     for (const policy of policies) {
       if (!matchesPolicyCondition(policy.condition, finding)) continue;
-      if (policy.actions.includes('fail_build')) return 'failed';
+      if (policy.actions.includes(action)) return outcomes.matched;
       break;
     }
   }
-  return 'passed';
+  return outcomes.unmatched;
+}
+
+/**
+ * First matching enabled policy wins per finding (same as the engine).
+ * There is no `clientConclusion` argument — a POST body cannot fail the build.
+ * Only inspects `fail_build`. Do not overload this to mean deploy as well.
+ */
+export function concludeScan(input: ConcludePolicyInput): ScanConclusion {
+  return concludeByAction(input, 'fail_build', {
+    pending: 'pending',
+    matched: 'failed',
+    unmatched: 'passed',
+  });
+}
+
+/**
+ * Deploy gate parallel to `concludeScan`. Same pending rules and first-match
+ * priority sort; looks only for `block_deploy`. A matching `fail_build` alone
+ * does not block deploy.
+ */
+export function concludeDeploy(input: ConcludePolicyInput): ScanDeployConclusion {
+  return concludeByAction(input, 'block_deploy', {
+    pending: 'pending',
+    matched: 'blocked',
+    unmatched: 'allowed',
+  });
 }

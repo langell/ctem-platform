@@ -18,7 +18,7 @@ describe('policies human path', () => {
     expect(policies).toMatch(/const \[loading, setLoading\] = useState\(true\)/);
     expect(policies).toMatch(/SkeletonRows/);
     expect(policies).toMatch(/className="empty-title">No rules yet/);
-    expect(policies).toMatch(/Create a rule to notify, ticket, or fail a build\./);
+    expect(policies).toMatch(/Create a rule to notify, ticket, fail a build, or block a deploy\./);
     expect(policies).toMatch(/!loading && items\.length === 0 && !error/);
     expect(policies).not.toMatch(/No policies in this organization/);
     expect(policies).toMatch(
@@ -49,16 +49,24 @@ describe('policies human path', () => {
     expect(form).toMatch(/<option value="notify">Notify \(Slack\)<\/option>/);
     expect(form).toMatch(/<option value="ticket">Ticket \(Jira\)<\/option>/);
     expect(form).toMatch(/<option value="fail_build">Fail build \(CI GET\)<\/option>/);
+    expect(form).toMatch(/<option value="block_deploy">Block deploy \(GET\)<\/option>/);
     expect(form).toMatch(/<option value="notify,ticket">Notify and ticket<\/option>/);
     expect(form).toMatch(/<option value="notify,fail_build">Notify and fail build<\/option>/);
+    expect(form).toMatch(/<option value="notify,block_deploy">Notify and block deploy<\/option>/);
     expect(form).toMatch(/<option value="ticket,fail_build">Ticket and fail build<\/option>/);
+    expect(form).toMatch(/<option value="ticket,block_deploy">Ticket and block deploy<\/option>/);
+    expect(form).toMatch(
+      /<option value="fail_build,block_deploy">Fail build and block deploy<\/option>/,
+    );
     expect(form).toMatch(
       /<option value="notify,ticket,fail_build">Notify, ticket, and fail build<\/option>/,
     );
-    expect(form).not.toMatch(/<option value="block_deploy"/);
+    expect(form).toMatch(
+      /<option value="notify,ticket,fail_build,block_deploy">/,
+    );
     expect(form).not.toMatch(/minEpss/);
     expect(form).not.toMatch(/requireFixAvailable/);
-    expect(form).toMatch(/block-deploy and tenant webhook\/Jira URLs are out of this slice/);
+    expect(form).toMatch(/deploy tooling reads deployConclusion/);
   });
 
   it('humanizes the action column and marks the editing row', () => {

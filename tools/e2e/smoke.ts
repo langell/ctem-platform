@@ -518,7 +518,7 @@ async function main(): Promise<void> {
       expect(write.status === 404, `expected 404 on update, got ${write.status}`);
     });
 
-    await step('editor accepts ticket and fail-build; refuses block-deploy plus a tenant webhook URL', async () => {
+    await step('editor accepts ticket, fail-build, and block-deploy; refuses a tenant webhook URL', async () => {
       const ticket = await api(GATEWAY, 'POST', '/v1/policies', {
         token: patA,
         body: {
@@ -536,17 +536,17 @@ async function main(): Promise<void> {
         body: {
           name: 'smoke-fail-build',
           condition: {},
-          actions: ['fail_build'],
+          actions: ['fail_build', 'block_deploy'],
           priority: 1,
         },
       });
       expect(
         failBuild.status < 300,
-        `expected fail_build create, got ${failBuild.status} ${JSON.stringify(failBuild.json)}`,
+        `expected fail_build+block_deploy create, got ${failBuild.status} ${JSON.stringify(failBuild.json)}`,
       );
       expect(
-        failBuild.json?.actions?.join(',') === 'fail_build',
-        `expected fail_build actions, got ${JSON.stringify(failBuild.json)}`,
+        failBuild.json?.actions?.join(',') === 'fail_build,block_deploy',
+        `expected fail_build+block_deploy actions, got ${JSON.stringify(failBuild.json)}`,
       );
 
       const blockDeploy = await api(GATEWAY, 'POST', '/v1/policies', {
@@ -558,7 +558,14 @@ async function main(): Promise<void> {
           priority: 2,
         },
       });
-      expect(blockDeploy.status === 400, `expected 400 for block_deploy, got ${blockDeploy.status}`);
+      expect(
+        blockDeploy.status < 300,
+        `expected block_deploy create, got ${blockDeploy.status} ${JSON.stringify(blockDeploy.json)}`,
+      );
+      expect(
+        blockDeploy.json?.actions?.join(',') === 'block_deploy',
+        `expected block_deploy actions, got ${JSON.stringify(blockDeploy.json)}`,
+      );
 
       const webhook = await api(GATEWAY, 'POST', '/v1/policies', {
         token: patA,
@@ -593,6 +600,10 @@ async function main(): Promise<void> {
         res.json?.conclusion === 'failed',
         `expected conclusion failed from fail_build, got ${JSON.stringify(res.json)}`,
       );
+      expect(
+        res.json?.deployConclusion === 'blocked',
+        `expected deployConclusion blocked from block_deploy, got ${JSON.stringify(res.json)}`,
+      );
     });
 
     await step('a valid PAT cannot POST a failed conclusion without a matching fail_build rule', async () => {
@@ -612,6 +623,15 @@ async function main(): Promise<void> {
       expect(
         nested.status === 400,
         `expected 400 when posting options.conclusion, got ${nested.status} ${JSON.stringify(nested.json)}`,
+      );
+
+      const deployForced = await api(GATEWAY, 'POST', '/v1/scans', {
+        token: patA,
+        body: { scannerType: 'sca', deployConclusion: 'blocked' },
+      });
+      expect(
+        deployForced.status === 400,
+        `expected 400 when posting deployConclusion, got ${deployForced.status} ${JSON.stringify(deployForced.json)}`,
       );
     });
 

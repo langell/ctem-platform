@@ -56,7 +56,11 @@ describe('ScansController.get', () => {
     const { prisma } = prismaForGet({ scan });
     const ctrl = new ScansController({} as never, prisma as never, {} as never);
 
-    await expect(ctrl.get(ORG_A, SCAN_A)).resolves.toEqual({ ...scan, conclusion: 'passed' });
+    await expect(ctrl.get(ORG_A, SCAN_A)).resolves.toEqual({
+      ...scan,
+      conclusion: 'passed',
+      deployConclusion: 'allowed',
+    });
   });
 
   it('returns conclusion failed when a matching fail_build rule wins', async () => {
@@ -84,6 +88,92 @@ describe('ScansController.get', () => {
     await expect(ctrl.get(ORG_A, SCAN_A)).resolves.toMatchObject({
       id: SCAN_A,
       conclusion: 'failed',
+      deployConclusion: 'allowed',
+    });
+  });
+
+  it('returns deployConclusion blocked when a matching block_deploy rule wins — conclusion stays passed', async () => {
+    const scan = {
+      id: SCAN_A,
+      orgId: ORG_A,
+      status: 'succeeded',
+      scannerType: 'sca',
+      jobs: [{ assetId: ASSET_A, findingCount: 1 }],
+    };
+    const { prisma } = prismaForGet({
+      scan,
+      findings: [matchingFinding],
+      policies: [
+        {
+          enabled: true,
+          priority: 10,
+          condition: { severityAtLeast: 'high' },
+          actions: ['block_deploy'],
+        },
+      ],
+    });
+    const ctrl = new ScansController({} as never, prisma as never, {} as never);
+
+    await expect(ctrl.get(ORG_A, SCAN_A)).resolves.toMatchObject({
+      id: SCAN_A,
+      conclusion: 'passed',
+      deployConclusion: 'blocked',
+    });
+  });
+
+  it('computes both gates from a combined fail_build + block_deploy policy', async () => {
+    const scan = {
+      id: SCAN_A,
+      orgId: ORG_A,
+      status: 'succeeded',
+      scannerType: 'sca',
+      jobs: [{ assetId: ASSET_A, findingCount: 1 }],
+    };
+    const { prisma } = prismaForGet({
+      scan,
+      findings: [matchingFinding],
+      policies: [
+        {
+          enabled: true,
+          priority: 10,
+          condition: { severityAtLeast: 'high' },
+          actions: ['fail_build', 'block_deploy'],
+        },
+      ],
+    });
+    const ctrl = new ScansController({} as never, prisma as never, {} as never);
+
+    await expect(ctrl.get(ORG_A, SCAN_A)).resolves.toMatchObject({
+      conclusion: 'failed',
+      deployConclusion: 'blocked',
+    });
+  });
+
+  it('returns both gates pending while the scan is running', async () => {
+    const scan = {
+      id: SCAN_A,
+      orgId: ORG_A,
+      status: 'running',
+      scannerType: 'sca',
+      jobs: [{ assetId: ASSET_A, findingCount: 1 }],
+    };
+    const { prisma } = prismaForGet({
+      scan,
+      findings: [matchingFinding],
+      policies: [
+        {
+          enabled: true,
+          priority: 10,
+          condition: {},
+          actions: ['fail_build', 'block_deploy'],
+        },
+      ],
+    });
+    const ctrl = new ScansController({} as never, prisma as never, {} as never);
+
+    await expect(ctrl.get(ORG_A, SCAN_A)).resolves.toMatchObject({
+      conclusion: 'pending',
+      deployConclusion: 'pending',
     });
   });
 
@@ -103,7 +193,32 @@ describe('ScansController.get', () => {
     });
     const ctrl = new ScansController({} as never, prisma as never, {} as never);
 
-    await expect(ctrl.get(ORG_A, SCAN_A)).resolves.toMatchObject({ conclusion: 'passed' });
+    await expect(ctrl.get(ORG_A, SCAN_A)).resolves.toMatchObject({
+      conclusion: 'passed',
+      deployConclusion: 'allowed',
+    });
+  });
+
+  it('does not block deploy from a client-supplied deployConclusion field', async () => {
+    const scan = {
+      id: SCAN_A,
+      orgId: ORG_A,
+      status: 'succeeded',
+      scannerType: 'sca',
+      deployConclusion: 'blocked',
+      jobs: [{ assetId: ASSET_A, findingCount: 1 }],
+    };
+    const { prisma } = prismaForGet({
+      scan,
+      findings: [matchingFinding],
+      policies: [{ enabled: true, priority: 10, condition: { kevOnly: true }, actions: ['notify'] }],
+    });
+    const ctrl = new ScansController({} as never, prisma as never, {} as never);
+
+    await expect(ctrl.get(ORG_A, SCAN_A)).resolves.toMatchObject({
+      conclusion: 'passed',
+      deployConclusion: 'allowed',
+    });
   });
 });
 
@@ -117,5 +232,15 @@ describe('ScansController.create refuses a client conclusion', () => {
       pipe.transform({ scannerType: 'sca', options: { conclusion: 'failed' } }),
     ).toThrow(BadRequestException);
     expect(pipe.transform({ scannerType: 'sca' })).toMatchObject({ scannerType: 'sca' });
+  });
+
+  it('ZodBody 400s a POST that tries to set deployConclusion', () => {
+    const pipe = new ZodBody(CreateScanRequest);
+    expect(() => pipe.transform({ scannerType: 'sca', deployConclusion: 'blocked' })).toThrow(
+      BadRequestException,
+    );
+    expect(() =>
+      pipe.transform({ scannerType: 'sca', options: { deployConclusion: 'blocked' } }),
+    ).toThrow(BadRequestException);
   });
 });

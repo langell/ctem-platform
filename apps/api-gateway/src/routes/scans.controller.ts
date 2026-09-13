@@ -5,10 +5,12 @@ import type { CreateScanRequest, IngestSbomRequest } from '@ctem/contracts';
 import { ServiceProxy } from '../proxy/service-proxy';
 
 /**
- * CI polls GET /v1/scans/:id with a PAT. Conclusion is computed upstream from
- * matching fail_build rules — this proxy has no POST/PATCH for it and does not
- * call GitHub Checks (orchestrator publishes Checks on scanCompleted, additive).
- * Org comes from the token. CORS and unknown query forwarding stay comments.
+ * CI and deploy tooling poll GET /v1/scans/:id with a PAT. `conclusion` is
+ * computed upstream from matching fail_build rules; `deployConclusion` from
+ * matching block_deploy. This proxy has no POST/PATCH for either and does not
+ * call GitHub Checks (orchestrator publishes Checks on scanCompleted from
+ * concludeScan only, additive). Org comes from the token. CORS and unknown
+ * query forwarding stay comments.
  */
 @ApiTags('scans')
 @ApiBearerAuth()

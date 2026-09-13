@@ -155,7 +155,10 @@ describe('ScanDispatcherService credentialRef wiring', () => {
     await dispatcher.createScan(orgId, null, { scannerType: 'sca', assetSelector: {}, options: {} });
 
     expect(tx.scan.create).toHaveBeenCalledWith({
-      data: expect.not.objectContaining({ conclusion: expect.anything() }),
+      data: expect.not.objectContaining({
+        conclusion: expect.anything(),
+        deployConclusion: expect.anything(),
+      }),
     });
     expect(published).toHaveLength(1);
     expect(published[0].subject).toBe(SUBJECTS.scanJobDispatched);
