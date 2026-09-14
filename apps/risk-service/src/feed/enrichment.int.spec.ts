@@ -18,6 +18,7 @@ describe('EnrichmentService (integration)', () => {
   let service: EnrichmentService;
   let orgId: string;
   let findingId: string;
+  let reachableFindingId: string;
   const published: Array<{ subject: string; orgId: string; payload: unknown }> = [];
 
   beforeAll(async () => {
@@ -36,6 +37,17 @@ describe('EnrichmentService (integration)', () => {
       await createFinding(owner, orgId, asset.id, {
         title: `enrichment target ${cve}`,
         identifiers: [{ system: 'GHSA', value: vulnId }, { system: 'alias', value: cve }],
+        epssScore: null,
+        kev: false,
+      })
+    ).id;
+    reachableFindingId = (
+      await createFinding(owner, orgId, asset.id, {
+        title: `reachable enrichment target ${cve}`,
+        scannerType: 'sca',
+        identifiers: [{ system: 'CVE', value: cve }],
+        evidence: { reachability: 'reachable' },
+        validation: 'reachable',
         epssScore: null,
         kev: false,
       })
@@ -82,7 +94,10 @@ describe('EnrichmentService (integration)', () => {
     expect(vuln!.kevDueDate?.toISOString().slice(0, 10)).toBe('2099-01-15');
 
     const finding = await owner.finding.findUnique({ where: { id: findingId } });
-    expect(finding).toMatchObject({ kev: true, epssScore: 0.911 });
+    expect(finding).toMatchObject({ kev: true, epssScore: 0.911, validation: 'not_validated' });
+
+    const reachable = await owner.finding.findUnique({ where: { id: reachableFindingId } });
+    expect(reachable).toMatchObject({ kev: true, epssScore: 0.911, validation: 'exploitable' });
 
     const rescore = published.find(
       (e) => e.subject === 'ctem.risk.rescore_requested' && e.orgId === orgId,

@@ -305,3 +305,32 @@ describe('FindingNormalizer.collapseScan', () => {
     expect(purls).toEqual(['pkg:npm/lodash@4.17.21', 'pkg:npm/qs@6.5.2']);
   });
 });
+
+describe('FindingNormalizer.promoteValidation', () => {
+  it('reachable + KEV → exploitable', () => {
+    expect(normalizer.promoteValidation('sca', { reachability: 'reachable' }, true)).toBe('exploitable');
+  });
+
+  it('reachable alone → reachable', () => {
+    expect(normalizer.promoteValidation('sca', { reachability: 'reachable' }, false)).toBe('reachable');
+  });
+
+  it('not_reachable → not_reachable', () => {
+    expect(normalizer.promoteValidation('sca', { reachability: 'not_reachable' }, true)).toBe(
+      'not_reachable',
+    );
+  });
+
+  it('unknown / missing → undefined (leave prior / default not_validated)', () => {
+    expect(normalizer.promoteValidation('sca', { reachability: 'unknown' }, true)).toBeUndefined();
+    expect(normalizer.promoteValidation('sca', {}, false)).toBeUndefined();
+  });
+
+  it('non-SCA is unchanged even when evidence says reachable', () => {
+    expect(normalizer.promoteValidation('sast', { reachability: 'reachable' }, true)).toBeUndefined();
+    expect(normalizer.promoteValidation('asm', { reachability: 'reachable' }, false)).toBeUndefined();
+    expect(normalizer.promoteValidation('cloud_posture', { reachability: 'unknown' }, false)).toBeUndefined();
+    expect(normalizer.promoteValidation('container', { reachability: 'unknown' }, false)).toBeUndefined();
+    expect(normalizer.promoteValidation('iac', { reachability: 'unknown' }, false)).toBeUndefined();
+  });
+});

@@ -31,6 +31,10 @@ export class FindingsService {
 
     for (const { fingerprint, finding: raw, location, evidence } of collapsed) {
       const severity = this.normalizer.reconcileSeverity(raw);
+      // Only a known SCA reachability verdict is written. Missing/unknown/non-SCA
+      // omit the column so create keeps not_validated and update does not flap.
+      const validation = this.normalizer.promoteValidation(raw.scannerType, evidence, raw.kev);
+      const validationWrite = validation ? { validation } : {};
 
       const { finding, created } = await this.prisma.withOrg(orgId, async (tx) => {
         const existing = await tx.finding.findUnique({
@@ -61,6 +65,7 @@ export class FindingsService {
             artifactKey: payload.artifactKey,
             firstSeenAt: seenAt,
             lastSeenAt: seenAt,
+            ...validationWrite,
           },
           update: {
             // A re-reported finding refreshes evidence/location but never resets triage.
@@ -74,6 +79,7 @@ export class FindingsService {
             location: location as object,
             evidence: evidence as object,
             artifactKey: payload.artifactKey,
+            ...validationWrite,
             ...(existing?.state === 'resolved'
               ? { state: 'open', resolvedAt: null } // regression
               : {}),

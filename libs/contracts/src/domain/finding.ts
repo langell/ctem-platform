@@ -70,6 +70,40 @@ export const ValidationVerdict = z.enum([
 ]);
 export type ValidationVerdict = z.infer<typeof ValidationVerdict>;
 
+/**
+ * Phase-1 SCA promotion. Findings-service ingest is the writer (SoT); the
+ * scanner only records `evidence.reachability` as a string. Enrichment
+ * re-applies this when KEV flips without a re-scan.
+ *
+ * | reachability     | kev   | result          |
+ * | reachable        | true  | exploitable     |
+ * | reachable        | false | reachable       |
+ * | not_reachable    | *     | not_reachable   |
+ * | missing/unknown  | *     | undefined       |
+ * | non-SCA          | *     | undefined       |
+ *
+ * `undefined` means leave prior / default `not_validated` — do not invent.
+ * This slice never returns `not_exploitable` or `compensating_control`.
+ */
+export function promoteScaValidation(input: {
+  scannerType: string;
+  evidence: unknown;
+  kev: boolean;
+}): ValidationVerdict | undefined {
+  if (input.scannerType !== 'sca') return undefined;
+  const reachability = readEvidenceReachability(input.evidence);
+  if (reachability === 'reachable') return input.kev === true ? 'exploitable' : 'reachable';
+  if (reachability === 'not_reachable') return 'not_reachable';
+  return undefined;
+}
+
+/** Fail-closed: only a string `evidence.reachability` counts. RawFinding stays untyped. */
+export function readEvidenceReachability(evidence: unknown): string | undefined {
+  if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return undefined;
+  const value = (evidence as Record<string, unknown>).reachability;
+  return typeof value === 'string' ? value : undefined;
+}
+
 export const Finding = z
   .object({
     id: z.string().uuid(),

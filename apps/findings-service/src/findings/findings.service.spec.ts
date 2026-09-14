@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { NotFoundException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import type { EventBus } from '@ctem/events';
-import type { FindingsReportedPayload, RawFinding } from '@ctem/contracts';
+import { SUBJECTS, type FindingsReportedPayload, type RawFinding } from '@ctem/contracts';
 import { FindingNormalizer } from './finding-normalizer';
 import { FindingsService } from './findings.service';
 
@@ -44,16 +44,42 @@ function payload(findings: RawFinding[]): FindingsReportedPayload {
 function service() {
   const upserts: Array<{
     where: { orgId_fingerprint: { fingerprint: string } };
-    create: { location: Record<string, unknown>; evidence: Record<string, unknown>; fingerprint: string };
-    update: { location: Record<string, unknown>; evidence: Record<string, unknown> };
+    create: {
+      location: Record<string, unknown>;
+      evidence: Record<string, unknown>;
+      fingerprint: string;
+      validation?: string;
+      kev?: boolean;
+    };
+    update: {
+      location: Record<string, unknown>;
+      evidence: Record<string, unknown>;
+      validation?: string;
+      kev?: boolean;
+    };
   }> = [];
+
+  const byFingerprint = new Map<string, Record<string, unknown>>();
 
   const tx = {
     finding: {
-      findUnique: vi.fn(async () => null),
+      findUnique: vi.fn(
+        async (args: { where: { id?: string; orgId_fingerprint?: { fingerprint: string } } }) => {
+          if (args.where.orgId_fingerprint) {
+            return byFingerprint.get(args.where.orgId_fingerprint.fingerprint) ?? null;
+          }
+          return null;
+        },
+      ),
       upsert: vi.fn(async (args: (typeof upserts)[number]) => {
         upserts.push(args);
-        return { id: randomUUID(), ...args.create };
+        const fp = args.where.orgId_fingerprint.fingerprint;
+        const existing = byFingerprint.get(fp);
+        const row = existing
+          ? { ...existing, ...args.update }
+          : { id: randomUUID(), validation: 'not_validated', ...args.create };
+        byFingerprint.set(fp, row);
+        return row;
       }),
       updateMany: vi.fn(async () => ({ count: 0 })),
     },
@@ -65,7 +91,7 @@ function service() {
 
   const bus = { publish: vi.fn(async () => undefined) } as unknown as EventBus;
   const findings = new FindingsService(prisma as never, bus, new FindingNormalizer());
-  return { findings, upserts, tx };
+  return { findings, upserts, tx, bus, byFingerprint };
 }
 
 describe('FindingsService.ingest persist', () => {
@@ -144,5 +170,111 @@ describe('FindingsService.get', () => {
       where: { id: FINDING_A },
       include: { events: true, asset: true },
     });
+  });
+});
+
+describe('FindingsService.ingest validation promotion', () => {
+  const orgId = randomUUID();
+
+  it('reachable + KEV → exploitable', async () => {
+    const { findings, upserts } = service();
+    await findings.ingest(
+      orgId,
+      payload([raw({ kev: true, evidence: { reachability: 'reachable' } })]),
+    );
+    expect(upserts[0].create.validation).toBe('exploitable');
+    expect(upserts[0].update.validation).toBe('exploitable');
+  });
+
+  it('reachable alone → reachable', async () => {
+    const { findings, upserts } = service();
+    await findings.ingest(orgId, payload([raw({ evidence: { reachability: 'reachable' } })]));
+    expect(upserts[0].create.validation).toBe('reachable');
+  });
+
+  it('not_reachable → not_reachable', async () => {
+    const { findings, upserts } = service();
+    await findings.ingest(orgId, payload([raw({ kev: true, evidence: { reachability: 'not_reachable' } })]));
+    expect(upserts[0].create.validation).toBe('not_reachable');
+  });
+
+  it('unknown → not_validated (does not write a verdict)', async () => {
+    const { findings, upserts, byFingerprint } = service();
+    await findings.ingest(orgId, payload([raw({ kev: true, evidence: { reachability: 'unknown' } })]));
+    expect(upserts[0].create.validation).toBeUndefined();
+    expect([...byFingerprint.values()][0]?.validation).toBe('not_validated');
+  });
+
+  it('non-SCA findings stay not_validated even with reachable evidence', async () => {
+    const { findings, upserts } = service();
+    for (const scannerType of ['sast', 'asm', 'cloud_posture', 'container', 'iac'] as const) {
+      upserts.length = 0;
+      await findings.ingest(
+        orgId,
+        payload([
+          raw({
+            scannerType,
+            scannerName: `ctem-${scannerType}`,
+            evidence: { reachability: 'reachable' },
+            kev: true,
+          }),
+        ]),
+      );
+      expect(upserts[0].create.validation, scannerType).toBeUndefined();
+    }
+  });
+
+  it('re-ingest with the same reachability does not flap', async () => {
+    const { findings, upserts, byFingerprint } = service();
+    const batch = payload([raw({ evidence: { reachability: 'reachable' } })]);
+    await findings.ingest(orgId, batch);
+    await findings.ingest(orgId, batch);
+    expect(upserts).toHaveLength(2);
+    expect(upserts[0].create.validation).toBe('reachable');
+    expect(upserts[1].update.validation).toBe('reachable');
+    expect([...byFingerprint.values()][0]?.validation).toBe('reachable');
+  });
+
+  it('KEV flip on re-ingest re-evaluates reachable → exploitable', async () => {
+    const { findings, upserts } = service();
+    const assetId = randomUUID();
+    const scan = (kev: boolean): FindingsReportedPayload => ({
+      scanId: randomUUID(),
+      jobId: randomUUID(),
+      assetId,
+      scannerType: 'sca',
+      artifactKey: null,
+      findings: [raw({ kev, evidence: { reachability: 'reachable' } })],
+    });
+    await findings.ingest(orgId, scan(false));
+    await findings.ingest(orgId, scan(true));
+    expect(upserts[0].create.validation).toBe('reachable');
+    expect(upserts[1].update.validation).toBe('exploitable');
+    expect(upserts[1].update.kev).toBe(true);
+  });
+
+  it('unknown re-ingest leaves a prior reachable verdict', async () => {
+    const { findings, upserts, byFingerprint } = service();
+    const assetId = randomUUID();
+    const scan = (reachability: string): FindingsReportedPayload => ({
+      scanId: randomUUID(),
+      jobId: randomUUID(),
+      assetId,
+      scannerType: 'sca',
+      artifactKey: null,
+      findings: [raw({ evidence: { reachability } })],
+    });
+    await findings.ingest(orgId, scan('reachable'));
+    await findings.ingest(orgId, scan('unknown'));
+    expect(upserts[1].update.validation).toBeUndefined();
+    expect([...byFingerprint.values()][0]?.validation).toBe('reachable');
+  });
+
+  it('still requests a risk rescore after validation is written', async () => {
+    const { findings, bus } = service();
+    await findings.ingest(orgId, payload([raw({ kev: true, evidence: { reachability: 'reachable' } })]));
+    const published = vi.mocked(bus.publish).mock.calls.map((c) => c[0]);
+    expect(published).toContain(SUBJECTS.findingCreated);
+    expect(published).toContain(SUBJECTS.riskRescoreRequested);
   });
 });

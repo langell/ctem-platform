@@ -102,6 +102,7 @@ export class ScaScanner extends BaseScanner {
           evidence: {
             direct: component.direct,
             dependencyPath: component.dependencyPath,
+            // Findings-service ingest owns Finding.validation promotion from this string.
             reachability,
           },
           raw: {},

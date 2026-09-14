@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
-import type { RawFinding } from '@ctem/contracts';
+import { promoteScaValidation, type RawFinding, type ValidationVerdict } from '@ctem/contracts';
 
 /** Persist shape after same-identity hits in one scan have been unioned. */
 export type CollapsedFinding = {
@@ -118,6 +118,18 @@ export class FindingNormalizer {
     }
 
     return [...byFingerprint.values()];
+  }
+
+  /**
+   * SCA reachability → Finding.validation. Unknown / missing / non-SCA returns
+   * undefined so ingest leaves prior (or the not_validated default on create).
+   */
+  promoteValidation(
+    scannerType: RawFinding['scannerType'],
+    evidence: Record<string, unknown>,
+    kev: boolean,
+  ): ValidationVerdict | undefined {
+    return promoteScaValidation({ scannerType, evidence, kev });
   }
 
   /**

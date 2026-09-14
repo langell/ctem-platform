@@ -18,6 +18,7 @@ import {
   findClientConclusionKeys,
   findTenantWebhookKeys,
   matchesPolicyCondition,
+  promoteScaValidation,
 } from './index';
 
 describe('event catalog', () => {
@@ -413,5 +414,100 @@ describe('client cannot write scan conclusion', () => {
     expect(Scan.parse({ ...base, deployConclusion: 'allowed' }).deployConclusion).toBe('allowed');
     expect(Scan.parse({ ...base, deployConclusion: 'pending' }).deployConclusion).toBe('pending');
     expect(() => Scan.parse({ ...base, deployConclusion: 'failed' })).toThrow();
+  });
+});
+
+describe('promoteScaValidation', () => {
+  it.each([
+    {
+      name: 'reachable + KEV → exploitable',
+      scannerType: 'sca',
+      evidence: { reachability: 'reachable' },
+      kev: true,
+      expected: 'exploitable',
+    },
+    {
+      name: 'reachable alone → reachable',
+      scannerType: 'sca',
+      evidence: { reachability: 'reachable' },
+      kev: false,
+      expected: 'reachable',
+    },
+    {
+      name: 'not_reachable → not_reachable (KEV does not override)',
+      scannerType: 'sca',
+      evidence: { reachability: 'not_reachable' },
+      kev: true,
+      expected: 'not_reachable',
+    },
+    {
+      name: 'unknown → leave prior / default',
+      scannerType: 'sca',
+      evidence: { reachability: 'unknown' },
+      kev: true,
+      expected: undefined,
+    },
+    {
+      name: 'missing reachability → leave prior / default',
+      scannerType: 'sca',
+      evidence: {},
+      kev: true,
+      expected: undefined,
+    },
+    {
+      name: 'non-string reachability → leave prior / default',
+      scannerType: 'sca',
+      evidence: { reachability: true },
+      kev: true,
+      expected: undefined,
+    },
+    {
+      name: 'SAST reachable does not promote',
+      scannerType: 'sast',
+      evidence: { reachability: 'reachable' },
+      kev: true,
+      expected: undefined,
+    },
+    {
+      name: 'ASM reachable does not promote',
+      scannerType: 'asm',
+      evidence: { reachability: 'reachable' },
+      kev: false,
+      expected: undefined,
+    },
+    {
+      name: 'CSPM unknown does not promote',
+      scannerType: 'cloud_posture',
+      evidence: { reachability: 'unknown' },
+      kev: false,
+      expected: undefined,
+    },
+    {
+      name: 'container unknown does not promote',
+      scannerType: 'container',
+      evidence: { reachability: 'unknown' },
+      kev: false,
+      expected: undefined,
+    },
+    {
+      name: 'IaC unknown does not promote',
+      scannerType: 'iac',
+      evidence: { reachability: 'unknown' },
+      kev: false,
+      expected: undefined,
+    },
+  ] as const)('$name', ({ scannerType, evidence, kev, expected }) => {
+    expect(promoteScaValidation({ scannerType, evidence, kev })).toBe(expected);
+  });
+
+  it('never returns not_exploitable or compensating_control', () => {
+    const verdicts = [
+      promoteScaValidation({ scannerType: 'sca', evidence: { reachability: 'reachable' }, kev: true }),
+      promoteScaValidation({ scannerType: 'sca', evidence: { reachability: 'reachable' }, kev: false }),
+      promoteScaValidation({ scannerType: 'sca', evidence: { reachability: 'not_reachable' }, kev: false }),
+      promoteScaValidation({ scannerType: 'sca', evidence: { reachability: 'unknown' }, kev: false }),
+    ];
+    expect(verdicts).not.toContain('not_exploitable');
+    expect(verdicts).not.toContain('compensating_control');
   });
 });

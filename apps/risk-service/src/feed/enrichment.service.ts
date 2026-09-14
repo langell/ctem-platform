@@ -4,7 +4,12 @@ import { rootLogger } from '@ctem/observability';
 import { EventBus } from '@ctem/events';
 import { SUBJECTS } from '@ctem/contracts';
 import { FeedStore } from './feed.store';
-import { computeEpssUpdates, computeKevUpdates, type KevEntry } from './enrichment.logic';
+import {
+  computeEpssUpdates,
+  computeKevUpdates,
+  findingIntelPatch,
+  type KevEntry,
+} from './enrichment.logic';
 import { fetchEpssPaged } from './epss.client';
 
 const SIX_HOURS_MS = 6 * 3_600_000;
@@ -155,17 +160,27 @@ export class EnrichmentService implements OnApplicationBootstrap, OnModuleDestro
           state: { in: ['open', 'triaged', 'in_progress'] },
           identifiers: { array_contains: [{ value: cve }] },
         },
-        select: { id: true, orgId: true },
+        select: { id: true, orgId: true, scannerType: true, evidence: true },
       });
       if (!findings.length) continue;
 
-      await this.store.finding.updateMany({
-        where: { id: { in: findings.map((f) => f.id) } },
-        data: patch,
-      });
+      // Group by resulting patch so reachable+KEV can promote to exploitable
+      // without a second scorer, while EPSS-only rows stay a single updateMany.
+      const groups = new Map<string, { ids: string[]; data: ReturnType<typeof findingIntelPatch> }>();
       for (const f of findings) {
+        const data = findingIntelPatch({ scannerType: f.scannerType, evidence: f.evidence }, patch);
+        const key = JSON.stringify(data);
+        const group = groups.get(key) ?? { ids: [], data };
+        group.ids.push(f.id);
+        groups.set(key, group);
         if (!touched.has(f.orgId)) touched.set(f.orgId, new Set());
         touched.get(f.orgId)!.add(f.id);
+      }
+      for (const { ids, data } of groups.values()) {
+        await this.store.finding.updateMany({
+          where: { id: { in: ids } },
+          data,
+        });
       }
     }
 
