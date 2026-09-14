@@ -25,6 +25,9 @@ function engine(row: ReturnType<typeof finding>, policies: object[] = []) {
   const tx = {
     finding: {
       findUniqueOrThrow: vi.fn(async () => row),
+      findUnique: vi.fn(async () => ({
+        slaDueAt: (row as { slaDueAt?: Date | null }).slaDueAt ?? null,
+      })),
       update: vi.fn(),
     },
     policy: { findMany: vi.fn(async () => policies) },
@@ -42,6 +45,7 @@ function engine(row: ReturnType<typeof finding>, policies: object[] = []) {
     service: new PolicyEngineService(prisma as never, bus as never),
     published,
     bus,
+    tx,
   };
 }
 
@@ -108,5 +112,34 @@ describe('PolicyEngineService seed KEV-or-critical rule', () => {
       policyId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
       actions: ['fail_build'],
     });
+  });
+});
+
+describe('PolicyEngineService SLA due reset', () => {
+  const slaPolicy = {
+    id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+    condition: { kevOnly: true },
+    actions: ['notify'],
+    slaHours: 24,
+  };
+
+  it('does not clear slaNotifiedAt on the first slaDueAt assignment', async () => {
+    const { service, tx } = engine(finding({ kev: true, slaDueAt: null }), [slaPolicy]);
+    await service.evaluate(orgId, findingId);
+    const data = vi.mocked(tx.finding.update).mock.calls[0]?.[0]?.data as Record<string, unknown>;
+    expect(data).toEqual(expect.objectContaining({ slaDueAt: expect.any(Date) }));
+    expect(data).not.toHaveProperty('slaNotifiedAt');
+  });
+
+  it('clears slaNotifiedAt when slaDueAt is pushed later than the prior due', async () => {
+    const prior = new Date('2026-01-01T00:00:00.000Z');
+    const { service, tx } = engine(finding({ kev: true, slaDueAt: prior }), [slaPolicy]);
+    await service.evaluate(orgId, findingId);
+    const data = vi.mocked(tx.finding.update).mock.calls[0]?.[0]?.data as {
+      slaDueAt: Date;
+      slaNotifiedAt?: null;
+    };
+    expect(data.slaNotifiedAt).toBeNull();
+    expect(data.slaDueAt.getTime()).toBeGreaterThan(prior.getTime());
   });
 });

@@ -81,7 +81,7 @@ export class FindingsService {
             artifactKey: payload.artifactKey,
             ...validationWrite,
             ...(existing?.state === 'resolved'
-              ? { state: 'open', resolvedAt: null } // regression
+              ? { state: 'open', resolvedAt: null, slaNotifiedAt: null } // regression; new SLA window may alert
               : {}),
           },
         });
@@ -103,7 +103,7 @@ export class FindingsService {
           state: { in: ['open', 'triaged', 'in_progress'] },
           fingerprint: { notIn: fingerprints },
         },
-        data: { state: 'resolved', resolvedAt: seenAt },
+        data: { state: 'resolved', resolvedAt: seenAt, slaNotifiedAt: null },
       }),
     );
 
@@ -137,7 +137,10 @@ export class FindingsService {
 
       const hasMore = items.length > query.limit;
       const page = hasMore ? items.slice(0, query.limit) : items;
-      return { items: page, nextCursor: hasMore ? (page.at(-1)?.id ?? null) : null };
+      return {
+        items: page.map(omitSlaClaim),
+        nextCursor: hasMore ? (page.at(-1)?.id ?? null) : null,
+      };
     });
   }
 
@@ -148,7 +151,7 @@ export class FindingsService {
     // RLS fail-closed looks the same as a missing row. Never 500 — that is how
     // a cross-tenant GET /v1/findings/:id would leak that the id exists (P2025).
     if (!finding) throw new NotFoundException(`Finding ${id} not found`);
-    return finding;
+    return omitSlaClaim(finding);
   }
 
   /** State changes are events, not just column writes — auditors need the trail. */
@@ -160,6 +163,7 @@ export class FindingsService {
         data: {
           state: request.state,
           resolvedAt: request.state === 'resolved' ? new Date() : null,
+          ...(request.state === 'resolved' ? { slaNotifiedAt: null } : {}),
         },
       });
       await tx.findingEvent.create({
@@ -183,14 +187,20 @@ export class FindingsService {
       to: updated.state,
       actor,
     });
-    return updated;
+    return omitSlaClaim(updated);
   }
 
   private toContract(row: Record<string, unknown>) {
     return {
-      ...row,
+      ...omitSlaClaim(row),
       identifiers: row.identifiers ?? [],
       location: row.location ?? {},
     };
   }
+}
+
+/** slaNotifiedAt is an internal notify-once claim — not on public Finding GET. */
+function omitSlaClaim<T extends { slaNotifiedAt?: unknown }>(row: T): Omit<T, 'slaNotifiedAt'> {
+  const { slaNotifiedAt: _slaNotifiedAt, ...rest } = row;
+  return rest;
 }
