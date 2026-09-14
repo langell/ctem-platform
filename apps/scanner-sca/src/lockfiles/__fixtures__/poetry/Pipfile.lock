@@ -1,0 +1,7 @@
+{
+    "default": {
+        "should-not-appear": {
+            "version": "==9.9.9"
+        }
+    }
+}

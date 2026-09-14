@@ -1,0 +1,6 @@
+version = 1
+
+[[package]]
+name = "should-not-appear"
+version = "9.9.9"
+source = { registry = "https://pypi.org/simple" }

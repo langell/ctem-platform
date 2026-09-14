@@ -8,9 +8,11 @@ import { gradleParser, pomParser } from './maven';
 import { npmParser } from './npm';
 import { csprojParser, nugetLockParser } from './nuget';
 import { pipParser } from './pip';
+import { pipfileParser } from './pipfile';
 import { pnpmParser } from './pnpm';
 import { poetryParser } from './poetry';
 import type { EcosystemParser, ResolvedComponent } from './types';
+import { uvParser } from './uv';
 import { listRepoFiles, posixDir, type RepoFile } from './walk';
 import { yarnParser } from './yarn';
 
@@ -32,6 +34,7 @@ export class LockfileResolutionError extends Error {
  *
  * `pom.xml`, `*.csproj`, and `requirements.txt` are pinned-manifest fallbacks —
  * they are not dependency graphs. Prefer the lockfile when both exist.
+ * Python prefers poetry.lock → uv.lock / Pipfile.lock → requirements.txt.
  */
 export const PARSERS: EcosystemParser[] = [
   pnpmParser,
@@ -40,6 +43,8 @@ export const PARSERS: EcosystemParser[] = [
   cargoParser,
   golangParser,
   poetryParser,
+  uvParser,
+  pipfileParser,
   pipParser,
   gemParser,
   gradleParser,
