@@ -3,6 +3,7 @@ import {
   chunk,
   computeEpssUpdates,
   computeKevUpdates,
+  findingIntelPatch,
   resolveCve,
 } from './enrichment.logic';
 
@@ -75,5 +76,36 @@ describe('chunk', () => {
   it('splits into fixed-size batches with a short tail', () => {
     expect(chunk([1, 2, 3, 4, 5], 2)).toEqual([[1, 2], [3, 4], [5]]);
     expect(chunk([], 10)).toEqual([]);
+  });
+});
+
+describe('findingIntelPatch', () => {
+  const scaReachable = { scannerType: 'sca', evidence: { reachability: 'reachable' } };
+
+  it('promotes reachable + KEV flip to exploitable', () => {
+    expect(findingIntelPatch(scaReachable, { kev: true })).toEqual({
+      kev: true,
+      validation: 'exploitable',
+    });
+  });
+
+  it('re-evaluates reachable when KEV clears', () => {
+    expect(findingIntelPatch(scaReachable, { kev: false })).toEqual({
+      kev: false,
+      validation: 'reachable',
+    });
+  });
+
+  it('does not invent validation on EPSS-only updates', () => {
+    expect(findingIntelPatch(scaReachable, { epssScore: 0.4 })).toEqual({ epssScore: 0.4 });
+  });
+
+  it('leaves unknown SCA and non-SCA findings without a validation write', () => {
+    expect(
+      findingIntelPatch({ scannerType: 'sca', evidence: { reachability: 'unknown' } }, { kev: true }),
+    ).toEqual({ kev: true });
+    expect(
+      findingIntelPatch({ scannerType: 'sast', evidence: { reachability: 'reachable' } }, { kev: true }),
+    ).toEqual({ kev: true });
   });
 });

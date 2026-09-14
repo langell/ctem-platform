@@ -1,3 +1,5 @@
+import { promoteScaValidation, type ValidationVerdict } from '@ctem/contracts';
+
 /**
  * Pure decision logic for threat-intel enrichment: given mirrored advisories
  * and the latest KEV/EPSS data, compute exactly which rows change. IO-free so
@@ -77,4 +79,29 @@ export function chunk<T>(items: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
   return out;
+}
+
+export type FindingIntelPatch = {
+  kev?: boolean;
+  epssScore?: number;
+  validation?: ValidationVerdict;
+};
+
+/**
+ * Finding-row patch for a KEV/EPSS intel change. When KEV flips, re-evaluate
+ * SCA validation with the same rules ingest uses; EPSS-only leaves validation.
+ */
+export function findingIntelPatch(
+  finding: { scannerType: string; evidence: unknown },
+  intel: { kev?: boolean; epssScore?: number },
+): FindingIntelPatch {
+  const data: FindingIntelPatch = { ...intel };
+  if (intel.kev === undefined) return data;
+  const validation = promoteScaValidation({
+    scannerType: finding.scannerType,
+    evidence: finding.evidence,
+    kev: intel.kev,
+  });
+  if (validation !== undefined) data.validation = validation;
+  return data;
 }
