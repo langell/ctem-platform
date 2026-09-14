@@ -16,6 +16,7 @@ import { AwsConnector } from './connectors/aws.connector';
 import { AzureConnector } from './connectors/azure.connector';
 import { GcpConnector } from './connectors/gcp.connector';
 import { EcrConnector } from './connectors/ecr.connector';
+import { GcrConnector } from './connectors/gcr.connector';
 import { GhcrConnector } from './connectors/ghcr.connector';
 import { GitHubConnector } from './connectors/github.connector';
 import { GitLabConnector } from './connectors/gitlab.connector';
@@ -23,7 +24,14 @@ import { DnsEnumConnector } from './connectors/dns.connector';
 import { KubernetesConnector } from './connectors/kubernetes.connector';
 
 @Module({
-  imports: [CtemConfigModule, ObservabilityModule, AuthModule, EventsModule, CoordinationModule, DbModule],
+  imports: [
+    CtemConfigModule,
+    ObservabilityModule,
+    AuthModule,
+    EventsModule,
+    CoordinationModule,
+    DbModule,
+  ],
   controllers: [HealthController, AssetsController],
   providers: [
     AssetsService,
@@ -37,6 +45,7 @@ import { KubernetesConnector } from './connectors/kubernetes.connector';
     GcpConnector,
     GhcrConnector,
     EcrConnector,
+    GcrConnector,
     KubernetesConnector,
     DnsEnumConnector,
     { provide: APP_GUARD, useClass: InternalAuthGuard },
@@ -52,6 +61,7 @@ export class AppModule implements OnModuleInit {
     private readonly gcp: GcpConnector,
     private readonly ghcr: GhcrConnector,
     private readonly ecr: EcrConnector,
+    private readonly gcr: GcrConnector,
     private readonly kubernetes: KubernetesConnector,
     private readonly dnsEnum: DnsEnumConnector,
   ) {}
@@ -65,6 +75,7 @@ export class AppModule implements OnModuleInit {
     this.registry.register(this.gcp);
     this.registry.register(this.ghcr);
     this.registry.register(this.ecr);
+    this.registry.register(this.gcr);
     this.registry.register(this.kubernetes);
     this.registry.register(this.dnsEnum);
   }
