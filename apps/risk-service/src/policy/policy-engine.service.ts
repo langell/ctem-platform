@@ -8,6 +8,7 @@ import {
   SEED_NOTIFY_ACTIONS,
   matchesSeedKevOrCritical,
 } from './seed-notify';
+import { slaNotifyResetForDueChange } from './sla-notify';
 
 interface EvaluableFinding {
   id: string;
@@ -53,12 +54,20 @@ export class PolicyEngineService {
       if (!this.matches(policy.condition as PolicyCondition, finding)) continue;
 
       if (policy.slaHours) {
-        await this.prisma.withOrg(orgId, (tx) =>
-          tx.finding.update({
+        await this.prisma.withOrg(orgId, async (tx) => {
+          const current = await tx.finding.findUnique({
             where: { id: findingId },
-            data: { slaDueAt: new Date(Date.now() + policy.slaHours! * 3_600_000) },
-          }),
-        );
+            select: { slaDueAt: true },
+          });
+          const slaDueAt = new Date(Date.now() + policy.slaHours! * 3_600_000);
+          await tx.finding.update({
+            where: { id: findingId },
+            data: {
+              slaDueAt,
+              ...slaNotifyResetForDueChange(current?.slaDueAt, slaDueAt),
+            },
+          });
+        });
       }
 
       await this.bus.publish(SUBJECTS.policyViolated, orgId, {

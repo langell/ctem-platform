@@ -264,6 +264,9 @@ model Finding {
   fixedVersion String?
   artifactKey  String?
   slaDueAt     DateTime?
+  /// Durable notify-once claim for ctem.policy.sla_breached. Null = not yet
+  /// published for the current SLA window. Internal — not on Finding GET.
+  slaNotifiedAt DateTime?
   ticketRef    String?
   firstSeenAt  DateTime  @default(now())
   lastSeenAt   DateTime  @default(now())

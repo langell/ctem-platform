@@ -82,7 +82,14 @@ function service() {
         return row;
       }),
       updateMany: vi.fn(async () => ({ count: 0 })),
+      update: vi.fn(async (args: { where: { id: string }; data: Record<string, unknown> }) => ({
+        id: args.where.id,
+        state: args.data.state,
+        slaNotifiedAt: args.data.slaNotifiedAt ?? new Date(),
+      })),
+      findUniqueOrThrow: vi.fn(async () => ({ id: FINDING_A, state: 'open' })),
     },
+    findingEvent: { create: vi.fn(async () => ({})) },
   };
 
   const prisma = {
@@ -276,5 +283,61 @@ describe('FindingsService.ingest validation promotion', () => {
     const published = vi.mocked(bus.publish).mock.calls.map((c) => c[0]);
     expect(published).toContain(SUBJECTS.findingCreated);
     expect(published).toContain(SUBJECTS.riskRescoreRequested);
+  });
+});
+
+describe('FindingsService SLA notify claim reset', () => {
+  const orgId = randomUUID();
+
+  it('clears slaNotifiedAt on triage to resolved', async () => {
+    const { findings, tx } = service();
+    tx.finding.findUniqueOrThrow = vi.fn(async () => ({
+      id: FINDING_A,
+      state: 'open',
+      slaNotifiedAt: new Date(),
+    }));
+    await findings.triage(orgId, FINDING_A, 'actor-1', {
+      state: 'resolved',
+      reason: 'fixed in 1.2.3',
+    });
+    expect(tx.finding.update).toHaveBeenCalledWith({
+      where: { id: FINDING_A },
+      data: expect.objectContaining({ state: 'resolved', slaNotifiedAt: null }),
+    });
+  });
+
+  it('clears slaNotifiedAt on ingest auto-resolve', async () => {
+    const { findings, tx } = service();
+    await findings.ingest(orgId, payload([raw()]));
+    expect(tx.finding.updateMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        scannerType: 'sca',
+        state: { in: ['open', 'triaged', 'in_progress'] },
+      }),
+      data: expect.objectContaining({ state: 'resolved', slaNotifiedAt: null }),
+    });
+  });
+
+  it('clears slaNotifiedAt when a resolved finding is reopened by ingest', async () => {
+    const { findings, upserts, byFingerprint } = service();
+    const batch = payload([raw()]);
+    await findings.ingest(orgId, batch);
+    const fp = upserts[0].create.fingerprint;
+    byFingerprint.set(fp, { ...byFingerprint.get(fp), state: 'resolved' });
+    await findings.ingest(orgId, batch);
+    expect(upserts[1].update).toEqual(expect.objectContaining({ state: 'open', slaNotifiedAt: null }));
+  });
+
+  it('omits slaNotifiedAt from GET', async () => {
+    const { findings, tx } = service();
+    tx.finding.findUnique = vi.fn(async () => ({
+      id: FINDING_A,
+      slaNotifiedAt: new Date('2026-01-01T00:00:00.000Z'),
+      events: [],
+      asset: {},
+    }));
+    const got = await findings.get(orgId, FINDING_A);
+    expect(got).not.toHaveProperty('slaNotifiedAt');
+    expect(got).toEqual(expect.objectContaining({ id: FINDING_A }));
   });
 });
