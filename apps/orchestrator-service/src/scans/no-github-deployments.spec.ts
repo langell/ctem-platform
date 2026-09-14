@@ -583,7 +583,6 @@ describe('publishDeploymentStatus never leaves api.github.com', () => {
       'fetch',
       vi.fn(async (url: string, init?: { method?: string }) => {
         urls.push(String(url));
-        const parsed = new URL(String(url));
         if ((init?.method ?? 'GET') === 'GET') {
           return new Response(JSON.stringify([]), { status: 200 });
         }
