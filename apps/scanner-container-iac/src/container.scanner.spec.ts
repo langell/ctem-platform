@@ -1,5 +1,5 @@
 import { gzipSync } from 'node:zlib';
-import { randomUUID } from 'node:crypto';
+import { generateKeyPairSync, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -13,6 +13,7 @@ import { DEMO_CONTAINER_DIGEST, DEMO_CONTAINER_IMAGE } from '@ctem/testing';
 import { ContainerInventoryError } from './inventory/packages';
 import { ContainerPullError, type ImagePuller, type LayerSnapshot } from './oci/registry';
 import type { EcrImagePuller } from './oci/ecr.registry';
+import type { GcrImagePuller } from './oci/gcr.registry';
 import type { VulnMatcher } from '@ctem/vuln-intel';
 
 const DIGEST = `sha256:${'a'.repeat(64)}`;
@@ -22,6 +23,12 @@ const GHCR_KEY = `ghcr:acme/payments-api@${DIGEST}`;
 const ACCOUNT = '123456789012';
 const REGION = 'us-east-1';
 const ECR_KEY = `ecr:${ACCOUNT}/payments-api@${DIGEST}`;
+const PROJECT = 'acme-prod';
+const GCR_LOCATION = 'us-central1';
+const GCR_KEY = `gcr:${PROJECT}/${GCR_LOCATION}/payments-api/web@${DIGEST}`;
+const gcpPem = generateKeyPairSync('rsa', { modulusLength: 2048 })
+  .privateKey.export({ type: 'pkcs8', format: 'pem' })
+  .toString();
 
 const APK_DB = ['P:openssl', 'V:1.1.1w', 'A:x86_64', '', 'P:busybox', 'V:1.36.1', '', ''].join('\n');
 const LODASH_JSON = JSON.stringify({ name: 'lodash', version: '4.17.21' });
@@ -111,6 +118,22 @@ function unusedEcr(): EcrImagePuller {
   };
 }
 
+function unusedGhcr(): ImagePuller {
+  return {
+    pull: vi.fn(async () => {
+      throw new Error('GHCR puller must not be called for ECR/GCR identities');
+    }),
+  };
+}
+
+function unusedGcr(): GcrImagePuller {
+  return {
+    pull: vi.fn(async () => {
+      throw new Error('GCR puller must not be called for GHCR/ECR identities');
+    }),
+  };
+}
+
 function ecrPuller(layers: LayerSnapshot[], spy?: (ref: unknown) => void): EcrImagePuller {
   return {
     pull: vi.fn(async (ref, _creds, checkDeadline) => {
@@ -121,15 +144,27 @@ function ecrPuller(layers: LayerSnapshot[], spy?: (ref: unknown) => void): EcrIm
   };
 }
 
+function gcrPuller(layers: LayerSnapshot[], spy?: (ref: unknown) => void): GcrImagePuller {
+  return {
+    pull: vi.fn(async (ref, _creds, checkDeadline) => {
+      spy?.(ref);
+      if (!checkDeadline()) throw new ContainerPullError('Job deadline exceeded mid-pull');
+      return { digest: DIGEST, owner: PROJECT, name: 'payments-api/web', layers };
+    }),
+  };
+}
+
 function scanner(
   matcher = matchingMatcher(),
   registry?: ImagePuller,
   ecr?: EcrImagePuller,
+  gcr?: GcrImagePuller,
 ): ContainerScanner {
   return new ContainerScanner(
     matcher as unknown as VulnMatcher,
     (registry ?? puller([layer(LAYER_BASE, { 'lib/apk/db/installed': APK_DB })])) as never,
     (ecr ?? unusedEcr()) as never,
+    (gcr ?? unusedGcr()) as never,
   );
 }
 
@@ -145,11 +180,26 @@ function ecrTarget(overrides: Record<string, unknown> = {}): Record<string, unkn
   };
 }
 
+function gcrTarget(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    kind: 'container_image',
+    externalKey: GCR_KEY,
+    projectId: PROJECT,
+    location: GCR_LOCATION,
+    repository: 'payments-api',
+    image: 'web',
+    digest: DIGEST,
+    ...overrides,
+  };
+}
+
 afterEach(() => {
   delete process.env.GITHUB_TOKEN;
   delete process.env.AWS_ACCESS_KEY_ID;
   delete process.env.AWS_SECRET_ACCESS_KEY;
   delete process.env.AWS_SESSION_TOKEN;
+  delete process.env.GCP_CLIENT_EMAIL;
+  delete process.env.GCP_PRIVATE_KEY;
 });
 
 describe('ContainerScanner.supports', () => {
@@ -189,6 +239,24 @@ describe('ContainerScanner.execute', () => {
             kind: 'container_image',
             externalKey: GHCR_KEY,
             registryUrl: 'https://123.dkr.ecr.us-east-1.amazonaws.com',
+          },
+        }),
+      ),
+    ).rejects.toThrow(ContainerEgressError);
+    await expect(
+      s.execute(
+        ctx({
+          options: { pkgDevHost: 'us-central1-docker.pkg.dev' },
+        }),
+      ),
+    ).rejects.toThrow(ContainerEgressError);
+    await expect(
+      s.execute(
+        ctx({
+          target: {
+            kind: 'container_image',
+            externalKey: GCR_KEY,
+            registryUrl: 'https://us-central1-docker.pkg.dev',
           },
         }),
       ),
@@ -297,6 +365,47 @@ describe('ContainerScanner.execute', () => {
     ).toThrow(/region/);
   });
 
+  it('accepts a GCR digest identity and refuses a tag, tenant pkg.dev host, or ACR', () => {
+    expect(parseContainerImageRef(gcrTarget())).toEqual({
+      kind: 'gcr',
+      projectId: PROJECT,
+      location: GCR_LOCATION,
+      repository: 'payments-api',
+      image: 'web',
+      digest: DIGEST,
+    });
+    expect(parseContainerImageRef(gcrTarget({ image: 'web/api', externalKey: `gcr:${PROJECT}/${GCR_LOCATION}/payments-api/web/api@${DIGEST}` }))).toMatchObject({
+      kind: 'gcr',
+      image: 'web/api',
+    });
+    expect(() =>
+      parseContainerImageRef({
+        kind: 'container_image',
+        externalKey: `gcr:${PROJECT}/${GCR_LOCATION}/payments-api/web:latest`,
+      }),
+    ).toThrow(ContainerIdentityError);
+    expect(() =>
+      parseContainerImageRef({
+        kind: 'container_image',
+        externalKey: GCR_KEY,
+        pkgDevHost: 'us-central1-docker.pkg.dev',
+      }),
+    ).toThrow(ContainerEgressError);
+    expect(() =>
+      parseContainerImageRef({
+        kind: 'container_image',
+        externalKey: GCR_KEY,
+        location: 'us-central1-docker.pkg.dev',
+      }),
+    ).toThrow(/location is an id|does not match/);
+    expect(() =>
+      parseContainerImageRef({
+        kind: 'container_image',
+        externalKey: `acr:11111111-1111-1111-1111-111111111111/rg/reg/app@${DIGEST}`,
+      }),
+    ).toThrow(/non-digest|malformed/);
+  });
+
   it('scans an ECR-discovered digest through the same inventory + vuln match', async () => {
     process.env.AWS_ACCESS_KEY_ID = 'AKIATEST';
     process.env.AWS_SECRET_ACCESS_KEY = 'secret';
@@ -335,6 +444,79 @@ describe('ContainerScanner.execute', () => {
       s.execute(ctx({ target: ecrTarget(), credentialRef: 'env:GITHUB_TOKEN' })),
     ).rejects.toThrow(/env:AWS_\*/);
     expect(ecr.pull).not.toHaveBeenCalled();
+  });
+
+  it('scans a GCR-discovered digest through the same inventory + vuln match', async () => {
+    process.env.GCP_CLIENT_EMAIL = 'ctem@acme-prod.iam.gserviceaccount.com';
+    process.env.GCP_PRIVATE_KEY = gcpPem;
+    const layers = [
+      layer(LAYER_BASE, { 'lib/apk/db/installed': APK_DB }),
+      layer(LAYER_APP, { 'app/node_modules/lodash/package.json': LODASH_JSON }),
+    ];
+    const gcr = gcrPuller(layers);
+    const matcher = matchingMatcher(['openssl', 'lodash']);
+    const outcome = await scanner(matcher, unusedGhcr(), unusedEcr(), gcr).execute(
+      ctx({
+        target: gcrTarget(),
+        credentialRef: 'env:GCP_CLIENT_EMAIL',
+      }),
+    );
+    expect(gcr.pull).toHaveBeenCalledOnce();
+    expect(outcome.findings.length).toBeGreaterThanOrEqual(2);
+    expect((outcome.rawOutput as { image: string }).image).toBe(
+      `${GCR_LOCATION}-docker.pkg.dev/${PROJECT}/payments-api/web@${DIGEST}`,
+    );
+    expect((outcome.rawOutput as { complete: boolean; truncated: boolean }).complete).toBe(true);
+    expect((outcome.rawOutput as { truncated: boolean }).truncated).toBe(false);
+  });
+
+  it('fails a GCR pull when GCP_* credentials are missing or not env:GCP_*', async () => {
+    const gcr = gcrPuller([]);
+    const s = scanner(matchingMatcher(), unusedGhcr(), unusedEcr(), gcr);
+    await expect(
+      s.execute(ctx({ target: gcrTarget(), credentialRef: null })),
+    ).rejects.toThrow(ContainerCredentialError);
+    await expect(
+      s.execute(ctx({ target: gcrTarget(), credentialRef: 'env:GCP_CLIENT_EMAIL' })),
+    ).rejects.toThrow(/cannot be used/);
+    process.env.GITHUB_TOKEN = 'ghp_test';
+    await expect(
+      s.execute(ctx({ target: gcrTarget(), credentialRef: 'env:GITHUB_TOKEN' })),
+    ).rejects.toThrow(/env:GCP_\*/);
+    expect(gcr.pull).not.toHaveBeenCalled();
+  });
+
+  it('fails a GCR pull that is incomplete or hits the deadline mid-pull', async () => {
+    process.env.GCP_CLIENT_EMAIL = 'ctem@acme-prod.iam.gserviceaccount.com';
+    process.env.GCP_PRIVATE_KEY = gcpPem;
+    const failPull: GcrImagePuller = {
+      pull: vi.fn(async () => {
+        throw new ContainerPullError('GCR blob GET returned 502 — refusing pull');
+      }),
+    };
+    await expect(
+      scanner(matchingMatcher(), unusedGhcr(), unusedEcr(), failPull).execute(
+        ctx({ target: gcrTarget(), credentialRef: 'env:GCP_CLIENT_EMAIL' }),
+      ),
+    ).rejects.toThrow(ContainerPullError);
+
+    const midPull: GcrImagePuller = {
+      pull: vi.fn(async (_ref, _creds, checkDeadline) => {
+        if (!checkDeadline()) throw new ContainerPullError('Job deadline exceeded mid-pull');
+        return { digest: DIGEST, owner: PROJECT, name: 'payments-api/web', layers: [] };
+      }),
+    };
+    let allow = true;
+    await expect(
+      scanner(matchingMatcher(), unusedGhcr(), unusedEcr(), midPull).execute({
+        ...ctx({ target: gcrTarget(), credentialRef: 'env:GCP_CLIENT_EMAIL' }),
+        checkDeadline: () => {
+          const ok = allow;
+          allow = false;
+          return ok;
+        },
+      }),
+    ).rejects.toThrow(/deadline/);
   });
 
   it('fails an ECR pull that is incomplete or hits the deadline mid-pull', async () => {
@@ -524,8 +706,11 @@ describe('ContainerScanner.execute', () => {
       'container.credential.ts',
       'aws.egress.ts',
       'aws.sigv4.ts',
+      'gcp.egress.ts',
+      'gcp.jwt.ts',
       'oci/registry.ts',
       'oci/ecr.registry.ts',
+      'oci/gcr.registry.ts',
       'oci/tar.ts',
       'inventory/packages.ts',
     ]

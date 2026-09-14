@@ -4,18 +4,25 @@ import {
   allowlistedEcrApiUrl,
   allowlistedEcrBlobRedirect,
   allowlistedEcrRegistryUrl,
+  allowlistedGcrBlobRedirect,
+  allowlistedGcrRegistryUrl,
   allowlistedGhcrBlobRedirect,
   allowlistedGhcrUrl,
   ecrApiUrl,
   ecrBlobUrl,
   ecrManifestUrl,
   ecrRegistryHost,
+  gcrBlobUrl,
+  gcrManifestUrl,
+  gcrRegistryHost,
+  gcrTokenUrl,
   ghcrBlobUrl,
   ghcrManifestUrl,
   ghcrTokenUrl,
   isEcrApiHost,
   isEcrBlobS3Host,
   isEcrRegistryHost,
+  isGcrRegistryHost,
   isGhcrRegistryHost,
   refuseTenantWritableRegistry,
 } from './container.egress';
@@ -134,6 +141,40 @@ describe('refuseTenantWritableRegistry', () => {
       refuseTenantWritableRegistry({ region: 'us-east-1', accountId: '123456789012' }),
     ).not.toThrow();
   });
+
+  it('refuses tenant pkg.dev / GCR registry URL override fields', () => {
+    expect(() =>
+      refuseTenantWritableRegistry({
+        location: 'us-central1',
+        pkgDevHost: 'us-central1-docker.pkg.dev',
+      }),
+    ).toThrow(/tenant-writable/);
+    expect(() =>
+      refuseTenantWritableRegistry({
+        location: 'us-central1',
+        pkgDevUrl: 'https://us-central1-docker.pkg.dev/acme-prod/app',
+      }),
+    ).toThrow(/tenant-writable/);
+    expect(() =>
+      refuseTenantWritableRegistry({
+        location: 'us-central1',
+        registryUrl: 'https://us-central1-docker.pkg.dev',
+      }),
+    ).toThrow(/tenant-writable/);
+    expect(() =>
+      refuseTenantWritableRegistry({ location: 'https://us-central1-docker.pkg.dev' }),
+    ).toThrow(/location is an id/);
+    expect(() =>
+      refuseTenantWritableRegistry({ location: 'us-central1-docker.pkg.dev' }),
+    ).toThrow(/location is an id/);
+    expect(() =>
+      refuseTenantWritableRegistry({
+        projectId: 'acme-prod',
+        location: 'us-central1',
+        repository: 'payments-api',
+      }),
+    ).not.toThrow();
+  });
 });
 
 const ACCOUNT = '123456789012';
@@ -239,3 +280,85 @@ describe('allowlistedEcrBlobRedirect', () => {
     );
   });
 });
+
+const PROJECT = 'acme-prod';
+const GCR_LOCATION = 'us-central1';
+
+describe('gcrRegistryHost / isGcrRegistryHost', () => {
+  it('derives {location}-docker.pkg.dev from a location id and pins the exact host', () => {
+    expect(gcrRegistryHost(GCR_LOCATION)).toBe('us-central1-docker.pkg.dev');
+    expect(gcrRegistryHost('us')).toBe('us-docker.pkg.dev');
+    expect(isGcrRegistryHost('us-central1-docker.pkg.dev', GCR_LOCATION)).toBe(true);
+    expect(isGcrRegistryHost('US-CENTRAL1-DOCKER.PKG.DEV', GCR_LOCATION)).toBe(true);
+    expect(isGcrRegistryHost('us-docker.pkg.dev', GCR_LOCATION)).toBe(false);
+    expect(isGcrRegistryHost('us-central1-docker.pkg.dev.evil.example', GCR_LOCATION)).toBe(false);
+    expect(isGcrRegistryHost('docker.pkg.dev', GCR_LOCATION)).toBe(false);
+    expect(isGcrRegistryHost('pkg.dev', GCR_LOCATION)).toBe(false);
+    expect(isGcrRegistryHost('gcr.io', GCR_LOCATION)).toBe(false);
+    expect(isGcrRegistryHost('ghcr.io', GCR_LOCATION)).toBe(false);
+  });
+});
+
+describe('allowlistedGcrRegistryUrl / gcrManifestUrl', () => {
+  it('builds the location docker.pkg.dev host from ids, never a tenant URL', () => {
+    expect(gcrManifestUrl(GCR_LOCATION, PROJECT, 'payments-api', 'web', DIGEST)).toBe(
+      `https://us-central1-docker.pkg.dev/v2/${PROJECT}/payments-api/web/manifests/${DIGEST}`,
+    );
+    expect(gcrBlobUrl(GCR_LOCATION, PROJECT, 'payments-api', 'web/api', DIGEST)).toBe(
+      `https://us-central1-docker.pkg.dev/v2/${PROJECT}/payments-api/web/api/blobs/${DIGEST}`,
+    );
+    expect(gcrTokenUrl(GCR_LOCATION, PROJECT, 'payments-api', 'web')).toContain(
+      'https://us-central1-docker.pkg.dev/v2/token?',
+    );
+    expect(() =>
+      allowlistedGcrRegistryUrl(
+        'https://europe-west1-docker.pkg.dev/v2/acme-prod/app/manifests/sha256:abc',
+        GCR_LOCATION,
+      ),
+    ).toThrow(/only us-central1-docker\.pkg\.dev/);
+    expect(() =>
+      allowlistedGcrRegistryUrl('https://us-central1-docker.pkg.dev.evil.example/v2/app/manifests/x', GCR_LOCATION),
+    ).toThrow(/only us-central1-docker\.pkg\.dev/);
+    expect(() =>
+      allowlistedGcrRegistryUrl('https://ghcr.io/v2/acme/app/manifests/sha256:abc', GCR_LOCATION),
+    ).toThrow();
+    expect(() =>
+      allowlistedGcrRegistryUrl(
+        `http://us-central1-docker.pkg.dev/v2/${PROJECT}/payments-api/web/manifests/${DIGEST}`,
+        GCR_LOCATION,
+      ),
+    ).toThrow(/non-https/);
+    expect(() => gcrRegistryHost('https://evil.example')).toThrow(/location/);
+    expect(() => gcrRegistryHost('us-central1-docker.pkg.dev')).toThrow(/location/);
+  });
+});
+
+describe('allowlistedGcrBlobRedirect', () => {
+  it('allows the pinned docker.pkg.dev host and path-style GCS, refuses suffix confusion', () => {
+    expect(
+      allowlistedGcrBlobRedirect(
+        `https://us-central1-docker.pkg.dev/v2/${PROJECT}/payments-api/web/blobs/${DIGEST}`,
+        GCR_LOCATION,
+      ),
+    ).toContain('us-central1-docker.pkg.dev');
+    expect(
+      allowlistedGcrBlobRedirect(
+        'https://storage.googleapis.com/artifacts-acme/containers/images/blob?sig=1',
+        GCR_LOCATION,
+      ),
+    ).toContain('storage.googleapis.com');
+    expect(() =>
+      allowlistedGcrBlobRedirect('https://us-central1-docker.pkg.dev.evil.example/blob', GCR_LOCATION),
+    ).toThrow(/redirect host/);
+    expect(() => allowlistedGcrBlobRedirect('https://docker.io/v2/library/nginx/blobs/x', GCR_LOCATION)).toThrow(
+      /redirect host/,
+    );
+    expect(() => allowlistedGcrBlobRedirect('https://ghcr.io/v2/acme/app/blobs/x', GCR_LOCATION)).toThrow(
+      /redirect host/,
+    );
+    expect(() =>
+      allowlistedGcrBlobRedirect('https://acme.azurecr.io/v2/app/blobs/x', GCR_LOCATION),
+    ).toThrow(/redirect host/);
+  });
+});
+

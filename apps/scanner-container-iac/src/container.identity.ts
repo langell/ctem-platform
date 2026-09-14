@@ -2,17 +2,21 @@
  * Container image identity. Discovery keys `container_image` assets as:
  *   `ghcr:owner/name@sha256:<64 hex>`  — GHCR content digest
  *   `ecr:{accountId}/{repositoryName}@sha256:<64 hex>` — ECR content digest
- * Never a mutable tag. Region is an AWS region id on the asset / integration
- * config, not a host, and is not encoded in the ECR externalKey.
+ *   `gcr:{project}/{location}/{repository}/{image}@sha256:<64 hex>` — Artifact Registry
+ * Never a mutable tag. Region / location / project / repository are ids, not
+ * hosts. The ECR region is not encoded in the externalKey; GCR location is.
  */
 
 import { AWS_REGION_RE } from './aws.egress';
 import { AWS_ACCOUNT_RE, ContainerEgressError, refuseTenantWritableRegistry } from './container.egress';
+import { GCP_LOCATION_ID_RE, GCP_PROJECT_ID_RE, GCR_REPOSITORY_ID_RE } from './gcp.egress';
 
 export const SHA256_DIGEST_RE = /^sha256:[a-f0-9]{64}$/i;
 export const GHCR_EXTERNAL_KEY_RE = /^ghcr:([^/@]+)\/(.+)@(sha256:[a-f0-9]{64})$/i;
 export const ECR_EXTERNAL_KEY_RE = /^ecr:(\d{12})\/(.+)@(sha256:[a-f0-9]{64})$/i;
-export { AWS_ACCOUNT_RE };
+export const GCR_EXTERNAL_KEY_RE =
+  /^gcr:([^/@]+)\/([^/@]+)\/([^/@]+)\/(.+)@(sha256:[a-f0-9]{64})$/i;
+export { AWS_ACCOUNT_RE, GCP_LOCATION_ID_RE, GCP_PROJECT_ID_RE, GCR_REPOSITORY_ID_RE };
 
 export class ContainerIdentityError extends Error {
   constructor(message: string) {
@@ -36,7 +40,16 @@ export interface EcrImageRef {
   region: string;
 }
 
-export type ContainerImageRef = (GhcrImageRef & { kind: 'ghcr' }) | EcrImageRef;
+export interface GcrImageRef {
+  kind: 'gcr';
+  projectId: string;
+  location: string;
+  repository: string;
+  image: string;
+  digest: string;
+}
+
+export type ContainerImageRef = (GhcrImageRef & { kind: 'ghcr' }) | EcrImageRef | GcrImageRef;
 
 function failIdentity(message: string): never {
   throw new ContainerIdentityError(message);
@@ -184,8 +197,98 @@ export function parseEcrImageRef(
 }
 
 /**
- * Accept GHCR or ECR digest identities. Other registries (Docker Hub, GCR,
- * ACR, Quay) are refused. Pull is by digest only.
+ * Parse `externalKey` / attributes for
+ * `gcr:{project}/{location}/{repository}/{image}@sha256:<digest>`.
+ * Location / project / repository / image are ids — never a pkg.dev host.
+ */
+export function parseGcrImageRef(
+  target: Record<string, unknown>,
+  options: Record<string, unknown> = {},
+): GcrImageRef {
+  refuseTenantWritableRegistry(options);
+  refuseTenantWritableRegistry(target);
+
+  const key = typeof target.externalKey === 'string' ? target.externalKey.trim() : '';
+  let fromKey:
+    | { projectId: string; location: string; repository: string; image: string; digest: string }
+    | undefined;
+  if (key) {
+    const match = GCR_EXTERNAL_KEY_RE.exec(key);
+    if (!match) {
+      failIdentity(
+        `Refusing non-digest or malformed container identity '${key}' — expected gcr:{project}/{location}/{repository}/{image}@sha256:<64 hex>`,
+      );
+    }
+    fromKey = {
+      projectId: match[1]!,
+      location: match[2]!,
+      repository: match[3]!,
+      image: match[4]!,
+      digest: match[5]!.toLowerCase(),
+    };
+    assertGcrIdentityParts(fromKey);
+  }
+
+  const attrs = asRecord(target.attributes);
+  const projectAttr = stringAttr(target.projectId) ?? stringAttr(attrs.projectId);
+  const locationAttr = stringAttr(target.location) ?? stringAttr(attrs.location);
+  const repoAttr = stringAttr(target.repository) ?? stringAttr(attrs.repository);
+  const imageAttr = stringAttr(target.image) ?? stringAttr(attrs.image);
+  const digestAttr = stringAttr(target.digest) ?? stringAttr(attrs.digest);
+
+  if (fromKey) {
+    if (projectAttr && projectAttr !== fromKey.projectId) {
+      failIdentity('Container asset projectId does not match gcr: identity — refusing pull');
+    }
+    if (locationAttr && locationAttr !== fromKey.location) {
+      failIdentity('Container asset location does not match gcr: identity — refusing pull');
+    }
+    if (repoAttr && repoAttr !== fromKey.repository) {
+      failIdentity('Container asset repository does not match gcr: identity — refusing pull');
+    }
+    if (imageAttr && imageAttr !== fromKey.image) {
+      failIdentity('Container asset image does not match gcr: identity — refusing pull');
+    }
+    if (digestAttr) {
+      if (!SHA256_DIGEST_RE.test(digestAttr)) {
+        failIdentity(`Refusing non-digest container attribute digest '${digestAttr}'`);
+      }
+      if (digestAttr.toLowerCase() !== fromKey.digest) {
+        failIdentity('Container asset digest does not match gcr: identity — refusing pull');
+      }
+    }
+    const location = resolveGcrLocation(fromKey.location, target, options);
+    return { kind: 'gcr', ...fromKey, location };
+  }
+
+  if (
+    projectAttr &&
+    GCP_PROJECT_ID_RE.test(projectAttr) &&
+    repoAttr &&
+    GCR_REPOSITORY_ID_RE.test(repoAttr) &&
+    imageAttr &&
+    digestAttr &&
+    SHA256_DIGEST_RE.test(digestAttr)
+  ) {
+    const parts = {
+      projectId: projectAttr,
+      location: resolveGcrLocation(undefined, target, options),
+      repository: repoAttr,
+      image: imageAttr,
+      digest: digestAttr.toLowerCase(),
+    };
+    assertGcrIdentityParts(parts);
+    return { kind: 'gcr', ...parts };
+  }
+
+  failIdentity(
+    'Refusing container_image without gcr:{project}/{location}/{repository}/{image}@sha256:<digest> identity — no tag fallback, no other registry',
+  );
+}
+
+/**
+ * Accept GHCR, ECR, or GCR/Artifact Registry digest identities. Other
+ * registries (Docker Hub, ACR, Quay) are refused. Pull is by digest only.
  */
 export function parseContainerImageRef(
   target: Record<string, unknown>,
@@ -202,8 +305,11 @@ export function parseContainerImageRef(
     if (ECR_EXTERNAL_KEY_RE.test(key)) {
       return parseEcrImageRef(target, options);
     }
+    if (GCR_EXTERNAL_KEY_RE.test(key)) {
+      return parseGcrImageRef(target, options);
+    }
     failIdentity(
-      `Refusing non-digest or malformed container identity '${key}' — expected ghcr:owner/name@sha256:<64 hex> or ecr:{accountId}/{repositoryName}@sha256:<64 hex>`,
+      `Refusing non-digest or malformed container identity '${key}' — expected ghcr:owner/name@sha256:<64 hex>, ecr:{accountId}/{repositoryName}@sha256:<64 hex>, or gcr:{project}/{location}/{repository}/{image}@sha256:<64 hex>`,
     );
   }
 
@@ -212,7 +318,22 @@ export function parseContainerImageRef(
   const nameAttr = stringAttr(target.package) ?? stringAttr(attrs.package);
   const digestAttr = stringAttr(target.digest) ?? stringAttr(attrs.digest);
   const accountAttr = stringAttr(target.accountId) ?? stringAttr(attrs.accountId);
+  const projectAttr = stringAttr(target.projectId) ?? stringAttr(attrs.projectId);
+  const locationAttr = stringAttr(target.location) ?? stringAttr(attrs.location);
+  const repoAttr = stringAttr(target.repository) ?? stringAttr(attrs.repository);
+  const imageAttr = stringAttr(target.image) ?? stringAttr(attrs.image);
 
+  if (
+    projectAttr &&
+    GCP_PROJECT_ID_RE.test(projectAttr) &&
+    (locationAttr || stringAttr(options.location)) &&
+    repoAttr &&
+    imageAttr &&
+    digestAttr &&
+    SHA256_DIGEST_RE.test(digestAttr)
+  ) {
+    return parseGcrImageRef(target, options);
+  }
   if (ownerAttr && nameAttr && digestAttr && SHA256_DIGEST_RE.test(digestAttr) && !accountAttr) {
     return { kind: 'ghcr', ...parseGhcrImageRef(target, options) };
   }
@@ -221,8 +342,80 @@ export function parseContainerImageRef(
   }
 
   failIdentity(
-    'Refusing container_image without ghcr: or ecr: digest identity — no tag fallback, no other registry',
+    'Refusing container_image without ghcr:, ecr:, or gcr: digest identity — no tag fallback, no other registry',
   );
+}
+
+function assertGcrIdentityParts(parts: {
+  projectId: string;
+  location: string;
+  repository: string;
+  image: string;
+}): void {
+  assertProjectId(parts.projectId);
+  assertLocationId(parts.location);
+  if (!GCR_REPOSITORY_ID_RE.test(parts.repository) || /^https?:\/\//i.test(parts.repository)) {
+    failIdentity(
+      `Refusing Artifact Registry repository '${parts.repository}' — not a valid repository identifier`,
+    );
+  }
+  if (!parts.image || /^https?:\/\//i.test(parts.image.trim()) || parts.image.includes('@')) {
+    failIdentity(
+      `Refusing Artifact Registry image '${parts.image}' — image is a path id, not a registry host`,
+    );
+  }
+}
+
+function resolveGcrLocation(
+  fromKey: string | undefined,
+  target: Record<string, unknown>,
+  options: Record<string, unknown>,
+): string {
+  const attrs = asRecord(target.attributes);
+  const fromTarget = stringAttr(target.location) ?? stringAttr(attrs.location);
+  const fromOptions = stringAttr(options.location);
+  if (fromKey && fromTarget && fromKey !== fromTarget) {
+    failIdentity('Container asset location does not match gcr: identity — refusing pull');
+  }
+  if (fromKey && fromOptions && fromKey !== fromOptions) {
+    failIdentity('Container asset location does not match integration location — refusing pull');
+  }
+  if (fromTarget && fromOptions && fromTarget !== fromOptions) {
+    failIdentity('Container asset location does not match integration location — refusing pull');
+  }
+  const location = fromKey ?? fromTarget ?? fromOptions;
+  if (!location) {
+    failIdentity(
+      'Refusing GCR pull without a location id — location comes from the gcr: identity, not a pkg.dev host',
+    );
+  }
+  return assertLocationId(location);
+}
+
+function assertProjectId(projectId: string): string {
+  if (/^https?:\/\//i.test(projectId.trim()) || /pkg\.dev/i.test(projectId)) {
+    throw new ContainerEgressError(
+      "Refusing tenant-writable container registry endpoint (projectId) — project is an id, not a host",
+    );
+  }
+  if (!GCP_PROJECT_ID_RE.test(projectId)) {
+    failIdentity(`Refusing GCP projectId '${projectId}' — not a valid GCP project identifier`);
+  }
+  return projectId;
+}
+
+function assertLocationId(location: string): string {
+  if (/^https?:\/\//i.test(location.trim()) || /pkg\.dev/i.test(location) || location.includes('.')) {
+    throw new ContainerEgressError(
+      "Refusing tenant-writable container registry endpoint (location) — location is an id, not a host",
+    );
+  }
+  if (!GCP_LOCATION_ID_RE.test(location)) {
+    failIdentity(
+      `Refusing GCP location '${location}' — not a valid Artifact Registry location identifier`,
+    );
+  }
+  return location;
 }
 
 function resolveEcrRegion(
