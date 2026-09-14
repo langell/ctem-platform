@@ -89,7 +89,7 @@ describe('PolicyService.create / update', () => {
     expect(prisma.withOrg).toHaveBeenCalledWith(ORG_B, expect.any(Function));
   });
 
-  it('persists a ticket or fail_build action from the editor', async () => {
+  it('persists a ticket, fail_build, or block_deploy action from the editor', async () => {
     const { policies, tx } = service();
     await policies.create(ORG_A, { ...notifyRule, name: 'KEV ticket', actions: ['ticket'] });
     expect(tx.policy.create).toHaveBeenCalledWith({
@@ -107,24 +107,29 @@ describe('PolicyService.create / update', () => {
         actions: ['fail_build'],
       }),
     });
+    await policies.create(ORG_A, { ...notifyRule, name: 'Deploy gate', actions: ['block_deploy'] });
+    expect(tx.policy.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        orgId: ORG_A,
+        name: 'Deploy gate',
+        actions: ['block_deploy'],
+      }),
+    });
   });
 
-  it('refuses block_deploy on create and update', async () => {
-    const { policies } = service({
+  it('persists block_deploy combined with notify or ticket on create and update', async () => {
+    const { policies, tx } = service({
       existing: { id: POLICY_A, orgId: ORG_A, actions: ['notify'] },
     });
-    await expect(
-      policies.create(ORG_A, { ...notifyRule, actions: ['block_deploy'] }),
-    ).rejects.toBeInstanceOf(BadRequestException);
-    await expect(
-      policies.create(ORG_A, { ...notifyRule, actions: ['notify', 'block_deploy'] }),
-    ).rejects.toBeInstanceOf(BadRequestException);
-    await expect(
-      policies.update(ORG_A, POLICY_A, { actions: ['block_deploy'] }),
-    ).rejects.toBeInstanceOf(BadRequestException);
-    await expect(
-      policies.update(ORG_A, POLICY_A, { actions: ['ticket', 'block_deploy'] }),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    await policies.create(ORG_A, { ...notifyRule, actions: ['notify', 'block_deploy'] });
+    expect(tx.policy.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ actions: ['notify', 'block_deploy'] }),
+    });
+    await policies.update(ORG_A, POLICY_A, { actions: ['ticket', 'block_deploy'] });
+    expect(tx.policy.update).toHaveBeenCalledWith({
+      where: { id: POLICY_A },
+      data: expect.objectContaining({ actions: ['ticket', 'block_deploy'] }),
+    });
   });
 
   it('refuses a tenant webhook URL if it appears on create or update', async () => {

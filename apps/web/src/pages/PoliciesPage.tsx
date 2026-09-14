@@ -190,7 +190,7 @@ export function PoliciesPage() {
               <td colSpan={canWrite ? 6 : 5}>
                 <div className="empty-title">No rules yet</div>
                 <p className="muted empty-copy">
-                  Create a rule to notify, ticket, or fail a build.
+                  Create a rule to notify, ticket, fail a build, or block a deploy.
                 </p>
               </td>
             </tr>
@@ -285,15 +285,30 @@ export function PoliciesPage() {
               <option value="notify">Notify (Slack)</option>
               <option value="ticket">Ticket (Jira)</option>
               <option value="fail_build">Fail build (CI GET)</option>
+              <option value="block_deploy">Block deploy (GET)</option>
               <option value="notify,ticket">Notify and ticket</option>
               <option value="notify,fail_build">Notify and fail build</option>
+              <option value="notify,block_deploy">Notify and block deploy</option>
               <option value="ticket,fail_build">Ticket and fail build</option>
+              <option value="ticket,block_deploy">Ticket and block deploy</option>
+              <option value="fail_build,block_deploy">Fail build and block deploy</option>
               <option value="notify,ticket,fail_build">Notify, ticket, and fail build</option>
+              <option value="notify,ticket,block_deploy">Notify, ticket, and block deploy</option>
+              <option value="notify,fail_build,block_deploy">
+                Notify, fail build, and block deploy
+              </option>
+              <option value="ticket,fail_build,block_deploy">
+                Ticket, fail build, and block deploy
+              </option>
+              <option value="notify,ticket,fail_build,block_deploy">
+                Notify, ticket, fail build, and block deploy
+              </option>
             </select>
           </label>
           <p className="muted small">
-            block-deploy and tenant webhook/Jira URLs are out of this slice. Slack still cannot
-            ticket. CI reads conclusion from GET /v1/scans/:id — this form cannot POST it.
+            Tenant webhook/Jira URLs are out of this slice. Slack still cannot ticket. CI reads
+            conclusion from GET /v1/scans/:id; deploy tooling reads deployConclusion — this form
+            cannot POST either field.
           </p>
           <div className="form-actions">
             {editingId ? (

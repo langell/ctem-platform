@@ -32,6 +32,8 @@ describe('shouldNotify / shouldTicket', () => {
     expect(shouldNotify(['notify'])).toBe(true);
     expect(shouldNotify(['notify', 'ticket'])).toBe(true);
     expect(shouldNotify(['ticket', 'fail_build'])).toBe(false);
+    expect(shouldNotify(['block_deploy'])).toBe(false);
+    expect(shouldNotify(['notify', 'block_deploy'])).toBe(true);
     expect(shouldNotify([])).toBe(false);
   });
 
@@ -39,6 +41,8 @@ describe('shouldNotify / shouldTicket', () => {
     expect(shouldTicket(['ticket'])).toBe(true);
     expect(shouldTicket(['notify', 'ticket'])).toBe(true);
     expect(shouldTicket(['notify', 'fail_build'])).toBe(false);
+    expect(shouldTicket(['block_deploy'])).toBe(false);
+    expect(shouldTicket(['ticket', 'block_deploy'])).toBe(true);
     expect(shouldTicket([])).toBe(false);
   });
 });

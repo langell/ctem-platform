@@ -128,7 +128,7 @@ The api-gateway rate limit is the same class of Redis dependency: a shared token
 
 ## GitHub Checks (optional, additive)
 
-Policy `fail_build` is still the CI-facing scan `conclusion` on `GET /v1/scans/:id` (`concludeScan`). GitHub Checks do **not** replace that field. After a scan is terminal (`ctem.scan.completed`, or an already-terminal create with no jobs), orchestrator may create or PATCH **one** Check Run on `https://api.github.com` (HTTPS only — no GitHub Enterprise / tenant `baseUrl`).
+Policy `fail_build` is still the CI-facing scan `conclusion` on `GET /v1/scans/:id` (`concludeScan`). Policy `block_deploy` independently sets GET `deployConclusion` (`concludeDeploy`). GitHub Checks do **not** replace either field and stay mapped from `concludeScan` / `fail_build` only. After a scan is terminal (`ctem.scan.completed`, or an already-terminal create with no jobs), orchestrator may create or PATCH **one** Check Run on `https://api.github.com` (HTTPS only — no GitHub Enterprise / tenant `baseUrl`).
 
 Publish requires Checks context on the scan options (`options.github` or the same top-level keys):
 

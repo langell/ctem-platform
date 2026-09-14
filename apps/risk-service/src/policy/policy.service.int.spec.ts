@@ -62,6 +62,25 @@ describe('PolicyService (integration)', () => {
     expect(relisted.map((p) => p.priority)).toEqual([20, 30]);
   });
 
+  it('persists block_deploy on create and update', async () => {
+    const created = await service.create(orgA, {
+      name: 'deploy-gate',
+      description: '',
+      enabled: true,
+      priority: 80,
+      condition: { kevOnly: true },
+      actions: ['block_deploy'],
+      slaHours: null,
+    });
+    expect(created.actions).toEqual(['block_deploy']);
+
+    const updated = await service.update(orgA, created.id, {
+      actions: ['notify', 'block_deploy'],
+    });
+    expect(updated.actions).toEqual(['notify', 'block_deploy']);
+    expect((await service.get(orgA, created.id)).actions).toEqual(['notify', 'block_deploy']);
+  });
+
   it('org B cannot read or update an org A rule (404, not 500 or empty 200)', async () => {
     const planted = await createPolicy(owner, orgA, {
       name: 'org-a-only',

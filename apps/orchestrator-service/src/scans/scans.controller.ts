@@ -6,7 +6,7 @@ import { ZodBody } from '@ctem/service-kit';
 import { PrismaService } from '@ctem/db';
 import { ArtifactStore } from '@ctem/storage';
 import { ScanDispatcherService } from './scan-dispatcher.service';
-import { conclusionForScan } from './scan-conclusion.query';
+import { scanGatesForScan } from './scan-conclusion.query';
 
 @ApiTags('scans')
 @Controller('internal/scans')
@@ -26,10 +26,11 @@ export class ScansController {
   }
 
   /**
-   * CI-facing GET. Org comes from the token (JWT or PAT), never the client.
-   * Conclusion is computed from matching fail_build rules via concludeScan —
-   * there is no write path for it. GitHub Checks (if any) are published
-   * separately on scanCompleted and do not replace this field.
+   * CI- and deploy-facing GET. Org comes from the token (JWT or PAT), never
+   * the client. `conclusion` is computed from matching fail_build rules via
+   * concludeScan; `deployConclusion` from matching block_deploy via
+   * concludeDeploy. There is no write path for either. GitHub Checks (if any)
+   * are published separately on scanCompleted from concludeScan only.
    */
   @Get(':id')
   @RequirePermissions('scan:read')
@@ -39,7 +40,7 @@ export class ScansController {
       // RLS fail-closed looks the same as a missing row. Never 500 — that is how
       // a cross-tenant GET /v1/scans/:id would leak that the id exists (P2025).
       if (!scan) return null;
-      return { ...scan, conclusion: await conclusionForScan(tx, scan) };
+      return { ...scan, ...(await scanGatesForScan(tx, scan)) };
     });
     if (!result) throw new NotFoundException(`Scan ${id} not found`);
     return result;

@@ -24,7 +24,15 @@ export type ScanStatus = z.infer<typeof ScanStatus>;
 export const ScanConclusion = z.enum(['pending', 'passed', 'failed']);
 export type ScanConclusion = z.infer<typeof ScanConclusion>;
 
-/** Field names a client might use to force a failed CI gate. Refused on write. */
+/**
+ * Deploy tooling polls this on GET. Independent of `conclusion`: only a matching
+ * `block_deploy` policy produces `blocked`. Callers cannot POST or PATCH it.
+ * GitHub Checks stay mapped from `concludeScan` / `fail_build` only.
+ */
+export const ScanDeployConclusion = z.enum(['pending', 'allowed', 'blocked']);
+export type ScanDeployConclusion = z.infer<typeof ScanDeployConclusion>;
+
+/** Field names a client might use to force a CI or deploy gate. Refused on write. */
 export const CLIENT_CONCLUSION_KEYS = [
   'conclusion',
   'scanConclusion',
@@ -33,6 +41,8 @@ export const CLIENT_CONCLUSION_KEYS = [
   'check_conclusion',
   'githubCheck',
   'github_check',
+  'deployConclusion',
+  'deploy_conclusion',
 ] as const;
 
 export function findClientConclusionKeys(input: unknown): string[] {
@@ -61,7 +71,8 @@ function refuseClientConclusion(
       code: z.ZodIssueCode.custom,
       message:
         `scan conclusion is not client-writable (${hits.join(', ')}) — ` +
-        'only a matching fail_build policy can fail the build',
+        'only a matching fail_build policy can fail the build; ' +
+        'only a matching block_deploy policy can block deploy',
     });
   }
 }
@@ -116,6 +127,8 @@ export const Scan = z
     finishedAt: z.coerce.date().nullable().default(null),
     /** Computed on GET from matching fail_build rules. Never accepted on write. */
     conclusion: ScanConclusion.optional(),
+    /** Computed on GET from matching block_deploy rules. Never accepted on write. */
+    deployConclusion: ScanDeployConclusion.optional(),
   })
   .merge(AuditMeta);
 export type Scan = z.infer<typeof Scan>;

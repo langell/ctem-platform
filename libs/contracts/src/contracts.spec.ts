@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CreatePolicyRequest,
   CreateScanRequest,
+  Scan,
   UpdatePolicyRequest,
   EVENT_SCHEMAS,
   InviteMemberRequest,
@@ -12,6 +13,7 @@ import {
   STREAMS,
   ScanJob,
   SetMemberRoleRequest,
+  concludeDeploy,
   concludeScan,
   findClientConclusionKeys,
   findTenantWebhookKeys,
@@ -93,7 +95,7 @@ describe('policy editor writes', () => {
     actions: ['notify'],
   };
 
-  it('accepts notify, ticket, or fail_build create and update, persisting priority', () => {
+  it('accepts notify, ticket, fail_build, or block_deploy create and update, persisting priority', () => {
     expect(CreatePolicyRequest.parse({ ...notifyRule, priority: 10 })).toMatchObject({
       actions: ['notify'],
       priority: 10,
@@ -104,23 +106,39 @@ describe('policy editor writes', () => {
     expect(CreatePolicyRequest.parse({ ...notifyRule, actions: ['fail_build'] })).toMatchObject({
       actions: ['fail_build'],
     });
+    expect(CreatePolicyRequest.parse({ ...notifyRule, actions: ['block_deploy'] })).toMatchObject({
+      actions: ['block_deploy'],
+    });
     expect(
       CreatePolicyRequest.parse({ ...notifyRule, actions: ['notify', 'ticket'] }),
     ).toMatchObject({ actions: ['notify', 'ticket'] });
     expect(
       CreatePolicyRequest.parse({ ...notifyRule, actions: ['notify', 'fail_build'] }),
     ).toMatchObject({ actions: ['notify', 'fail_build'] });
+    expect(
+      CreatePolicyRequest.parse({ ...notifyRule, actions: ['notify', 'block_deploy'] }),
+    ).toMatchObject({ actions: ['notify', 'block_deploy'] });
+    expect(
+      CreatePolicyRequest.parse({
+        ...notifyRule,
+        actions: ['notify', 'ticket', 'fail_build', 'block_deploy'],
+      }),
+    ).toMatchObject({ actions: ['notify', 'ticket', 'fail_build', 'block_deploy'] });
     expect(UpdatePolicyRequest.parse({ priority: 5 })).toEqual({ priority: 5 });
     expect(UpdatePolicyRequest.parse({ actions: ['ticket'] })).toEqual({ actions: ['ticket'] });
     expect(UpdatePolicyRequest.parse({ actions: ['fail_build'] })).toEqual({ actions: ['fail_build'] });
+    expect(UpdatePolicyRequest.parse({ actions: ['block_deploy'] })).toEqual({
+      actions: ['block_deploy'],
+    });
+    expect(UpdatePolicyRequest.parse({ actions: ['ticket', 'block_deploy'] })).toEqual({
+      actions: ['ticket', 'block_deploy'],
+    });
   });
 
-  it('refuses block_deploy on create and update', () => {
-    expect(() => UpdatePolicyRequest.parse({ actions: ['block_deploy'] })).toThrow();
-    expect(() =>
-      CreatePolicyRequest.parse({ ...notifyRule, actions: ['notify', 'block_deploy'] }),
-    ).toThrow();
-    expect(() => UpdatePolicyRequest.parse({ actions: ['ticket', 'block_deploy'] })).toThrow();
+  it('keeps ignore off the editor', () => {
+    expect(() => CreatePolicyRequest.parse({ ...notifyRule, actions: ['ignore'] })).toThrow();
+    expect(() => UpdatePolicyRequest.parse({ actions: ['ignore'] })).toThrow();
+    expect(() => UpdatePolicyRequest.parse({ actions: [] })).toThrow();
   });
 
   it('refuses a tenant webhook URL if it appears', () => {
@@ -200,6 +218,137 @@ describe('scan conclusion', () => {
       }),
     ).toBe('pending');
   });
+
+  it('does not fail conclusion from a matching block_deploy rule', () => {
+    expect(
+      concludeScan({
+        status: 'succeeded',
+        findings: [finding],
+        policies: [
+          {
+            priority: 10,
+            condition: { severityAtLeast: 'high' },
+            actions: ['block_deploy'],
+          },
+        ],
+        expectedFindingCount: 1,
+      }),
+    ).toBe('passed');
+  });
+});
+
+describe('deploy conclusion', () => {
+  it('blocks only when a matching block_deploy rule wins', () => {
+    expect(
+      concludeDeploy({
+        status: 'succeeded',
+        findings: [finding],
+        policies: [
+          {
+            priority: 10,
+            condition: { severityAtLeast: 'high' },
+            actions: ['block_deploy'],
+          },
+        ],
+        expectedFindingCount: 1,
+      }),
+    ).toBe('blocked');
+  });
+
+  it('stays allowed when only fail_build matches — gates are independent', () => {
+    expect(
+      concludeDeploy({
+        status: 'succeeded',
+        findings: [finding],
+        policies: [
+          {
+            priority: 10,
+            condition: { severityAtLeast: 'high' },
+            actions: ['fail_build'],
+          },
+        ],
+        expectedFindingCount: 1,
+      }),
+    ).toBe('allowed');
+  });
+
+  it('stays allowed when no block_deploy rule matches — a client field cannot force blocked', () => {
+    const forced = {
+      status: 'succeeded',
+      findings: [finding],
+      policies: [{ priority: 10, condition: { kevOnly: true }, actions: ['notify'] }],
+      expectedFindingCount: 1,
+      clientDeployConclusion: 'blocked',
+    };
+    expect(concludeDeploy(forced)).toBe('allowed');
+    expect(
+      concludeDeploy({
+        status: 'succeeded',
+        findings: [finding],
+        policies: [
+          { priority: 10, condition: { severityAtLeast: 'high' }, actions: ['notify'] },
+          { priority: 20, condition: {}, actions: ['block_deploy'] },
+        ],
+        expectedFindingCount: 1,
+      }),
+    ).toBe('allowed');
+  });
+
+  it('is pending while the scan is running or findings are still expected', () => {
+    expect(
+      concludeDeploy({
+        status: 'running',
+        findings: [finding],
+        policies: [{ priority: 1, condition: {}, actions: ['block_deploy'] }],
+      }),
+    ).toBe('pending');
+    expect(
+      concludeDeploy({
+        status: 'queued',
+        findings: [],
+        policies: [{ priority: 1, condition: {}, actions: ['block_deploy'] }],
+      }),
+    ).toBe('pending');
+    expect(
+      concludeDeploy({
+        status: 'succeeded',
+        findings: [],
+        policies: [{ priority: 1, condition: {}, actions: ['block_deploy'] }],
+        expectedFindingCount: 1,
+      }),
+    ).toBe('pending');
+  });
+
+  it('blocks when the first matching policy includes block_deploy among other actions', () => {
+    expect(
+      concludeDeploy({
+        status: 'succeeded',
+        findings: [finding],
+        policies: [
+          {
+            priority: 10,
+            condition: { severityAtLeast: 'high' },
+            actions: ['notify', 'fail_build', 'block_deploy'],
+          },
+        ],
+        expectedFindingCount: 1,
+      }),
+    ).toBe('blocked');
+    expect(
+      concludeScan({
+        status: 'succeeded',
+        findings: [finding],
+        policies: [
+          {
+            priority: 10,
+            condition: { severityAtLeast: 'high' },
+            actions: ['notify', 'fail_build', 'block_deploy'],
+          },
+        ],
+        expectedFindingCount: 1,
+      }),
+    ).toBe('failed');
+  });
 });
 
 describe('matchesPolicyCondition', () => {
@@ -226,5 +375,43 @@ describe('client cannot write scan conclusion', () => {
     expect(CreateScanRequest.parse({ scannerType: 'sca' })).toMatchObject({
       scannerType: 'sca',
     });
+  });
+
+  it('refuses client-written deployConclusion on create and nested under options', () => {
+    expect(
+      findClientConclusionKeys({ scannerType: 'sca', deployConclusion: 'blocked' }),
+    ).toEqual(['deployConclusion']);
+    expect(
+      findClientConclusionKeys({ scannerType: 'sca', options: { deployConclusion: 'blocked' } }),
+    ).toEqual(['options.deployConclusion']);
+    expect(() =>
+      CreateScanRequest.parse({ scannerType: 'sca', deployConclusion: 'blocked' }),
+    ).toThrow();
+    expect(() =>
+      CreateScanRequest.parse({ scannerType: 'sca', options: { deployConclusion: 'blocked' } }),
+    ).toThrow(/not client-writable/);
+    expect(() =>
+      CreateScanRequest.parse({ scannerType: 'sca', options: { deploy_conclusion: 'blocked' } }),
+    ).toThrow(/not client-writable/);
+    expect(CreateScanRequest.parse({ scannerType: 'sca' })).not.toHaveProperty('deployConclusion');
+  });
+
+  it('accepts deployConclusion on the GET Scan shape only', () => {
+    const base = {
+      id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      orgId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      scannerType: 'sca' as const,
+      trigger: 'ci' as const,
+      status: 'succeeded' as const,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    expect(Scan.parse({ ...base, conclusion: 'failed', deployConclusion: 'blocked' })).toMatchObject({
+      conclusion: 'failed',
+      deployConclusion: 'blocked',
+    });
+    expect(Scan.parse({ ...base, deployConclusion: 'allowed' }).deployConclusion).toBe('allowed');
+    expect(Scan.parse({ ...base, deployConclusion: 'pending' }).deployConclusion).toBe('pending');
+    expect(() => Scan.parse({ ...base, deployConclusion: 'failed' })).toThrow();
   });
 });

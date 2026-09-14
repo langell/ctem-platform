@@ -47,6 +47,7 @@ describe('badges and labels', () => {
     expect(humanize('internet_facing')).toBe('Internet facing');
     expect(humanize('cloud_posture')).toBe('Cloud posture');
     expect(humanize('fail_build')).toBe('Fail build');
+    expect(humanize('block_deploy')).toBe('Block deploy');
     expect(humanize('queued')).toBe('Queued');
   });
 

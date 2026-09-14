@@ -1,6 +1,6 @@
 import { EDITOR_ACTIONS, type EditorAction } from '../api/types';
 
-/** Tenant editor may write notify, ticket, and/or fail-build. block-deploy is not an option. */
+/** Tenant editor may write notify, ticket, fail-build, and/or block-deploy. */
 export function editorActionsFromPolicy(actions: string[]): EditorAction[] {
   const picked = EDITOR_ACTIONS.filter((action) => actions.includes(action));
   return picked.length ? [...picked] : ['notify'];
