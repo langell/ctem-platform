@@ -37,6 +37,7 @@ export const AssetSource = z.enum([
   'ecr',
   'ghcr',
   'gcr',
+  'acr',
   'dockerhub',
   'dns_enum',
   'cert_transparency',

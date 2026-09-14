@@ -8,6 +8,12 @@
 export const AZURE_LOGIN_HOST = 'login.microsoftonline.com';
 export const AZURE_ARM_HOST = 'management.azure.com';
 export const AZURE_TOKEN_SCOPE = 'https://management.azure.com/.default';
+/**
+ * AAD scope for ACR data-plane listing. This is a token audience string sent
+ * to login.microsoftonline.com — never a fetch host. Data-plane HTTP is the
+ * ARM-returned `{loginServer}` (`*.azurecr.io`) only.
+ */
+export const ACR_AAD_SCOPE = 'https://containerregistry.azure.net/.default';
 
 export const AZURE_COMPUTE_API_VERSION = '2024-07-01';
 export const AZURE_STORAGE_API_VERSION = '2023-05-01';
