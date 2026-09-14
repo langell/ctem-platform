@@ -147,14 +147,15 @@ function assertUsableGcpPrivateKey(pem: string): void {
 }
 
 /**
- * GCP discovery has no unauthenticated public path. The integration pointer
- * must be `env:GCP_*`, and the platform-operated signing pair
- * `GCP_CLIENT_EMAIL` + `GCP_PRIVATE_KEY` must both be usable.
+ * GCP and GCR/Artifact Registry discovery have no unauthenticated public
+ * path. The integration pointer must be `env:GCP_*`, and the
+ * platform-operated signing pair `GCP_CLIENT_EMAIL` + `GCP_PRIVATE_KEY`
+ * must both be usable.
  */
 export function requireGcpCredentials(credentialRef: string | null): GcpCredentials {
   if (!credentialRef) {
     throw new Error(
-      'GCP discovery requires a usable credentialRef (env:GCP_*) — refusing unauthenticated listing',
+      'GCP/GCR discovery requires a usable credentialRef (env:GCP_*) — refusing unauthenticated listing',
     );
   }
 
