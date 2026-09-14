@@ -53,7 +53,8 @@ function validRepo(value: string): boolean {
   return REPO_PART.test(value) && value !== '.' && value !== '..';
 }
 
-function parseRepository(
+/** Shared `owner/name` (or `owner`+`repo`) parse for Checks and Deployments. */
+export function parseGithubRepository(
   repository: string | undefined,
   owner: string | undefined,
   repo: string | undefined,
@@ -132,7 +133,7 @@ export function parseGithubChecksContext(options: unknown, scanId: string): Gith
   // Tenant endpoint keys (baseUrl, githubHost, …) are ignored — they must
   // never become the API host.
 
-  const parsedRepo = parseRepository(
+  const parsedRepo = parseGithubRepository(
     stringField(github.repository) ?? stringField(opts.repository),
     stringField(github.owner) ?? stringField(opts.owner),
     stringField(github.repo) ?? stringField(opts.repo),

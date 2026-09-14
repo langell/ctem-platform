@@ -8,10 +8,11 @@ import {
 import type { PrismaTransaction } from '@ctem/db';
 
 /**
- * Shared loaders for CI GET and GitHub Checks. Inputs must stay identical so
- * a Check conclusion cannot drift from `GET /v1/scans/:id` `conclusion`.
- * `deployConclusion` uses the same findings/policies/suppressed set and
- * `concludeDeploy` — Checks still map `concludeScan` / fail_build only.
+ * Shared loaders for CI GET, GitHub Checks, and GitHub Deployment statuses.
+ * Inputs must stay identical so a Check cannot drift from GET `conclusion`
+ * and a Deployment status cannot drift from GET `deployConclusion`.
+ * Checks still map `concludeScan` / fail_build only; Deployment statuses map
+ * `concludeDeploy` / block_deploy only.
  */
 
 export interface ScanConclusionRow {
@@ -122,5 +123,23 @@ export async function conclusionForScan(
 export function checkConclusionFromScan(conclusion: ScanConclusion): 'success' | 'failure' | null {
   if (conclusion === 'passed') return 'success';
   if (conclusion === 'failed') return 'failure';
+  return null;
+}
+
+/** Shared `concludeDeploy` loader for CI GET and GitHub Deployment statuses. */
+export async function deployConclusionForScan(
+  tx: PrismaTransaction,
+  scan: ScanConclusionRow,
+): Promise<ScanDeployConclusion> {
+  const { deployConclusion } = await scanGatesForScan(tx, scan);
+  return deployConclusion;
+}
+
+/** Terminal GET `allowed`/`blocked` → Deployments API state. `pending` is not published. */
+export function deploymentStatusFromDeploy(
+  deployConclusion: ScanDeployConclusion,
+): 'success' | 'failure' | null {
+  if (deployConclusion === 'allowed') return 'success';
+  if (deployConclusion === 'blocked') return 'failure';
   return null;
 }
