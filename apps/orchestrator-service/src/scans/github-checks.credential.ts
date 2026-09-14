@@ -1,11 +1,12 @@
 /**
- * GitHub Checks credentials. Same class as GHCR: platform-operated `env:GITHUB_*`
- * only. A missing or unusable pointer must not call api.github.com.
+ * GitHub api.github.com credentials for Checks and Deployment statuses. Same
+ * class as GHCR: platform-operated `env:GITHUB_*` only. A missing or unusable
+ * pointer must not call api.github.com.
  *
  * Prefer the scan/asset integration `credentialRef` when it is an allowlisted
  * `env:GITHUB_*` name and the pointed token is usable. Otherwise the platform
- * default `env:GITHUB_TOKEN` is used for Checks only (still `GITHUB_*`).
- * Non-GITHUB refs (GITLAB_*, AWS_*, DATABASE_URL) are skipped — never read.
+ * default `env:GITHUB_TOKEN` is used (still `GITHUB_*`). Non-GITHUB refs
+ * (GITLAB_*, AWS_*, DATABASE_URL) are skipped — never read.
  */
 
 const GITHUB_ENV_NAME = /^GITHUB_[A-Z0-9_]+$/;
@@ -39,14 +40,14 @@ function envKeyFromRef(ref: string): string {
 export function requireGithubToken(credentialRef: string): string {
   if (!isGithubEnvRef(credentialRef)) {
     throw new GithubChecksCredentialError(
-      `credentialRef '${credentialRef}' is not an env:GITHUB_* pointer — GitHub Checks only accept platform-operated GITHUB_* names`,
+      `credentialRef '${credentialRef}' is not an env:GITHUB_* pointer — api.github.com publishers only accept platform-operated GITHUB_* names`,
     );
   }
   const key = envKeyFromRef(credentialRef);
   const token = process.env[key];
   if (!token || !token.trim()) {
     throw new GithubChecksCredentialError(
-      `credentialRef '${credentialRef}' is set but cannot be used — refusing to publish Checks without usable GITHUB_* credentials`,
+      `credentialRef '${credentialRef}' is set but cannot be used — refusing to call api.github.com without usable GITHUB_* credentials`,
     );
   }
   return token.trim();
