@@ -15,12 +15,13 @@ export interface ResolvedComponent {
 interface CycloneDxComponent {
   'bom-ref'?: string;
   purl?: string;
+  group?: string;
   name: string;
   version: string;
   licenses?: Array<{ license?: { id?: string; name?: string } }>;
 }
 
-interface CycloneDxDocument {
+export interface CycloneDxDocument {
   bomFormat?: string;
   metadata?: { component?: { 'bom-ref'?: string } };
   components?: CycloneDxComponent[];
@@ -42,52 +43,77 @@ export class SbomParser {
   }
 
   parseCycloneDx(doc: CycloneDxDocument): ResolvedComponent[] {
-    const rootRef = doc.metadata?.component?.['bom-ref'];
-    const directRefs = new Set(
-      doc.dependencies?.find((d) => d.ref === rootRef)?.dependsOn ?? [],
-    );
-    const paths = shortestPaths(rootRef, doc.dependencies ?? []);
-    const nameByRef = new Map(
-      (doc.components ?? []).map((c) => [c['bom-ref'] ?? c.purl ?? `${c.name}@${c.version}`, c.name]),
-    );
-
-    return (doc.components ?? []).map((c) => {
-      const ref = c['bom-ref'] ?? c.purl ?? `${c.name}@${c.version}`;
-      return {
-        purl: c.purl ?? `pkg:generic/${c.name}@${c.version}`,
-        name: c.name,
-        version: c.version,
-        ecosystem: this.ecosystemFromPurl(c.purl),
-        direct: directRefs.has(ref),
-        // The "why is this even here" answer: names from a direct dependency
-        // down to this component, e.g. ['express', 'body-parser', 'qs'].
-        dependencyPath: (paths.get(ref) ?? []).map((r) => nameByRef.get(r) ?? r),
-        licenses:
-          c.licenses?.map((l) => l.license?.id ?? l.license?.name ?? 'unknown').filter(Boolean) ?? [],
-      };
-    });
+    return parseCycloneDx(doc);
   }
+}
 
-  private ecosystemFromPurl(purl?: string): string {
-    if (!purl) return 'unknown';
-    const match = /^pkg:([^/]+)\//.exec(purl);
-    const type = match?.[1] ?? 'unknown';
-    // OSV uses its own ecosystem names; normalize once here rather than at every call site.
-    const map: Record<string, string> = {
-      npm: 'npm',
-      pypi: 'PyPI',
-      maven: 'Maven',
-      golang: 'Go',
-      cargo: 'crates.io',
-      gem: 'RubyGems',
-      nuget: 'NuGet',
-      composer: 'Packagist',
-      deb: 'Debian',
-      apk: 'Alpine',
-      rpm: 'Red Hat',
+/**
+ * Shared CycloneDX graph parse used by artifact SBOM ingest and the in-repo
+ * lockfile walker. `direct` + `dependencyPath` are identical on both paths.
+ *
+ * Maven purls (`pkg:maven/group/artifact@version`) become OSV names
+ * `group:artifact` so they match pom.xml / gradle.lockfile coordinates.
+ */
+export function parseCycloneDx(doc: CycloneDxDocument): ResolvedComponent[] {
+  const rootRef = doc.metadata?.component?.['bom-ref'];
+  const directRefs = new Set(doc.dependencies?.find((d) => d.ref === rootRef)?.dependsOn ?? []);
+  const paths = shortestPaths(rootRef, doc.dependencies ?? []);
+  const nameByRef = new Map(
+    (doc.components ?? []).map((c) => [
+      c['bom-ref'] ?? c.purl ?? `${c.name}@${c.version}`,
+      componentName(c),
+    ]),
+  );
+
+  return (doc.components ?? []).map((c) => {
+    const ref = c['bom-ref'] ?? c.purl ?? `${c.name}@${c.version}`;
+    const name = componentName(c);
+    return {
+      purl: c.purl ?? `pkg:generic/${c.name}@${c.version}`,
+      name,
+      version: c.version,
+      ecosystem: ecosystemFromPurl(c.purl),
+      direct: directRefs.has(ref),
+      // The "why is this even here" answer: names from a direct dependency
+      // down to this component, e.g. ['express', 'body-parser', 'qs'].
+      dependencyPath: (paths.get(ref) ?? []).map((r) => nameByRef.get(r) ?? r),
+      licenses:
+        c.licenses?.map((l) => l.license?.id ?? l.license?.name ?? 'unknown').filter(Boolean) ?? [],
     };
-    return map[type] ?? type;
-  }
+  });
+}
+
+export function ecosystemFromPurl(purl?: string): string {
+  if (!purl) return 'unknown';
+  const match = /^pkg:([^/]+)\//.exec(purl);
+  const type = match?.[1] ?? 'unknown';
+  // OSV uses its own ecosystem names; normalize once here rather than at every call site.
+  const map: Record<string, string> = {
+    npm: 'npm',
+    pypi: 'PyPI',
+    maven: 'Maven',
+    golang: 'Go',
+    cargo: 'crates.io',
+    gem: 'RubyGems',
+    nuget: 'NuGet',
+    composer: 'Packagist',
+    deb: 'Debian',
+    apk: 'Alpine',
+    rpm: 'Red Hat',
+  };
+  return map[type] ?? type;
+}
+
+function componentName(c: CycloneDxComponent): string {
+  return mavenNameFromPurl(c.purl) ?? c.name;
+}
+
+/** `pkg:maven/group/artifact@version` → `group:artifact` (OSV / pom / gradle). */
+function mavenNameFromPurl(purl?: string): string | undefined {
+  if (!purl) return undefined;
+  const m = /^pkg:maven\/([^/@]+)\/([^/@?#]+)/i.exec(purl);
+  if (!m) return undefined;
+  return `${decodeURIComponent(m[1])}:${decodeURIComponent(m[2])}`;
 }
 
 /**

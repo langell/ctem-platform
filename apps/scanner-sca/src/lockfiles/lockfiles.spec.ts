@@ -7,14 +7,16 @@ import { parseCargoLock } from './cargo';
 import { parseComposerLock } from './composer';
 import { parseGemfileLock } from './gem';
 import { parseGoModules } from './golang';
-import { parseGradleLockfile, parsePomXml } from './maven';
+import { parseGradleLockfile, parsePomXml, gradleParser, pomParser } from './maven';
+import { cyclonedxParser, parseCycloneDxLockfile } from './cyclonedx';
+import { parseCycloneDx } from '../sbom.parser';
 import { npmParser, parseNpmLock } from './npm';
 import { parseCsproj, parsePackagesLock } from './nuget';
 import { parseRequirementsTxt } from './pip';
 import { parsePipfileLock, pipfileParser } from './pipfile';
 import { parsePnpmLock, splitPnpmKey } from './pnpm';
 import { parsePoetryLock } from './poetry';
-import { filesToRead, LockfileResolutionError, MAX_LOCKFILE_BYTES, resolveLockfiles } from './resolve';
+import { filesToRead, LockfileResolutionError, MAX_LOCKFILE_BYTES, resolveLockfiles, winsGroup } from './resolve';
 import { parseUvLock, uvParser } from './uv';
 import { listRepoFiles } from './walk';
 import { parseYarnClassic, yarnParser } from './yarn';
@@ -422,6 +424,84 @@ describe('Maven / Gradle', () => {
       dependencyPath: [],
     });
   });
+
+  it('marks lockfile GAVs that match a sibling pom as direct with a path', () => {
+    const map = byName(
+      parseGradleLockfile(
+        load('gradle-pom', 'gradle.lockfile'),
+        'gradle.lockfile',
+        load('gradle-pom', 'pom.xml'),
+      ),
+    );
+    expect(map['org.apache.commons:commons-lang3']).toMatchObject({
+      version: '3.12.0',
+      direct: true,
+      dependencyPath: ['org.apache.commons:commons-lang3'],
+      purl: 'pkg:maven/org.apache.commons/commons-lang3@3.12.0',
+    });
+    expect(map['com.google.guava:guava']).toMatchObject({
+      version: '32.1.2-jre',
+      direct: true,
+      dependencyPath: ['com.google.guava:guava'],
+    });
+    expect(map['com.fasterxml.jackson.core:jackson-core']).toMatchObject({
+      version: '2.15.2',
+      direct: false,
+      dependencyPath: [],
+    });
+    expect(map['org.example:ranged']).toBeUndefined();
+  });
+});
+
+describe('in-repo CycloneDX', () => {
+  it('matches bom.json, cyclonedx.json, and *.cdx.json only', () => {
+    expect(cyclonedxParser.matches('bom.json')).toBe(true);
+    expect(cyclonedxParser.matches('cyclonedx.json')).toBe(true);
+    expect(cyclonedxParser.matches('app.cdx.json')).toBe(true);
+    expect(cyclonedxParser.matches('package-lock.json')).toBe(false);
+    expect(cyclonedxParser.matches('bom.json.bak')).toBe(false);
+  });
+  it('reuses the SBOM graph so Maven purls get real direct + dependencyPath', () => {
+    const content = load('cyclonedx', 'bom.json');
+    const doc = JSON.parse(content) as Parameters<typeof parseCycloneDx>[0];
+    const fromSbom = parseCycloneDx(doc);
+    const fromLock = parseCycloneDxLockfile(content, 'bom.json');
+    expect(
+      fromLock.map((c) => {
+        const { manifestPath, ...rest } = c;
+        expect(manifestPath).toBe('bom.json');
+        return rest;
+      }),
+    ).toEqual(fromSbom);
+
+    const map = byName(fromLock);
+    expect(map['org.apache.commons:commons-lang3']).toMatchObject({
+      version: '3.12.0',
+      ecosystem: 'Maven',
+      direct: true,
+      dependencyPath: ['org.apache.commons:commons-lang3'],
+      purl: 'pkg:maven/org.apache.commons/commons-lang3@3.12.0',
+      manifestPath: 'bom.json',
+    });
+    expect(map['com.google.guava:guava']).toMatchObject({
+      direct: true,
+      dependencyPath: ['com.google.guava:guava'],
+    });
+    expect(map['com.google.guava:failureaccess']).toMatchObject({
+      version: '1.0.1',
+      direct: false,
+      dependencyPath: ['com.google.guava:guava', 'com.google.guava:failureaccess'],
+      purl: 'pkg:maven/com.google.guava/failureaccess@1.0.1',
+    });
+  });
+
+  it('throws on malformed JSON so resolve can fail closed', () => {
+    expect(() => parseCycloneDxLockfile('{ this is not json', 'bom.json')).toThrow(/not valid JSON/);
+  });
+
+  it('throws when JSON is not CycloneDX', () => {
+    expect(() => parseCycloneDxLockfile('{"name":"not-a-bom"}', 'bom.json')).toThrow(/not CycloneDX/);
+  });
 });
 
 describe('composer.lock', () => {
@@ -486,6 +566,102 @@ describe('resolveLockfiles', () => {
     const components = await resolveLockfiles(join(FIX, 'pipenv'));
     expect(components.every((c) => c.manifestPath.endsWith('Pipfile.lock'))).toBe(true);
     expect(components.some((c) => c.name === 'flask')).toBe(false);
+  });
+
+  it('prefers in-repo CycloneDX over gradle.lockfile and pom.xml', async () => {
+    const components = await resolveLockfiles(join(FIX, 'java-priority'));
+    expect(components.every((c) => c.manifestPath === 'bom.json')).toBe(true);
+    expect(components.some((c) => c.name === 'com.fasterxml.jackson.core:jackson-core')).toBe(false);
+    expect(components.some((c) => c.name === 'org.example:only-in-pom')).toBe(false);
+    const map = byName(components);
+    expect(map['com.google.guava:failureaccess']).toMatchObject({
+      direct: false,
+      dependencyPath: ['com.google.guava:guava', 'com.google.guava:failureaccess'],
+    });
+  });
+
+  it('uses gradle.lockfile when it is the java winner and marks pom sibling directs', async () => {
+    const components = await resolveLockfiles(join(FIX, 'gradle-pom'));
+    expect(components.every((c) => c.manifestPath === 'gradle.lockfile')).toBe(true);
+    const map = byName(components);
+    expect(map['org.apache.commons:commons-lang3'].direct).toBe(true);
+    expect(map['com.fasterxml.jackson.core:jackson-core'].direct).toBe(false);
+  });
+
+  it('keeps gradle.lockfile flat when no sibling pom is present', async () => {
+    const components = await resolveLockfiles(join(FIX, 'gradle'));
+    expect(components.every((c) => c.manifestPath === 'gradle.lockfile' && !c.direct && c.dependencyPath.length === 0)).toBe(
+      true,
+    );
+  });
+
+  it('keeps the pom.xml fallback when it is the only java file', async () => {
+    const components = await resolveLockfiles(join(FIX, 'maven'));
+    expect(components.every((c) => c.manifestPath === 'pom.xml' && c.direct)).toBe(true);
+    expect(components.map((c) => c.name).sort()).toEqual([
+      'com.google.guava:guava',
+      'org.apache.commons:commons-lang3',
+    ]);
+  });
+
+  it('fails closed when the only selected Java file is a malformed BOM', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'ctem-bad-bom-'));
+    await writeFile(join(root, 'bom.json'), '{ this is not json');
+    await expect(resolveLockfiles(root)).rejects.toThrow(LockfileResolutionError);
+  });
+
+  it('picks bom.json over cyclonedx.json and the first *.cdx.json', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'ctem-bom-rank-'));
+    const mini = (artifact: string) =>
+      JSON.stringify({
+        bomFormat: 'CycloneDX',
+        metadata: { component: { 'bom-ref': 'root' } },
+        components: [
+          {
+            'bom-ref': `pkg:maven/com.acme/${artifact}@1.0.0`,
+            name: artifact,
+            version: '1.0.0',
+            purl: `pkg:maven/com.acme/${artifact}@1.0.0`,
+          },
+        ],
+        dependencies: [{ ref: 'root', dependsOn: [`pkg:maven/com.acme/${artifact}@1.0.0`] }],
+      });
+    await writeFile(join(root, 'z.cdx.json'), mini('from-z'));
+    await writeFile(join(root, 'a.cdx.json'), mini('from-a'));
+    await writeFile(join(root, 'cyclonedx.json'), mini('from-cyclonedx'));
+    await writeFile(join(root, 'bom.json'), mini('from-bom'));
+    const withBom = await resolveLockfiles(root);
+    expect(withBom.map((c) => c.name)).toEqual(['com.acme:from-bom']);
+    expect(withBom[0].manifestPath).toBe('bom.json');
+  });
+
+  it('picks the lexicographically first *.cdx.json when that is the only CycloneDX name', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'ctem-cdx-sort-'));
+    const mini = (artifact: string) =>
+      JSON.stringify({
+        bomFormat: 'CycloneDX',
+        metadata: { component: { 'bom-ref': 'root' } },
+        components: [
+          {
+            'bom-ref': `pkg:maven/com.acme/${artifact}@1.0.0`,
+            name: artifact,
+            version: '1.0.0',
+            purl: `pkg:maven/com.acme/${artifact}@1.0.0`,
+          },
+        ],
+        dependencies: [{ ref: 'root', dependsOn: [`pkg:maven/com.acme/${artifact}@1.0.0`] }],
+      });
+    await writeFile(join(root, 'z.cdx.json'), mini('from-z'));
+    await writeFile(join(root, 'a.cdx.json'), mini('from-a'));
+    const components = await resolveLockfiles(root);
+    expect(components.map((c) => c.name)).toEqual(['com.acme:from-a']);
+    expect(components[0].manifestPath).toBe('a.cdx.json');
+  });
+
+  it('fails closed when the only selected file is JSON that is not CycloneDX', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'ctem-not-cdx-'));
+    await writeFile(join(root, 'bom.json'), JSON.stringify({ name: 'not-a-bom' }));
+    await expect(resolveLockfiles(root)).rejects.toThrow(LockfileResolutionError);
   });
 
   it('keeps the pip fallback when only requirements.txt exists', async () => {
@@ -560,11 +736,48 @@ describe('resolveLockfiles', () => {
         { absPath: '/r/pyproject.toml', relPath: 'pyproject.toml', fileName: 'pyproject.toml' },
       ]).map((f) => f.fileName),
     ).toEqual(['uv.lock']);
+    expect(
+      filesToRead(gradleParser, 'gradle.lockfile', [
+        { absPath: '/r/gradle.lockfile', relPath: 'gradle.lockfile', fileName: 'gradle.lockfile' },
+        { absPath: '/r/pom.xml', relPath: 'pom.xml', fileName: 'pom.xml' },
+        { absPath: '/r/README.md', relPath: 'README.md', fileName: 'README.md' },
+      ]).map((f) => f.fileName),
+    ).toEqual(['gradle.lockfile', 'pom.xml']);
+    expect(
+      filesToRead(cyclonedxParser, 'bom.json', [
+        { absPath: '/r/bom.json', relPath: 'bom.json', fileName: 'bom.json' },
+        { absPath: '/r/pom.xml', relPath: 'pom.xml', fileName: 'pom.xml' },
+      ]).map((f) => f.fileName),
+    ).toEqual(['bom.json']);
+  });
+
+  it('ranks CycloneDX filenames bom.json > cyclonedx.json > first *.cdx.json', () => {
+    const bom = { absPath: '/r/bom.json', relPath: 'bom.json', fileName: 'bom.json' };
+    const named = { absPath: '/r/cyclonedx.json', relPath: 'cyclonedx.json', fileName: 'cyclonedx.json' };
+    const lateCdx = { absPath: '/r/z.cdx.json', relPath: 'z.cdx.json', fileName: 'z.cdx.json' };
+    const earlyCdx = { absPath: '/r/a.cdx.json', relPath: 'a.cdx.json', fileName: 'a.cdx.json' };
+    const lock = { absPath: '/r/gradle.lockfile', relPath: 'gradle.lockfile', fileName: 'gradle.lockfile' };
+    const pom = { absPath: '/r/pom.xml', relPath: 'pom.xml', fileName: 'pom.xml' };
+
+    expect(winsGroup(cyclonedxParser, bom, { parser: gradleParser, file: lock })).toBe(true);
+    expect(winsGroup(gradleParser, lock, { parser: pomParser, file: pom })).toBe(true);
+    expect(winsGroup(cyclonedxParser, bom, { parser: cyclonedxParser, file: named })).toBe(true);
+    expect(winsGroup(cyclonedxParser, named, { parser: cyclonedxParser, file: lateCdx })).toBe(true);
+    expect(winsGroup(cyclonedxParser, earlyCdx, { parser: cyclonedxParser, file: lateCdx })).toBe(true);
+    expect(winsGroup(cyclonedxParser, lateCdx, { parser: cyclonedxParser, file: earlyCdx })).toBe(false);
   });
 
   it('refuses a lockfile over MAX_LOCKFILE_BYTES', async () => {
     const root = await mkdtemp(join(tmpdir(), 'ctem-huge-lock-'));
     const handle = await open(join(root, 'uv.lock'), 'w');
+    await handle.truncate(MAX_LOCKFILE_BYTES + 1);
+    await handle.close();
+    await expect(resolveLockfiles(root)).rejects.toThrow(LockfileResolutionError);
+  });
+
+  it('refuses an in-repo BOM over MAX_LOCKFILE_BYTES', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'ctem-huge-bom-'));
+    const handle = await open(join(root, 'bom.json'), 'w');
     await handle.truncate(MAX_LOCKFILE_BYTES + 1);
     await handle.close();
     await expect(resolveLockfiles(root)).rejects.toThrow(LockfileResolutionError);

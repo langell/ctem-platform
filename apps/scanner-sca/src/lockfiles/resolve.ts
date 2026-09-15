@@ -2,6 +2,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { rootLogger } from '@ctem/observability';
 import { cargoParser } from './cargo';
 import { composerParser } from './composer';
+import { cyclonedxParser } from './cyclonedx';
 import { gemParser } from './gem';
 import { golangParser } from './golang';
 import { gradleParser, pomParser } from './maven';
@@ -35,6 +36,7 @@ export class LockfileResolutionError extends Error {
  * `pom.xml`, `*.csproj`, and `requirements.txt` are pinned-manifest fallbacks —
  * they are not dependency graphs. Prefer the lockfile when both exist.
  * Python prefers poetry.lock → uv.lock / Pipfile.lock → requirements.txt.
+ * Java prefers in-repo CycloneDX → gradle.lockfile (+ pom direct hints) → pom.xml fallback.
  */
 export const PARSERS: EcosystemParser[] = [
   pnpmParser,
@@ -47,6 +49,7 @@ export const PARSERS: EcosystemParser[] = [
   pipfileParser,
   pipParser,
   gemParser,
+  cyclonedxParser,
   gradleParser,
   pomParser,
   composerParser,
@@ -57,6 +60,28 @@ export const PARSERS: EcosystemParser[] = [
 export function filesToRead(parser: EcosystemParser, lockfileName: string, dirFiles: RepoFile[]): RepoFile[] {
   const needed = new Set([lockfileName, ...(parser.companionFiles ?? [])]);
   return dirFiles.filter((file) => needed.has(file.fileName));
+}
+
+/**
+ * Highest parser priority wins the group. Equal priority uses optional
+ * `fileRank` (CycloneDX: bom.json > cyclonedx.json > first *.cdx.json).
+ */
+export function winsGroup(
+  parser: EcosystemParser,
+  file: RepoFile,
+  current?: { parser: EcosystemParser; file: RepoFile },
+): boolean {
+  if (!current) return true;
+  if (parser.priority !== current.parser.priority) {
+    return parser.priority > current.parser.priority;
+  }
+  const a = parser.fileRank?.(file.fileName);
+  const b = current.parser.fileRank?.(current.file.fileName);
+  if (a === undefined && b === undefined) return false;
+  const aRank = a ?? 0;
+  const bRank = b ?? 0;
+  if (aRank !== bRank) return aRank > bRank;
+  return file.fileName.localeCompare(current.file.fileName) < 0;
 }
 
 export async function resolveLockfiles(repoRoot: string): Promise<ResolvedComponent[]> {
@@ -94,7 +119,7 @@ export async function resolveLockfiles(repoRoot: string): Promise<ResolvedCompon
       for (const parser of PARSERS) {
         if (!parser.matches(file.fileName)) continue;
         const current = winners.get(parser.group);
-        if (!current || parser.priority > current.parser.priority) {
+        if (winsGroup(parser, file, current)) {
           winners.set(parser.group, { parser, file });
         }
       }
