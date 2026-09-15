@@ -3,11 +3,25 @@
  *   `ghcr:owner/name@sha256:<64 hex>`  — GHCR content digest
  *   `ecr:{accountId}/{repositoryName}@sha256:<64 hex>` — ECR content digest
  *   `gcr:{project}/{location}/{repository}/{image}@sha256:<64 hex>` — Artifact Registry
- * Never a mutable tag. Region / location / project / repository are ids, not
- * hosts. The ECR region is not encoded in the externalKey; GCR location is.
+ *   `acr:{subscriptionId}/{resourceGroup}/{registry}/{repository}@sha256:<64 hex>` — ACR
+ * Never a mutable tag. Region / location / project / repository / registry
+ * / subscription / resource group are ids, not hosts. The ECR region is not
+ * encoded in the externalKey; GCR location and ACR registry are.
  */
 
 import { AWS_REGION_RE } from './aws.egress';
+import {
+  ACR_REGISTRY_NAME_RE,
+  ACR_REPOSITORY_RE,
+  AZURE_GUID_RE,
+  AZURE_RESOURCE_GROUP_RE,
+  AzureEgressError,
+  assertAcrLoginServer,
+  assertAcrRegistryName,
+  assertAcrRepository,
+  assertAzureGuid,
+  assertAzureResourceGroup,
+} from './azure.egress';
 import { AWS_ACCOUNT_RE, ContainerEgressError, refuseTenantWritableRegistry } from './container.egress';
 import { GCP_LOCATION_ID_RE, GCP_PROJECT_ID_RE, GCR_REPOSITORY_ID_RE } from './gcp.egress';
 
@@ -16,7 +30,10 @@ export const GHCR_EXTERNAL_KEY_RE = /^ghcr:([^/@]+)\/(.+)@(sha256:[a-f0-9]{64})$
 export const ECR_EXTERNAL_KEY_RE = /^ecr:(\d{12})\/(.+)@(sha256:[a-f0-9]{64})$/i;
 export const GCR_EXTERNAL_KEY_RE =
   /^gcr:([^/@]+)\/([^/@]+)\/([^/@]+)\/(.+)@(sha256:[a-f0-9]{64})$/i;
+export const ACR_EXTERNAL_KEY_RE =
+  /^acr:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/([^/@]+)\/([a-z0-9]{5,50})\/(.+)@(sha256:[a-f0-9]{64})$/i;
 export { AWS_ACCOUNT_RE, GCP_LOCATION_ID_RE, GCP_PROJECT_ID_RE, GCR_REPOSITORY_ID_RE };
+export { AZURE_GUID_RE, ACR_REGISTRY_NAME_RE, ACR_REPOSITORY_RE, AZURE_RESOURCE_GROUP_RE };
 
 export class ContainerIdentityError extends Error {
   constructor(message: string) {
@@ -49,7 +66,20 @@ export interface GcrImageRef {
   digest: string;
 }
 
-export type ContainerImageRef = (GhcrImageRef & { kind: 'ghcr' }) | EcrImageRef | GcrImageRef;
+export interface AcrImageRef {
+  kind: 'acr';
+  subscriptionId: string;
+  resourceGroup: string;
+  registry: string;
+  repository: string;
+  digest: string;
+}
+
+export type ContainerImageRef =
+  | (GhcrImageRef & { kind: 'ghcr' })
+  | EcrImageRef
+  | GcrImageRef
+  | AcrImageRef;
 
 function failIdentity(message: string): never {
   throw new ContainerIdentityError(message);
@@ -287,8 +317,103 @@ export function parseGcrImageRef(
 }
 
 /**
- * Accept GHCR, ECR, or GCR/Artifact Registry digest identities. Other
- * registries (Docker Hub, ACR, Quay) are refused. Pull is by digest only.
+ * Parse `externalKey` / attributes for
+ * `acr:{subscriptionId}/{resourceGroup}/{registry}/{repository}@sha256:<digest>`.
+ * Subscription / resource group / registry / repository are ids — never a
+ * tenant `azurecr.io` host. Pull host is derived as `{registry}.azurecr.io`.
+ * An ARM-derived `loginServer` attribute is consistency-checked only.
+ */
+export function parseAcrImageRef(
+  target: Record<string, unknown>,
+  options: Record<string, unknown> = {},
+): AcrImageRef {
+  refuseTenantWritableRegistry(options);
+  refuseTenantWritableRegistry(target);
+
+  const key = typeof target.externalKey === 'string' ? target.externalKey.trim() : '';
+  let fromKey:
+    | { subscriptionId: string; resourceGroup: string; registry: string; repository: string; digest: string }
+    | undefined;
+  if (key) {
+    const match = ACR_EXTERNAL_KEY_RE.exec(key);
+    if (!match) {
+      failIdentity(
+        `Refusing non-digest or malformed container identity '${key}' — expected acr:{subscriptionId}/{resourceGroup}/{registry}/{repository}@sha256:<64 hex>`,
+      );
+    }
+    fromKey = {
+      subscriptionId: match[1]!.toLowerCase(),
+      resourceGroup: match[2]!,
+      registry: match[3]!.toLowerCase(),
+      repository: match[4]!,
+      digest: match[5]!.toLowerCase(),
+    };
+    assertAcrIdentityParts(fromKey);
+  }
+
+  const attrs = asRecord(target.attributes);
+  const subscriptionAttr =
+    stringAttr(target.subscriptionId) ?? stringAttr(attrs.subscriptionId);
+  const rgAttr = stringAttr(target.resourceGroup) ?? stringAttr(attrs.resourceGroup);
+  const registryAttr = stringAttr(target.registry) ?? stringAttr(attrs.registry);
+  const repoAttr = stringAttr(target.repository) ?? stringAttr(attrs.repository);
+  const digestAttr = stringAttr(target.digest) ?? stringAttr(attrs.digest);
+
+  if (fromKey) {
+    if (subscriptionAttr && subscriptionAttr.toLowerCase() !== fromKey.subscriptionId) {
+      failIdentity('Container asset subscriptionId does not match acr: identity — refusing pull');
+    }
+    if (rgAttr && rgAttr !== fromKey.resourceGroup) {
+      failIdentity('Container asset resourceGroup does not match acr: identity — refusing pull');
+    }
+    if (registryAttr && registryAttr.toLowerCase() !== fromKey.registry) {
+      failIdentity('Container asset registry does not match acr: identity — refusing pull');
+    }
+    if (repoAttr && repoAttr !== fromKey.repository) {
+      failIdentity('Container asset repository does not match acr: identity — refusing pull');
+    }
+    if (digestAttr) {
+      if (!SHA256_DIGEST_RE.test(digestAttr)) {
+        failIdentity(`Refusing non-digest container attribute digest '${digestAttr}'`);
+      }
+      if (digestAttr.toLowerCase() !== fromKey.digest) {
+        failIdentity('Container asset digest does not match acr: identity — refusing pull');
+      }
+    }
+    pinAcrLoginServerAttr(fromKey.registry, target, options);
+    return { kind: 'acr', ...fromKey };
+  }
+
+  if (
+    subscriptionAttr &&
+    AZURE_GUID_RE.test(subscriptionAttr) &&
+    rgAttr &&
+    registryAttr &&
+    ACR_REGISTRY_NAME_RE.test(registryAttr) &&
+    repoAttr &&
+    digestAttr &&
+    SHA256_DIGEST_RE.test(digestAttr)
+  ) {
+    const parts = {
+      subscriptionId: subscriptionAttr.toLowerCase(),
+      resourceGroup: rgAttr,
+      registry: registryAttr.toLowerCase(),
+      repository: repoAttr,
+      digest: digestAttr.toLowerCase(),
+    };
+    assertAcrIdentityParts(parts);
+    pinAcrLoginServerAttr(parts.registry, target, options);
+    return { kind: 'acr', ...parts };
+  }
+
+  failIdentity(
+    'Refusing container_image without acr:{subscriptionId}/{resourceGroup}/{registry}/{repository}@sha256:<digest> identity — no tag fallback, no other registry',
+  );
+}
+
+/**
+ * Accept GHCR, ECR, GCR/Artifact Registry, or ACR digest identities. Other
+ * registries (Docker Hub, Quay) are refused. Pull is by digest only.
  */
 export function parseContainerImageRef(
   target: Record<string, unknown>,
@@ -308,8 +433,11 @@ export function parseContainerImageRef(
     if (GCR_EXTERNAL_KEY_RE.test(key)) {
       return parseGcrImageRef(target, options);
     }
+    if (ACR_EXTERNAL_KEY_RE.test(key)) {
+      return parseAcrImageRef(target, options);
+    }
     failIdentity(
-      `Refusing non-digest or malformed container identity '${key}' — expected ghcr:owner/name@sha256:<64 hex>, ecr:{accountId}/{repositoryName}@sha256:<64 hex>, or gcr:{project}/{location}/{repository}/{image}@sha256:<64 hex>`,
+      `Refusing non-digest or malformed container identity '${key}' — expected ghcr:owner/name@sha256:<64 hex>, ecr:{accountId}/{repositoryName}@sha256:<64 hex>, gcr:{project}/{location}/{repository}/{image}@sha256:<64 hex>, or acr:{subscriptionId}/{resourceGroup}/{registry}/{repository}@sha256:<64 hex>`,
     );
   }
 
@@ -322,6 +450,9 @@ export function parseContainerImageRef(
   const locationAttr = stringAttr(target.location) ?? stringAttr(attrs.location);
   const repoAttr = stringAttr(target.repository) ?? stringAttr(attrs.repository);
   const imageAttr = stringAttr(target.image) ?? stringAttr(attrs.image);
+  const subscriptionAttr =
+    stringAttr(target.subscriptionId) ?? stringAttr(attrs.subscriptionId);
+  const registryAttr = stringAttr(target.registry) ?? stringAttr(attrs.registry);
 
   if (
     projectAttr &&
@@ -334,6 +465,17 @@ export function parseContainerImageRef(
   ) {
     return parseGcrImageRef(target, options);
   }
+  if (
+    subscriptionAttr &&
+    AZURE_GUID_RE.test(subscriptionAttr) &&
+    registryAttr &&
+    ACR_REGISTRY_NAME_RE.test(registryAttr) &&
+    repoAttr &&
+    digestAttr &&
+    SHA256_DIGEST_RE.test(digestAttr)
+  ) {
+    return parseAcrImageRef(target, options);
+  }
   if (ownerAttr && nameAttr && digestAttr && SHA256_DIGEST_RE.test(digestAttr) && !accountAttr) {
     return { kind: 'ghcr', ...parseGhcrImageRef(target, options) };
   }
@@ -342,7 +484,7 @@ export function parseContainerImageRef(
   }
 
   failIdentity(
-    'Refusing container_image without ghcr:, ecr:, or gcr: digest identity — no tag fallback, no other registry',
+    'Refusing container_image without ghcr:, ecr:, gcr:, or acr: digest identity — no tag fallback, no other registry',
   );
 }
 
@@ -363,6 +505,41 @@ function assertGcrIdentityParts(parts: {
     failIdentity(
       `Refusing Artifact Registry image '${parts.image}' — image is a path id, not a registry host`,
     );
+  }
+}
+
+function assertAcrIdentityParts(parts: {
+  subscriptionId: string;
+  resourceGroup: string;
+  registry: string;
+  repository: string;
+}): void {
+  wrapAzureIdentity(() => assertAzureGuid(parts.subscriptionId, 'subscriptionId'));
+  wrapAzureIdentity(() => assertAzureResourceGroup(parts.resourceGroup));
+  wrapAzureIdentity(() => assertAcrRegistryName(parts.registry));
+  wrapAzureIdentity(() => assertAcrRepository(parts.repository));
+}
+
+function pinAcrLoginServerAttr(
+  registry: string,
+  target: Record<string, unknown>,
+  options: Record<string, unknown>,
+): void {
+  const attrs = asRecord(target.attributes);
+  const fromTarget = stringAttr(target.loginServer) ?? stringAttr(attrs.loginServer);
+  const fromOptions = stringAttr(options.loginServer) ?? stringAttr(options.login_server);
+  if (fromTarget) wrapAzureIdentity(() => assertAcrLoginServer(registry, fromTarget));
+  if (fromOptions) wrapAzureIdentity(() => assertAcrLoginServer(registry, fromOptions));
+}
+
+function wrapAzureIdentity<T>(fn: () => T): T {
+  try {
+    return fn();
+  } catch (err) {
+    if (err instanceof AzureEgressError) {
+      throw new ContainerEgressError(err.message);
+    }
+    throw err;
   }
 }
 

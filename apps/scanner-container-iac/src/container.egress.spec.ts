@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   GHCR_REGISTRY_HOST,
+  allowlistedAcrBlobRedirect,
+  allowlistedAcrOauthUrl,
+  allowlistedAcrRegistryUrl,
   allowlistedEcrApiUrl,
   allowlistedEcrBlobRedirect,
   allowlistedEcrRegistryUrl,
@@ -8,6 +11,11 @@ import {
   allowlistedGcrRegistryUrl,
   allowlistedGhcrBlobRedirect,
   allowlistedGhcrUrl,
+  acrBlobUrl,
+  acrManifestUrl,
+  acrOauthExchangeUrl,
+  acrOauthTokenUrl,
+  acrRegistryHost,
   ecrApiUrl,
   ecrBlobUrl,
   ecrManifestUrl,
@@ -19,6 +27,7 @@ import {
   ghcrBlobUrl,
   ghcrManifestUrl,
   ghcrTokenUrl,
+  isAcrRegistryHost,
   isEcrApiHost,
   isEcrBlobS3Host,
   isEcrRegistryHost,
@@ -171,6 +180,54 @@ describe('refuseTenantWritableRegistry', () => {
       refuseTenantWritableRegistry({
         projectId: 'acme-prod',
         location: 'us-central1',
+        repository: 'payments-api',
+      }),
+    ).not.toThrow();
+  });
+
+  it('refuses tenant azurecr.io / loginServer URL override fields and allows ACR ids', () => {
+    expect(() =>
+      refuseTenantWritableRegistry({
+        registry: 'acmeprod',
+        azurecrUrl: 'https://acmeprod.azurecr.io',
+      }),
+    ).toThrow(/tenant-writable/);
+    expect(() =>
+      refuseTenantWritableRegistry({
+        registry: 'acmeprod',
+        azurecrHost: 'acmeprod.azurecr.io',
+      }),
+    ).toThrow(/tenant-writable/);
+    expect(() =>
+      refuseTenantWritableRegistry({
+        registry: 'acmeprod',
+        acrHost: 'acmeprod.azurecr.io',
+      }),
+    ).toThrow(/tenant-writable/);
+    expect(() =>
+      refuseTenantWritableRegistry({
+        registry: 'acmeprod',
+        loginServer: 'https://acmeprod.azurecr.io',
+      }),
+    ).toThrow(/loginServer/);
+    expect(() =>
+      refuseTenantWritableRegistry({
+        registry: 'acmeprod',
+        loginServer: 'acmeprod.azurecr.io.evil.example',
+      }),
+    ).toThrow(/loginServer/);
+    expect(() => refuseTenantWritableRegistry({ registry: 'https://acmeprod.azurecr.io' })).toThrow(
+      /registry is an id/,
+    );
+    expect(() => refuseTenantWritableRegistry({ registry: 'acmeprod.azurecr.io' })).toThrow(
+      /registry is an id/,
+    );
+    expect(() =>
+      refuseTenantWritableRegistry({
+        subscriptionId: '11111111-1111-1111-1111-111111111111',
+        resourceGroup: 'rg-prod',
+        registry: 'acmeprod',
+        loginServer: 'acmeprod.azurecr.io',
         repository: 'payments-api',
       }),
     ).not.toThrow();
@@ -359,6 +416,82 @@ describe('allowlistedGcrBlobRedirect', () => {
     expect(() =>
       allowlistedGcrBlobRedirect('https://acme.azurecr.io/v2/app/blobs/x', GCR_LOCATION),
     ).toThrow(/redirect host/);
+  });
+});
+
+const ACR_REGISTRY = 'acmeprod';
+
+describe('acrRegistryHost / isAcrRegistryHost', () => {
+  it('derives {registry}.azurecr.io from a registry id and pins the exact host', () => {
+    expect(acrRegistryHost(ACR_REGISTRY)).toBe('acmeprod.azurecr.io');
+    expect(acrRegistryHost('AcmeProd')).toBe('acmeprod.azurecr.io');
+    expect(isAcrRegistryHost('acmeprod.azurecr.io', ACR_REGISTRY)).toBe(true);
+    expect(isAcrRegistryHost('ACMEPROD.AZURECR.IO', ACR_REGISTRY)).toBe(true);
+    expect(isAcrRegistryHost('otherreg.azurecr.io', ACR_REGISTRY)).toBe(false);
+    expect(isAcrRegistryHost('acmeprod.azurecr.io.evil.example', ACR_REGISTRY)).toBe(false);
+    expect(isAcrRegistryHost('acmeprod.eastus.data.azurecr.io', ACR_REGISTRY)).toBe(false);
+    expect(isAcrRegistryHost('acmeprod.azurecr.cn', ACR_REGISTRY)).toBe(false);
+    expect(isAcrRegistryHost('azurecr.io', ACR_REGISTRY)).toBe(false);
+    expect(isAcrRegistryHost('ghcr.io', ACR_REGISTRY)).toBe(false);
+  });
+});
+
+describe('allowlistedAcrRegistryUrl / acrManifestUrl', () => {
+  it('builds the registry azurecr.io host from ids, never a tenant URL', () => {
+    expect(acrManifestUrl(ACR_REGISTRY, 'payments-api', DIGEST)).toBe(
+      `https://acmeprod.azurecr.io/v2/payments-api/manifests/${DIGEST}`,
+    );
+    expect(acrBlobUrl(ACR_REGISTRY, 'team/api', DIGEST)).toBe(
+      `https://acmeprod.azurecr.io/v2/team/api/blobs/${DIGEST}`,
+    );
+    expect(acrOauthExchangeUrl(ACR_REGISTRY)).toBe('https://acmeprod.azurecr.io/oauth2/exchange');
+    expect(acrOauthTokenUrl(ACR_REGISTRY)).toBe('https://acmeprod.azurecr.io/oauth2/token');
+    expect(() =>
+      allowlistedAcrRegistryUrl('https://evilreg.azurecr.io/v2/app/manifests/sha256:abc', ACR_REGISTRY),
+    ).toThrow(/only acmeprod\.azurecr\.io/);
+    expect(() =>
+      allowlistedAcrRegistryUrl('https://acmeprod.azurecr.io.evil.example/v2/app/manifests/x', ACR_REGISTRY),
+    ).toThrow(/only acmeprod\.azurecr\.io/);
+    expect(() =>
+      allowlistedAcrRegistryUrl('https://ghcr.io/v2/acme/app/manifests/sha256:abc', ACR_REGISTRY),
+    ).toThrow();
+    expect(() =>
+      allowlistedAcrRegistryUrl(`http://acmeprod.azurecr.io/v2/app/manifests/${DIGEST}`, ACR_REGISTRY),
+    ).toThrow(/non-https/);
+    expect(() => acrRegistryHost('https://evil.example')).toThrow(/registry/);
+    expect(() => acrRegistryHost('acmeprod.azurecr.io')).toThrow(/registry/);
+    expect(() =>
+      allowlistedAcrOauthUrl('https://acmeprod.azurecr.io/v2/token', ACR_REGISTRY),
+    ).toThrow(/oauth2\/exchange/);
+  });
+});
+
+describe('allowlistedAcrBlobRedirect', () => {
+  it('allows the pinned azurecr.io host and refuses suffix confusion / other registries', () => {
+    expect(
+      allowlistedAcrBlobRedirect(
+        `https://acmeprod.azurecr.io/v2/payments-api/blobs/${DIGEST}`,
+        ACR_REGISTRY,
+      ),
+    ).toContain('acmeprod.azurecr.io');
+    expect(() =>
+      allowlistedAcrBlobRedirect('https://acmeprod.azurecr.io.evil.example/blob', ACR_REGISTRY),
+    ).toThrow(/acmeprod\.azurecr\.io/);
+    expect(() =>
+      allowlistedAcrBlobRedirect('https://acmeprod.eastus.data.azurecr.io/blob', ACR_REGISTRY),
+    ).toThrow(/acmeprod\.azurecr\.io/);
+    expect(() =>
+      allowlistedAcrBlobRedirect('https://docker.io/v2/library/nginx/blobs/x', ACR_REGISTRY),
+    ).toThrow(/acmeprod\.azurecr\.io/);
+    expect(() =>
+      allowlistedAcrBlobRedirect('https://ghcr.io/v2/acme/app/blobs/x', ACR_REGISTRY),
+    ).toThrow(/acmeprod\.azurecr\.io/);
+    expect(() =>
+      allowlistedAcrBlobRedirect(
+        'https://us-central1-docker.pkg.dev/v2/acme/app/blobs/x',
+        ACR_REGISTRY,
+      ),
+    ).toThrow(/acmeprod\.azurecr\.io/);
   });
 });
 

@@ -14,6 +14,7 @@ import { ContainerInventoryError } from './inventory/packages';
 import { ContainerPullError, type ImagePuller, type LayerSnapshot } from './oci/registry';
 import type { EcrImagePuller } from './oci/ecr.registry';
 import type { GcrImagePuller } from './oci/gcr.registry';
+import type { AcrImagePuller } from './oci/acr.registry';
 import type { VulnMatcher } from '@ctem/vuln-intel';
 
 const DIGEST = `sha256:${'a'.repeat(64)}`;
@@ -26,6 +27,12 @@ const ECR_KEY = `ecr:${ACCOUNT}/payments-api@${DIGEST}`;
 const PROJECT = 'acme-prod';
 const GCR_LOCATION = 'us-central1';
 const GCR_KEY = `gcr:${PROJECT}/${GCR_LOCATION}/payments-api/web@${DIGEST}`;
+const SUB = '11111111-1111-1111-1111-111111111111';
+const AZURE_TENANT = '22222222-2222-2222-2222-222222222222';
+const AZURE_CLIENT = '33333333-3333-3333-3333-333333333333';
+const RG = 'rg-prod';
+const ACR_REGISTRY = 'acmeprod';
+const ACR_KEY = `acr:${SUB}/${RG}/${ACR_REGISTRY}/payments-api@${DIGEST}`;
 const gcpPem = generateKeyPairSync('rsa', { modulusLength: 2048 })
   .privateKey.export({ type: 'pkcs8', format: 'pem' })
   .toString();
@@ -129,7 +136,15 @@ function unusedGhcr(): ImagePuller {
 function unusedGcr(): GcrImagePuller {
   return {
     pull: vi.fn(async () => {
-      throw new Error('GCR puller must not be called for GHCR/ECR identities');
+      throw new Error('GCR puller must not be called for GHCR/ECR/ACR identities');
+    }),
+  };
+}
+
+function unusedAcr(): AcrImagePuller {
+  return {
+    pull: vi.fn(async () => {
+      throw new Error('ACR puller must not be called for GHCR/ECR/GCR identities');
     }),
   };
 }
@@ -154,17 +169,29 @@ function gcrPuller(layers: LayerSnapshot[], spy?: (ref: unknown) => void): GcrIm
   };
 }
 
+function acrPuller(layers: LayerSnapshot[], spy?: (ref: unknown) => void): AcrImagePuller {
+  return {
+    pull: vi.fn(async (ref, _creds, checkDeadline) => {
+      spy?.(ref);
+      if (!checkDeadline()) throw new ContainerPullError('Job deadline exceeded mid-pull');
+      return { digest: DIGEST, owner: ACR_REGISTRY, name: 'payments-api', layers };
+    }),
+  };
+}
+
 function scanner(
   matcher = matchingMatcher(),
   registry?: ImagePuller,
   ecr?: EcrImagePuller,
   gcr?: GcrImagePuller,
+  acr?: AcrImagePuller,
 ): ContainerScanner {
   return new ContainerScanner(
     matcher as unknown as VulnMatcher,
     (registry ?? puller([layer(LAYER_BASE, { 'lib/apk/db/installed': APK_DB })])) as never,
     (ecr ?? unusedEcr()) as never,
     (gcr ?? unusedGcr()) as never,
+    (acr ?? unusedAcr()) as never,
   );
 }
 
@@ -193,6 +220,20 @@ function gcrTarget(overrides: Record<string, unknown> = {}): Record<string, unkn
   };
 }
 
+function acrTarget(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    kind: 'container_image',
+    externalKey: ACR_KEY,
+    subscriptionId: SUB,
+    resourceGroup: RG,
+    registry: ACR_REGISTRY,
+    loginServer: `${ACR_REGISTRY}.azurecr.io`,
+    repository: 'payments-api',
+    digest: DIGEST,
+    ...overrides,
+  };
+}
+
 afterEach(() => {
   delete process.env.GITHUB_TOKEN;
   delete process.env.AWS_ACCESS_KEY_ID;
@@ -200,6 +241,9 @@ afterEach(() => {
   delete process.env.AWS_SESSION_TOKEN;
   delete process.env.GCP_CLIENT_EMAIL;
   delete process.env.GCP_PRIVATE_KEY;
+  delete process.env.AZURE_TENANT_ID;
+  delete process.env.AZURE_CLIENT_ID;
+  delete process.env.AZURE_CLIENT_SECRET;
 });
 
 describe('ContainerScanner.supports', () => {
@@ -261,6 +305,25 @@ describe('ContainerScanner.execute', () => {
         }),
       ),
     ).rejects.toThrow(ContainerEgressError);
+    await expect(
+      s.execute(
+        ctx({
+          target: {
+            kind: 'container_image',
+            externalKey: ACR_KEY,
+            azurecrUrl: 'https://acmeprod.azurecr.io',
+          },
+        }),
+      ),
+    ).rejects.toThrow(ContainerEgressError);
+    await expect(
+      s.execute(
+        ctx({
+          options: { loginServer: 'https://acmeprod.azurecr.io' },
+          target: acrTarget(),
+        }),
+      ),
+    ).rejects.toThrow(/loginServer|tenant-writable/);
     expect(registry.pull).not.toHaveBeenCalled();
   });
 
@@ -365,7 +428,7 @@ describe('ContainerScanner.execute', () => {
     ).toThrow(/region/);
   });
 
-  it('accepts a GCR digest identity and refuses a tag, tenant pkg.dev host, or ACR', () => {
+  it('accepts a GCR digest identity and refuses a tag or tenant pkg.dev host', () => {
     expect(parseContainerImageRef(gcrTarget())).toEqual({
       kind: 'gcr',
       projectId: PROJECT,
@@ -404,6 +467,62 @@ describe('ContainerScanner.execute', () => {
         externalKey: `acr:11111111-1111-1111-1111-111111111111/rg/reg/app@${DIGEST}`,
       }),
     ).toThrow(/non-digest|malformed/);
+  });
+
+  it('accepts an ACR digest identity and refuses a tag, tenant loginServer URL, or host override', () => {
+    expect(parseContainerImageRef(acrTarget())).toEqual({
+      kind: 'acr',
+      subscriptionId: SUB,
+      resourceGroup: RG,
+      registry: ACR_REGISTRY,
+      repository: 'payments-api',
+      digest: DIGEST,
+    });
+    expect(
+      parseContainerImageRef(
+        acrTarget({
+          repository: 'team/api',
+          externalKey: `acr:${SUB}/${RG}/${ACR_REGISTRY}/team/api@${DIGEST}`,
+        }),
+      ),
+    ).toMatchObject({
+      kind: 'acr',
+      repository: 'team/api',
+    });
+    expect(() =>
+      parseContainerImageRef({
+        kind: 'container_image',
+        externalKey: `acr:${SUB}/${RG}/${ACR_REGISTRY}/payments-api:latest`,
+      }),
+    ).toThrow(ContainerIdentityError);
+    expect(() =>
+      parseContainerImageRef({
+        kind: 'container_image',
+        externalKey: ACR_KEY,
+        azurecrUrl: 'https://acmeprod.azurecr.io',
+      }),
+    ).toThrow(ContainerEgressError);
+    expect(() =>
+      parseContainerImageRef({
+        kind: 'container_image',
+        externalKey: ACR_KEY,
+        loginServer: 'https://acmeprod.azurecr.io',
+      }),
+    ).toThrow(/loginServer|tenant-writable/);
+    expect(() =>
+      parseContainerImageRef({
+        kind: 'container_image',
+        externalKey: ACR_KEY,
+        loginServer: 'evilreg.azurecr.io',
+      }),
+    ).toThrow(/loginServer|identity-derived/);
+    expect(() =>
+      parseContainerImageRef({
+        kind: 'container_image',
+        externalKey: ACR_KEY,
+        registry: 'acmeprod.azurecr.io',
+      }),
+    ).toThrow(/registry is an id|does not match|tenant-writable/);
   });
 
   it('scans an ECR-discovered digest through the same inventory + vuln match', async () => {
@@ -484,6 +603,81 @@ describe('ContainerScanner.execute', () => {
       s.execute(ctx({ target: gcrTarget(), credentialRef: 'env:GITHUB_TOKEN' })),
     ).rejects.toThrow(/env:GCP_\*/);
     expect(gcr.pull).not.toHaveBeenCalled();
+  });
+
+  it('scans an ACR-discovered digest through the same inventory + vuln match', async () => {
+    process.env.AZURE_TENANT_ID = AZURE_TENANT;
+    process.env.AZURE_CLIENT_ID = AZURE_CLIENT;
+    process.env.AZURE_CLIENT_SECRET = 'super-secret';
+    const layers = [
+      layer(LAYER_BASE, { 'lib/apk/db/installed': APK_DB }),
+      layer(LAYER_APP, { 'app/node_modules/lodash/package.json': LODASH_JSON }),
+    ];
+    const acr = acrPuller(layers);
+    const matcher = matchingMatcher(['openssl', 'lodash']);
+    const outcome = await scanner(matcher, unusedGhcr(), unusedEcr(), unusedGcr(), acr).execute(
+      ctx({
+        target: acrTarget(),
+        credentialRef: 'env:AZURE_CLIENT_ID',
+      }),
+    );
+    expect(acr.pull).toHaveBeenCalledOnce();
+    expect(outcome.findings.length).toBeGreaterThanOrEqual(2);
+    expect((outcome.rawOutput as { image: string }).image).toBe(
+      `${ACR_REGISTRY}.azurecr.io/payments-api@${DIGEST}`,
+    );
+    expect((outcome.rawOutput as { complete: boolean; truncated: boolean }).complete).toBe(true);
+    expect((outcome.rawOutput as { truncated: boolean }).truncated).toBe(false);
+  });
+
+  it('fails an ACR pull when AZURE_* credentials are missing or not env:AZURE_*', async () => {
+    const acr = acrPuller([]);
+    const s = scanner(matchingMatcher(), unusedGhcr(), unusedEcr(), unusedGcr(), acr);
+    await expect(
+      s.execute(ctx({ target: acrTarget(), credentialRef: null })),
+    ).rejects.toThrow(ContainerCredentialError);
+    await expect(
+      s.execute(ctx({ target: acrTarget(), credentialRef: 'env:AZURE_CLIENT_ID' })),
+    ).rejects.toThrow(/cannot be used/);
+    process.env.GITHUB_TOKEN = 'ghp_test';
+    await expect(
+      s.execute(ctx({ target: acrTarget(), credentialRef: 'env:GITHUB_TOKEN' })),
+    ).rejects.toThrow(/env:AZURE_\*/);
+    expect(acr.pull).not.toHaveBeenCalled();
+  });
+
+  it('fails an ACR pull that is incomplete or hits the deadline mid-pull', async () => {
+    process.env.AZURE_TENANT_ID = AZURE_TENANT;
+    process.env.AZURE_CLIENT_ID = AZURE_CLIENT;
+    process.env.AZURE_CLIENT_SECRET = 'super-secret';
+    const failPull: AcrImagePuller = {
+      pull: vi.fn(async () => {
+        throw new ContainerPullError('ACR blob GET returned 502 — refusing pull');
+      }),
+    };
+    await expect(
+      scanner(matchingMatcher(), unusedGhcr(), unusedEcr(), unusedGcr(), failPull).execute(
+        ctx({ target: acrTarget(), credentialRef: 'env:AZURE_CLIENT_ID' }),
+      ),
+    ).rejects.toThrow(ContainerPullError);
+
+    const midPull: AcrImagePuller = {
+      pull: vi.fn(async (_ref, _creds, checkDeadline) => {
+        if (!checkDeadline()) throw new ContainerPullError('Job deadline exceeded mid-pull');
+        return { digest: DIGEST, owner: ACR_REGISTRY, name: 'payments-api', layers: [] };
+      }),
+    };
+    let allow = true;
+    await expect(
+      scanner(matchingMatcher(), unusedGhcr(), unusedEcr(), unusedGcr(), midPull).execute({
+        ...ctx({ target: acrTarget(), credentialRef: 'env:AZURE_CLIENT_ID' }),
+        checkDeadline: () => {
+          const ok = allow;
+          allow = false;
+          return ok;
+        },
+      }),
+    ).rejects.toThrow(/deadline/);
   });
 
   it('fails a GCR pull that is incomplete or hits the deadline mid-pull', async () => {
@@ -708,9 +902,12 @@ describe('ContainerScanner.execute', () => {
       'aws.sigv4.ts',
       'gcp.egress.ts',
       'gcp.jwt.ts',
+      'azure.egress.ts',
+      'azure.token.ts',
       'oci/registry.ts',
       'oci/ecr.registry.ts',
       'oci/gcr.registry.ts',
+      'oci/acr.registry.ts',
       'oci/tar.ts',
       'inventory/packages.ts',
     ]

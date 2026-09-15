@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   optionalGithubToken,
   requireAwsCredentials,
+  requireAzureCredentials,
   requireGcpCredentials,
   requireGithubToken,
 } from './container.credential';
@@ -18,6 +19,9 @@ afterEach(() => {
   delete process.env.AWS_SESSION_TOKEN;
   delete process.env.GCP_CLIENT_EMAIL;
   delete process.env.GCP_PRIVATE_KEY;
+  delete process.env.AZURE_TENANT_ID;
+  delete process.env.AZURE_CLIENT_ID;
+  delete process.env.AZURE_CLIENT_SECRET;
 });
 
 describe('requireGithubToken', () => {
@@ -122,6 +126,65 @@ describe('requireGcpCredentials', () => {
     expect(requireGcpCredentials('env:GCP_CLIENT_EMAIL')).toEqual({
       clientEmail: 'ctem@acme-prod.iam.gserviceaccount.com',
       privateKey: gcpPem,
+    });
+  });
+});
+
+const AZURE_TENANT = '22222222-2222-2222-2222-222222222222';
+const AZURE_CLIENT = '33333333-3333-3333-3333-333333333333';
+
+describe('requireAzureCredentials', () => {
+  it('fails closed when credentialRef is missing', () => {
+    expect(() => requireAzureCredentials(null)).toThrow(/env:AZURE_\*/);
+  });
+
+  it('fails closed when the pointed AZURE_* env var is empty', () => {
+    expect(() => requireAzureCredentials('env:AZURE_CLIENT_ID')).toThrow(/cannot be used/);
+  });
+
+  it('fails closed when the client-credentials triple is incomplete', () => {
+    process.env.AZURE_TENANT_ID = AZURE_TENANT;
+    process.env.AZURE_CLIENT_ID = AZURE_CLIENT;
+    expect(() => requireAzureCredentials('env:AZURE_CLIENT_ID')).toThrow(
+      /AZURE_TENANT_ID, AZURE_CLIENT_ID, and AZURE_CLIENT_SECRET/,
+    );
+  });
+
+  it('fails closed when AZURE_TENANT_ID is unusable', () => {
+    process.env.AZURE_TENANT_ID = 'https://evil.example';
+    process.env.AZURE_CLIENT_ID = AZURE_CLIENT;
+    process.env.AZURE_CLIENT_SECRET = 'super-secret';
+    expect(() => requireAzureCredentials('env:AZURE_CLIENT_ID')).toThrow(/unusable/);
+  });
+
+  it('fails closed when AZURE_CLIENT_ID is unusable', () => {
+    process.env.AZURE_TENANT_ID = AZURE_TENANT;
+    process.env.AZURE_CLIENT_ID = 'not-a-guid';
+    process.env.AZURE_CLIENT_SECRET = 'super-secret';
+    expect(() => requireAzureCredentials('env:AZURE_CLIENT_ID')).toThrow(/unusable/);
+  });
+
+  it('refuses a GITHUB_* ref even when AZURE keys are present', () => {
+    process.env.GITHUB_TOKEN = 'ghp_test';
+    process.env.AZURE_TENANT_ID = AZURE_TENANT;
+    process.env.AZURE_CLIENT_ID = AZURE_CLIENT;
+    process.env.AZURE_CLIENT_SECRET = 'super-secret';
+    expect(() => requireAzureCredentials('env:GITHUB_TOKEN')).toThrow(/env:AZURE_\*/);
+  });
+
+  it('refuses env:DATABASE_URL without reading the secret', () => {
+    process.env.DATABASE_URL = 'postgres://should-not-leak';
+    expect(() => requireAzureCredentials('env:DATABASE_URL')).toThrow(/not allowlisted/);
+  });
+
+  it('returns the platform triple when the ref and all three values are set', () => {
+    process.env.AZURE_TENANT_ID = AZURE_TENANT;
+    process.env.AZURE_CLIENT_ID = AZURE_CLIENT;
+    process.env.AZURE_CLIENT_SECRET = 'super-secret';
+    expect(requireAzureCredentials('env:AZURE_CLIENT_ID')).toEqual({
+      tenantId: AZURE_TENANT,
+      clientId: AZURE_CLIENT,
+      clientSecret: 'super-secret',
     });
   });
 });

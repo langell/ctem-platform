@@ -1,8 +1,8 @@
 /**
- * Same allowlist as GHCR / ECR / GCR discovery (`apps/asset-service` credentials).
- * Platform-operated `env:GITHUB_*` (GHCR), `env:AWS_*` (ECR), and `env:GCP_*`
- * (GCR / Artifact Registry). A missing or unusable pointer must fail the
- * pull — never empty-succeed.
+ * Same allowlist as GHCR / ECR / GCR / ACR discovery (`apps/asset-service` credentials).
+ * Platform-operated `env:GITHUB_*` (GHCR), `env:AWS_*` (ECR), `env:GCP_*`
+ * (GCR / Artifact Registry), and `env:AZURE_*` (ACR). A missing or unusable
+ * pointer must fail the pull — never empty-succeed.
  */
 
 import { createPrivateKey } from 'node:crypto';
@@ -11,6 +11,8 @@ const ENV_ALLOWLIST = /^(GITHUB|GITLAB|AWS|GCP|AZURE)_[A-Z0-9_]+$/;
 const GITHUB_ENV_NAME = /^GITHUB_[A-Z0-9_]+$/;
 const AWS_ENV_NAME = /^AWS_[A-Z0-9_]+$/;
 const GCP_ENV_NAME = /^GCP_[A-Z0-9_]+$/;
+const AZURE_ENV_NAME = /^AZURE_[A-Z0-9_]+$/;
+const AZURE_GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export class ContainerCredentialError extends Error {
   constructor(message: string) {
@@ -187,4 +189,66 @@ export function requireGcpCredentials(credentialRef: string | null): GcpCredenti
   assertUsableGcpPrivateKey(privateKey);
 
   return { clientEmail, privateKey };
+}
+
+export interface AzureCredentials {
+  tenantId: string;
+  clientId: string;
+  clientSecret: string;
+}
+
+function assertUsableAzureGuid(value: string, envName: string): string {
+  const trimmed = value.trim();
+  if (!AZURE_GUID_RE.test(trimmed) || /^https?:\/\//i.test(trimmed)) {
+    throw new ContainerCredentialError(`ACR pull fails closed — ${envName} is unusable`);
+  }
+  return trimmed.toLowerCase();
+}
+
+/**
+ * ACR pulls have no unauthenticated path (same class as ACR discovery).
+ * The integration pointer must be `env:AZURE_*`, and the platform-operated
+ * client-credentials triple `AZURE_TENANT_ID` + `AZURE_CLIENT_ID` +
+ * `AZURE_CLIENT_SECRET` must all be usable. A missing or unusable pointer
+ * must not empty-succeed.
+ */
+export function requireAzureCredentials(credentialRef: string | null): AzureCredentials {
+  if (!credentialRef) {
+    throw new ContainerCredentialError(
+      'ACR pull requires a usable credentialRef (env:AZURE_*) — refusing unauthenticated pull',
+    );
+  }
+
+  const sep = credentialRef.indexOf(':');
+  const scheme = sep === -1 ? credentialRef : credentialRef.slice(0, sep);
+  const key = sep === -1 ? '' : credentialRef.slice(sep + 1);
+  if (scheme !== 'env' || !key || !AZURE_ENV_NAME.test(key)) {
+    resolveCredential(credentialRef);
+    throw new ContainerCredentialError(
+      `credentialRef '${credentialRef}' is not an env:AZURE_* pointer — ACR pulls only accept platform-operated AZURE_* names`,
+    );
+  }
+
+  const pointed = resolveCredential(credentialRef);
+  if (!pointed) {
+    throw new ContainerCredentialError(
+      `credentialRef '${credentialRef}' is set but cannot be used — refusing to pull without usable AZURE_* credentials`,
+    );
+  }
+
+  const tenantId = resolveCredential('env:AZURE_TENANT_ID');
+  const clientId = resolveCredential('env:AZURE_CLIENT_ID');
+  const clientSecret = resolveCredential('env:AZURE_CLIENT_SECRET');
+  const secret = clientSecret?.trim();
+  if (!tenantId || !clientId || !secret) {
+    throw new ContainerCredentialError(
+      'ACR pull fails closed without usable AZURE_TENANT_ID, AZURE_CLIENT_ID, and AZURE_CLIENT_SECRET',
+    );
+  }
+
+  return {
+    tenantId: assertUsableAzureGuid(tenantId, 'AZURE_TENANT_ID'),
+    clientId: assertUsableAzureGuid(clientId, 'AZURE_CLIENT_ID'),
+    clientSecret: secret,
+  };
 }
