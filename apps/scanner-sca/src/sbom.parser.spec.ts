@@ -76,6 +76,44 @@ describe('SbomParser.parseCycloneDx', () => {
     expect(byName.requests.dependencyPath).toEqual([]);
   });
 
+  it('uses pkg:maven purls as group:artifact names matching pom/gradle', () => {
+    const maven = parser.parseCycloneDx({
+      bomFormat: 'CycloneDX',
+      metadata: { component: { 'bom-ref': 'root' } },
+      components: [
+        {
+          'bom-ref': 'pkg:maven/org.apache.commons/commons-lang3@3.12.0',
+          purl: 'pkg:maven/org.apache.commons/commons-lang3@3.12.0',
+          name: 'commons-lang3',
+          version: '3.12.0',
+        },
+        {
+          'bom-ref': 'pkg:maven/com.google.guava/failureaccess@1.0.1',
+          purl: 'pkg:maven/com.google.guava/failureaccess@1.0.1',
+          name: 'failureaccess',
+          version: '1.0.1',
+        },
+      ],
+      dependencies: [
+        { ref: 'root', dependsOn: ['pkg:maven/org.apache.commons/commons-lang3@3.12.0'] },
+        {
+          ref: 'pkg:maven/org.apache.commons/commons-lang3@3.12.0',
+          dependsOn: ['pkg:maven/com.google.guava/failureaccess@1.0.1'],
+        },
+      ],
+    });
+    const byName = Object.fromEntries(maven.map((c) => [c.name, c]));
+    expect(byName['org.apache.commons:commons-lang3']).toMatchObject({
+      ecosystem: 'Maven',
+      direct: true,
+      dependencyPath: ['org.apache.commons:commons-lang3'],
+    });
+    expect(byName['com.google.guava:failureaccess']).toMatchObject({
+      direct: false,
+      dependencyPath: ['org.apache.commons:commons-lang3', 'com.google.guava:failureaccess'],
+    });
+  });
+
   it('picks the shortest path when a component is reachable several ways', () => {
     const diamond = {
       metadata: { component: { 'bom-ref': 'root' } },

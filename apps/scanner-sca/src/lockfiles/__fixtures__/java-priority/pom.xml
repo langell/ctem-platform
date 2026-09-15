@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.acme</groupId>
+  <artifactId>fixture-app</artifactId>
+  <version>1.0.0</version>
+  <dependencies>
+    <dependency>
+      <groupId>org.example</groupId>
+      <artifactId>only-in-pom</artifactId>
+      <version>1.0.0</version>
+    </dependency>
+  </dependencies>
+</project>

@@ -7,7 +7,8 @@ export const gradleParser: EcosystemParser = {
   group: 'java',
   priority: 20,
   matches: (fileName) => fileName === 'gradle.lockfile',
-  parse: (input) => parseGradleLockfile(input.content, input.relPath),
+  companionFiles: ['pom.xml'],
+  parse: (input) => parseGradleLockfile(input.content, input.relPath, input.companions['pom.xml']),
 };
 
 export const pomParser: EcosystemParser = {
@@ -21,10 +22,12 @@ export const pomParser: EcosystemParser = {
 
 /**
  * Gradle lockfiles are a flat `group:artifact:version=configurations` list.
- * Limitation: no graph, so every coordinate is `direct: false` with an empty
- * dependencyPath — we cannot tell which were declared vs pulled in.
+ * They are not a graph: lockfile-only entries stay `direct: false` with an
+ * empty dependencyPath. When a sibling `pom.xml` is present, coordinates that
+ * match a concrete pom dependency (same rules as `parsePomXml`) are marked
+ * `direct: true` with `dependencyPath: [name]`. No Groovy/Kotlin DSL parse.
  */
-export function parseGradleLockfile(content: string, manifestPath: string) {
+export function parseGradleLockfile(content: string, manifestPath: string, pomXml?: string) {
   const seen = new Map<string, string>();
   for (const raw of content.split('\n')) {
     const line = raw.trim();
@@ -38,17 +41,22 @@ export function parseGradleLockfile(content: string, manifestPath: string) {
     if (!seen.has(name)) seen.set(name, version);
   }
 
-  return [...seen.entries()].map(([name, version]) =>
-    makeComponent({
+  const pomDirects = new Set(
+    pomXml ? parsePomXml(pomXml, 'pom.xml').map((component) => component.name) : [],
+  );
+
+  return [...seen.entries()].map(([name, version]) => {
+    const direct = pomDirects.has(name);
+    return makeComponent({
       name,
       version,
       ecosystem: ECOSYSTEM.maven,
       purl: purlFor(ECOSYSTEM.maven, name, version),
-      direct: false,
-      dependencyPath: [],
+      direct,
+      dependencyPath: direct ? [name] : [],
       manifestPath,
-    }),
-  );
+    });
+  });
 }
 
 /**
