@@ -18,8 +18,9 @@ export const ScanStatus = z.enum(['queued', 'running', 'succeeded', 'partial', '
 export type ScanStatus = z.infer<typeof ScanStatus>;
 
 /**
- * CI reads this on GET. It is not a writeable column. GitHub Checks (optional,
- * additive) map the same concludeScan result; they do not replace this field.
+ * CI-facing GET. It is not a writeable column. GitHub Checks and GitLab
+ * Commit Statuses (optional, additive) map the same concludeScan result; they
+ * do not replace this field.
  */
 export const ScanConclusion = z.enum(['pending', 'passed', 'failed']);
 export type ScanConclusion = z.infer<typeof ScanConclusion>;
@@ -152,8 +153,18 @@ export const CreateScanRequest = z
      * (`owner/name` or `owner`+`repo`), `sha` (40-char commit, Checks),
      * `deploymentId` (positive integer GitHub deployment id, Deployments),
      * optional `checkName` / `detailsUrl` / `environment` / `description` /
-     * `logUrl`. `detailsUrl` and `logUrl` must be a CTEM URL. Client
-     * conclusion keys stay refused — they are not Checks or Deployments context.
+     * `logUrl`. `detailsUrl` and `logUrl` must be a CTEM URL.
+     *
+     * Optional GitLab CI Commit Status context (allowlisted keys under
+     * `options.gitlab` or top-level): `projectId` (preferred GitLab
+     * `path/with/namespace`, or a positive integer project id), `sha`
+     * (40-char commit), optional `name` / `description` / `targetUrl` /
+     * `ref`. `targetUrl` must be a CTEM URL. `ref` is a git ref, not a host.
+     * Tenant `baseUrl` / `apiUrl` / host keys on the scan are not the GitLab
+     * API origin (gitlab.com, or the scan asset's GitLab connector `baseUrl`).
+     *
+     * Client conclusion keys stay refused — they are not Checks, Deployments,
+     * or GitLab status context.
      */
     options: z.record(z.unknown()).default({}),
   })

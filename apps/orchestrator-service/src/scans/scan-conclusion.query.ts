@@ -8,11 +8,12 @@ import {
 import type { PrismaTransaction } from '@ctem/db';
 
 /**
- * Shared loaders for CI GET, GitHub Checks, and GitHub Deployment statuses.
- * Inputs must stay identical so a Check cannot drift from GET `conclusion`
- * and a Deployment status cannot drift from GET `deployConclusion`.
- * Checks still map `concludeScan` / fail_build only; Deployment statuses map
- * `concludeDeploy` / block_deploy only.
+ * Shared loaders for CI GET, GitHub Checks, GitLab Commit Statuses, and
+ * GitHub Deployment statuses. Inputs must stay identical so a Check or GitLab
+ * status cannot drift from GET `conclusion` and a Deployment status cannot
+ * drift from GET `deployConclusion`. Checks and GitLab Commit Statuses map
+ * `concludeScan` / fail_build only; Deployment statuses map `concludeDeploy`
+ * / block_deploy only. GitLab statuses are not mapped from block_deploy.
  */
 
 export interface ScanConclusionRow {
@@ -110,7 +111,7 @@ export async function scanGatesForScan(
   };
 }
 
-/** Shared `concludeScan` loader for CI GET and GitHub Checks. */
+/** Shared `concludeScan` loader for CI GET, GitHub Checks, and GitLab Commit Statuses. */
 export async function conclusionForScan(
   tx: PrismaTransaction,
   scan: ScanConclusionRow,
@@ -123,6 +124,13 @@ export async function conclusionForScan(
 export function checkConclusionFromScan(conclusion: ScanConclusion): 'success' | 'failure' | null {
   if (conclusion === 'passed') return 'success';
   if (conclusion === 'failed') return 'failure';
+  return null;
+}
+
+/** Terminal GET `passed`/`failed` → GitLab Commit Status `state`. `pending` is not published. */
+export function gitlabCommitStatusFromScan(conclusion: ScanConclusion): 'success' | 'failed' | null {
+  if (conclusion === 'passed') return 'success';
+  if (conclusion === 'failed') return 'failed';
   return null;
 }
 
