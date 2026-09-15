@@ -7,6 +7,7 @@ import { ContainerScanner } from './container.scanner';
 import { IacScanner } from './iac.scanner';
 import { MisconfigRules } from './misconfig.rules';
 import { EcrRegistry } from './oci/ecr.registry';
+import { GcrRegistry } from './oci/gcr.registry';
 import { GhcrRegistry } from './oci/registry';
 
 /**
@@ -21,7 +22,7 @@ import { GhcrRegistry } from './oci/registry';
   imports: [
     DbModule,
     ScannerModule.register(IacScanner, [MisconfigRules, GitRepoCheckout, IacAnalyzer]),
-    ScannerModule.register(ContainerScanner, [VulnMatcher, GhcrRegistry, EcrRegistry]),
+    ScannerModule.register(ContainerScanner, [VulnMatcher, GhcrRegistry, EcrRegistry, GcrRegistry]),
   ],
 })
 export class AppModule {}

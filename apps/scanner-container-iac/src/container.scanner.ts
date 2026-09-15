@@ -5,11 +5,13 @@ import { VulnMatcher } from '@ctem/vuln-intel';
 import {
   optionalGithubToken,
   requireAwsCredentials,
+  requireGcpCredentials,
   requireGithubToken,
   ContainerCredentialError,
 } from './container.credential';
 import { AwsEgressError } from './aws.egress';
 import { ContainerEgressError } from './container.egress';
+import { GcpEgressError } from './gcp.egress';
 import {
   isPrivateContainerImage,
   parseContainerImageRef,
@@ -18,6 +20,7 @@ import {
 import { inventoryImage, ContainerInventoryError, type ImagePackage } from './inventory/packages';
 import { ContainerPullError, GhcrRegistry } from './oci/registry';
 import { EcrRegistry } from './oci/ecr.registry';
+import { GcrRegistry } from './oci/gcr.registry';
 import { LayerUnpackError } from './oci/tar';
 
 export class ContainerScanError extends Error {
@@ -41,14 +44,15 @@ const TENANT_ANALYZER_KEYS = [
 ] as const;
 
 /**
- * Container image scanning over GHCR- and ECR-discovered `container_image`
- * assets.
+ * Container image scanning over GHCR-, ECR-, and GCR/Artifact Registry-
+ * discovered `container_image` assets.
  *
- * Pull allowlisted `ghcr.io` or `{account}.dkr.ecr.{region}.amazonaws.com`
- * digests in-process (manifest + layer blobs), inventory OS/app packages
- * per layer, and match the shared vuln mirror.
- * `kubernetes_workload` is not claimed by `supports()` and still throws if
- * execute is invoked for it. `repository` / `iac_stack` belong to IacScanner.
+ * Pull allowlisted `ghcr.io`, `{account}.dkr.ecr.{region}.amazonaws.com`,
+ * or `{location}-docker.pkg.dev` digests in-process (manifest + layer
+ * blobs), inventory OS/app packages per layer, and match the shared vuln
+ * mirror. `kubernetes_workload` is not claimed by `supports()` and still
+ * throws if execute is invoked for it. `repository` / `iac_stack` belong
+ * to IacScanner.
  */
 @Injectable()
 export class ContainerScanner extends BaseScanner {
@@ -60,6 +64,7 @@ export class ContainerScanner extends BaseScanner {
     private readonly matcher: VulnMatcher,
     private readonly registry: GhcrRegistry,
     private readonly ecrRegistry: EcrRegistry,
+    private readonly gcrRegistry: GcrRegistry,
   ) {
     super();
   }
@@ -103,6 +108,7 @@ export class ContainerScanner extends BaseScanner {
         err instanceof ContainerCredentialError ||
         err instanceof ContainerEgressError ||
         err instanceof AwsEgressError ||
+        err instanceof GcpEgressError ||
         err instanceof ContainerPullError ||
         err instanceof ContainerInventoryError ||
         err instanceof LayerUnpackError
@@ -120,7 +126,9 @@ export class ContainerScanner extends BaseScanner {
     const image =
       ref.kind === 'ghcr'
         ? `ghcr.io/${ref.owner}/${ref.name}@${ref.digest}`
-        : `${ref.accountId}.dkr.ecr.${ref.region}.amazonaws.com/${ref.repositoryName}@${ref.digest}`;
+        : ref.kind === 'ecr'
+          ? `${ref.accountId}.dkr.ecr.${ref.region}.amazonaws.com/${ref.repositoryName}@${ref.digest}`
+          : `${ref.location}-docker.pkg.dev/${ref.projectId}/${ref.repository}/${ref.image}@${ref.digest}`;
 
     ctx.log(`pulling ${image}`);
     const pulled =
@@ -132,11 +140,17 @@ export class ContainerScanner extends BaseScanner {
               : optionalGithubToken(ctx.job.credentialRef),
             ctx.checkDeadline,
           )
-        : await this.ecrRegistry.pull(
-            ref,
-            requireAwsCredentials(ctx.job.credentialRef),
-            ctx.checkDeadline,
-          );
+        : ref.kind === 'ecr'
+          ? await this.ecrRegistry.pull(
+              ref,
+              requireAwsCredentials(ctx.job.credentialRef),
+              ctx.checkDeadline,
+            )
+          : await this.gcrRegistry.pull(
+              ref,
+              requireGcpCredentials(ctx.job.credentialRef),
+              ctx.checkDeadline,
+            );
 
     if (!ctx.checkDeadline()) {
       throw new ContainerScanError('Job deadline exceeded after pull — refusing incomplete inventory');

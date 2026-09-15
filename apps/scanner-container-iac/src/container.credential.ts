@@ -1,12 +1,16 @@
 /**
- * Same allowlist as GHCR / ECR discovery (`apps/asset-service` credentials).
- * Platform-operated `env:GITHUB_*` (GHCR) and `env:AWS_*` (ECR). A missing
- * or unusable pointer must fail the pull — never empty-succeed.
+ * Same allowlist as GHCR / ECR / GCR discovery (`apps/asset-service` credentials).
+ * Platform-operated `env:GITHUB_*` (GHCR), `env:AWS_*` (ECR), and `env:GCP_*`
+ * (GCR / Artifact Registry). A missing or unusable pointer must fail the
+ * pull — never empty-succeed.
  */
+
+import { createPrivateKey } from 'node:crypto';
 
 const ENV_ALLOWLIST = /^(GITHUB|GITLAB|AWS|GCP|AZURE)_[A-Z0-9_]+$/;
 const GITHUB_ENV_NAME = /^GITHUB_[A-Z0-9_]+$/;
 const AWS_ENV_NAME = /^AWS_[A-Z0-9_]+$/;
+const GCP_ENV_NAME = /^GCP_[A-Z0-9_]+$/;
 
 export class ContainerCredentialError extends Error {
   constructor(message: string) {
@@ -120,4 +124,67 @@ export function requireAwsCredentials(credentialRef: string | null): AwsCredenti
 
   const sessionToken = resolveCredential('env:AWS_SESSION_TOKEN');
   return { accessKeyId, secretAccessKey, ...(sessionToken ? { sessionToken } : {}) };
+}
+
+export interface GcpCredentials {
+  clientEmail: string;
+  privateKey: string;
+}
+
+/** Env PEM often stores literal `\n`; Node needs real newlines. */
+export function normalizeGcpPrivateKey(pem: string): string {
+  return pem.includes('-----BEGIN') ? pem.replace(/\\n/g, '\n').trim() : pem.trim();
+}
+
+function assertUsableGcpPrivateKey(pem: string): void {
+  try {
+    createPrivateKey(normalizeGcpPrivateKey(pem));
+  } catch {
+    throw new ContainerCredentialError('GCR pull fails closed — GCP_PRIVATE_KEY is unusable');
+  }
+}
+
+/**
+ * GCR / Artifact Registry pulls have no unauthenticated path (same class as
+ * GCR discovery). The integration pointer must be `env:GCP_*`, and the
+ * platform-operated signing pair `GCP_CLIENT_EMAIL` + `GCP_PRIVATE_KEY`
+ * must both be usable. A missing or unusable pointer must not empty-succeed.
+ */
+export function requireGcpCredentials(credentialRef: string | null): GcpCredentials {
+  if (!credentialRef) {
+    throw new ContainerCredentialError(
+      'GCR pull requires a usable credentialRef (env:GCP_*) — refusing unauthenticated pull',
+    );
+  }
+
+  const sep = credentialRef.indexOf(':');
+  const scheme = sep === -1 ? credentialRef : credentialRef.slice(0, sep);
+  const key = sep === -1 ? '' : credentialRef.slice(sep + 1);
+  if (scheme !== 'env' || !key || !GCP_ENV_NAME.test(key)) {
+    resolveCredential(credentialRef);
+    throw new ContainerCredentialError(
+      `credentialRef '${credentialRef}' is not an env:GCP_* pointer — GCR pulls only accept platform-operated GCP_* names`,
+    );
+  }
+
+  const pointed = resolveCredential(credentialRef);
+  if (!pointed) {
+    throw new ContainerCredentialError(
+      `credentialRef '${credentialRef}' is set but cannot be used — refusing to pull without usable GCP_* credentials`,
+    );
+  }
+
+  const clientEmail = resolveCredential('env:GCP_CLIENT_EMAIL');
+  const privateKey = resolveCredential('env:GCP_PRIVATE_KEY');
+  if (!clientEmail || !privateKey) {
+    throw new ContainerCredentialError(
+      'GCR pull fails closed without usable GCP_CLIENT_EMAIL and GCP_PRIVATE_KEY',
+    );
+  }
+  if (!clientEmail.includes('@') || /\s/.test(clientEmail)) {
+    throw new ContainerCredentialError('GCR pull fails closed — GCP_CLIENT_EMAIL is unusable');
+  }
+  assertUsableGcpPrivateKey(privateKey);
+
+  return { clientEmail, privateKey };
 }
