@@ -5,12 +5,14 @@ import { VulnMatcher } from '@ctem/vuln-intel';
 import {
   optionalGithubToken,
   requireAwsCredentials,
+  requireAzureCredentials,
   requireGcpCredentials,
   requireGithubToken,
   ContainerCredentialError,
 } from './container.credential';
 import { AwsEgressError } from './aws.egress';
-import { ContainerEgressError } from './container.egress';
+import { AzureEgressError } from './azure.egress';
+import { ContainerEgressError, acrRegistryHost } from './container.egress';
 import { GcpEgressError } from './gcp.egress';
 import {
   isPrivateContainerImage,
@@ -19,6 +21,7 @@ import {
 } from './container.identity';
 import { inventoryImage, ContainerInventoryError, type ImagePackage } from './inventory/packages';
 import { ContainerPullError, GhcrRegistry } from './oci/registry';
+import { AcrRegistry } from './oci/acr.registry';
 import { EcrRegistry } from './oci/ecr.registry';
 import { GcrRegistry } from './oci/gcr.registry';
 import { LayerUnpackError } from './oci/tar';
@@ -44,15 +47,15 @@ const TENANT_ANALYZER_KEYS = [
 ] as const;
 
 /**
- * Container image scanning over GHCR-, ECR-, and GCR/Artifact Registry-
- * discovered `container_image` assets.
+ * Container image scanning over GHCR-, ECR-, GCR/Artifact Registry-, and
+ * ACR-discovered `container_image` assets.
  *
  * Pull allowlisted `ghcr.io`, `{account}.dkr.ecr.{region}.amazonaws.com`,
- * or `{location}-docker.pkg.dev` digests in-process (manifest + layer
- * blobs), inventory OS/app packages per layer, and match the shared vuln
- * mirror. `kubernetes_workload` is not claimed by `supports()` and still
- * throws if execute is invoked for it. `repository` / `iac_stack` belong
- * to IacScanner.
+ * `{location}-docker.pkg.dev`, or `{registry}.azurecr.io` digests
+ * in-process (manifest + layer blobs), inventory OS/app packages per
+ * layer, and match the shared vuln mirror. `kubernetes_workload` is not
+ * claimed by `supports()` and still throws if execute is invoked for it.
+ * `repository` / `iac_stack` belong to IacScanner.
  */
 @Injectable()
 export class ContainerScanner extends BaseScanner {
@@ -65,6 +68,7 @@ export class ContainerScanner extends BaseScanner {
     private readonly registry: GhcrRegistry,
     private readonly ecrRegistry: EcrRegistry,
     private readonly gcrRegistry: GcrRegistry,
+    private readonly acrRegistry: AcrRegistry,
   ) {
     super();
   }
@@ -109,6 +113,7 @@ export class ContainerScanner extends BaseScanner {
         err instanceof ContainerEgressError ||
         err instanceof AwsEgressError ||
         err instanceof GcpEgressError ||
+        err instanceof AzureEgressError ||
         err instanceof ContainerPullError ||
         err instanceof ContainerInventoryError ||
         err instanceof LayerUnpackError
@@ -128,7 +133,9 @@ export class ContainerScanner extends BaseScanner {
         ? `ghcr.io/${ref.owner}/${ref.name}@${ref.digest}`
         : ref.kind === 'ecr'
           ? `${ref.accountId}.dkr.ecr.${ref.region}.amazonaws.com/${ref.repositoryName}@${ref.digest}`
-          : `${ref.location}-docker.pkg.dev/${ref.projectId}/${ref.repository}/${ref.image}@${ref.digest}`;
+          : ref.kind === 'gcr'
+            ? `${ref.location}-docker.pkg.dev/${ref.projectId}/${ref.repository}/${ref.image}@${ref.digest}`
+            : `${acrRegistryHost(ref.registry)}/${ref.repository}@${ref.digest}`;
 
     ctx.log(`pulling ${image}`);
     const pulled =
@@ -146,11 +153,17 @@ export class ContainerScanner extends BaseScanner {
               requireAwsCredentials(ctx.job.credentialRef),
               ctx.checkDeadline,
             )
-          : await this.gcrRegistry.pull(
-              ref,
-              requireGcpCredentials(ctx.job.credentialRef),
-              ctx.checkDeadline,
-            );
+          : ref.kind === 'gcr'
+            ? await this.gcrRegistry.pull(
+                ref,
+                requireGcpCredentials(ctx.job.credentialRef),
+                ctx.checkDeadline,
+              )
+            : await this.acrRegistry.pull(
+                ref,
+                requireAzureCredentials(ctx.job.credentialRef),
+                ctx.checkDeadline,
+              );
 
     if (!ctx.checkDeadline()) {
       throw new ContainerScanError('Job deadline exceeded after pull — refusing incomplete inventory');

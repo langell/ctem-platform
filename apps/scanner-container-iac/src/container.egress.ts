@@ -1,13 +1,22 @@
 /**
  * Container-scan egress allowlist. Layer pull talks to `ghcr.io` (GHCR),
  * AWS ECR API + `*.dkr.ecr.{region}.amazonaws.com` (ECR digest identities),
- * or `{location}-docker.pkg.dev` (GCR / Artifact Registry digest identities).
+ * `{location}-docker.pkg.dev` (GCR / Artifact Registry digest identities),
+ * or `{registry}.azurecr.io` (ACR digest identities).
  * HTTPS/443 only. Tenant config/body/query/options cannot set a registry host.
- * Identity is a content digest — never a tag, never Docker Hub / ACR / Quay.
- * Location / project / repository are ids; the docker host is derived.
+ * Identity is a content digest — never a tag, never Docker Hub / Quay.
+ * Location / project / repository / registry are ids; the docker host is derived.
  */
 
 import { AWS_API_SUFFIX, AWS_REGION_RE, AwsEgressError, allowlistedAwsUrl } from './aws.egress';
+import {
+  ACR_LOGIN_SUFFIX,
+  ACR_REGISTRY_NAME_RE,
+  AzureEgressError,
+  assertAcrRegistryName,
+  assertAcrRepository,
+  isAcrLoginServerHost,
+} from './azure.egress';
 import {
   GCP_LOCATION_ID_RE,
   GCP_PROJECT_ID_RE,
@@ -45,7 +54,6 @@ export const TENANT_REGISTRY_KEYS = [
   'apiHost',
   'registryUrl',
   'registryHost',
-  'registry',
   'imageRegistry',
   'ghcrUrl',
   'ghcrHost',
@@ -55,6 +63,13 @@ export const TENANT_REGISTRY_KEYS = [
   'ecrUrl',
   'gcrUrl',
   'acrUrl',
+  'acrHost',
+  'acrEndpoint',
+  'azurecrUrl',
+  'azurecrHost',
+  'containerRegistryUrl',
+  'containerRegistryHost',
+  'loginUrl',
   'awsEndpoint',
   'ecrHost',
   'ecrEndpoint',
@@ -185,14 +200,14 @@ export function refuseTenantWritableRegistry(config: Record<string, unknown>): v
     const value = config[key];
     if (value != null && value !== '') {
       throw new ContainerEgressError(
-        `Refusing tenant-writable container registry endpoint (${key}) — pulls are ghcr.io / ECR / Artifact Registry digest only, not tenant-configurable`,
+        `Refusing tenant-writable container registry endpoint (${key}) — pulls are ghcr.io / ECR / Artifact Registry / ACR digest only, not tenant-configurable`,
       );
     }
   }
   const owner = config.owner;
   if (typeof owner === 'string' && /^https?:\/\//i.test(owner.trim())) {
     throw new ContainerEgressError(
-      "Refusing tenant-writable container registry endpoint (owner) — pulls are ghcr.io / ECR / Artifact Registry digest only, not tenant-configurable",
+      "Refusing tenant-writable container registry endpoint (owner) — pulls are ghcr.io / ECR / Artifact Registry / ACR digest only, not tenant-configurable",
     );
   }
   const region = config.region;
@@ -232,6 +247,48 @@ export function refuseTenantWritableRegistry(config: Record<string, unknown>): v
     throw new ContainerEgressError(
       "Refusing tenant-writable container registry endpoint (projectId) — project is an id, not a host",
     );
+  }
+  const registry = config.registry;
+  if (registry != null && registry !== '') {
+    if (
+      typeof registry !== 'string' ||
+      /^https?:\/\//i.test(registry.trim()) ||
+      registry.includes('.') ||
+      /azurecr\.io/i.test(registry)
+    ) {
+      throw new ContainerEgressError(
+        "Refusing tenant-writable container registry endpoint (registry) — registry is an id, not a host",
+      );
+    }
+  }
+  const subscriptionId = config.subscriptionId;
+  if (typeof subscriptionId === 'string' && /^https?:\/\//i.test(subscriptionId.trim())) {
+    throw new ContainerEgressError(
+      "Refusing tenant-writable container registry endpoint (subscriptionId) — subscription is an id, not a host",
+    );
+  }
+  const resourceGroup = config.resourceGroup;
+  if (
+    typeof resourceGroup === 'string' &&
+    (/^https?:\/\//i.test(resourceGroup.trim()) || /azurecr\.io/i.test(resourceGroup))
+  ) {
+    throw new ContainerEgressError(
+      "Refusing tenant-writable container registry endpoint (resourceGroup) — resource group is an id, not a host",
+    );
+  }
+  const loginServer = config.loginServer ?? config.login_server;
+  if (typeof loginServer === 'string' && loginServer.length > 0) {
+    if (/^https?:\/\//i.test(loginServer.trim())) {
+      throw new ContainerEgressError(
+        "Refusing tenant-writable container registry endpoint (loginServer) — loginServer is an ARM-derived hostname, not a tenant URL",
+      );
+    }
+    const host = loginServer.trim().toLowerCase().replace(/\.$/, '').split(':')[0] ?? '';
+    if (!isAcrLoginServerHost(host)) {
+      throw new ContainerEgressError(
+        `Refusing tenant-writable container registry endpoint (loginServer) — only {name}.${ACR_LOGIN_SUFFIX} is allowlisted`,
+      );
+    }
   }
 }
 
@@ -594,5 +651,151 @@ export function gcrBlobUrl(
   );
 }
 
-export { GCP_LOCATION_ID_RE, GCP_PROJECT_ID_RE, GCR_REPOSITORY_ID_RE, GCP_STORAGE_HOST };
+function wrapAzure<T>(fn: () => T): T {
+  try {
+    return fn();
+  } catch (err) {
+    if (err instanceof AzureEgressError) {
+      throw new ContainerEgressError(err.message);
+    }
+    throw err;
+  }
+}
+
+/**
+ * `{registry}.azurecr.io` — ACR docker host derived from the inventory
+ * registry id. Pin the exact host for this pull; never a tenant
+ * `azurecr.io` URL or suffix-confused lookalike.
+ */
+export function acrRegistryHost(registry: string): string {
+  const name = wrapAzure(() => assertAcrRegistryName(registry));
+  return `${name}.${ACR_LOGIN_SUFFIX}`;
+}
+
+export function isAcrRegistryHost(hostname: string, registry?: string): boolean {
+  const host = hostname.toLowerCase().replace(/\.$/, '');
+  if (!isAcrLoginServerHost(host)) return false;
+  if (registry && host !== acrRegistryHost(registry)) return false;
+  return true;
+}
+
+function canonicalizeAcrHostUrl(raw: string, registry: string, label: string): URL {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new ContainerEgressError(`Refusing unparseable ACR ${label} URL`);
+  }
+  if (parsed.protocol !== 'https:') {
+    throw new ContainerEgressError(`Refusing non-https ACR ${label} URL — only https is permitted`);
+  }
+  if (parsed.port && parsed.port !== '443') {
+    throw new ContainerEgressError(`Refusing ACR ${label} URL with a non-default port`);
+  }
+  if (parsed.username || parsed.password) {
+    throw new ContainerEgressError(`Refusing ACR ${label} URL that embeds userinfo`);
+  }
+  const expected = acrRegistryHost(registry);
+  if (!isAcrRegistryHost(parsed.hostname, registry)) {
+    throw new ContainerEgressError(
+      `Refusing ACR ${label} host '${parsed.hostname}' — only ${expected} is allowlisted for this digest`,
+    );
+  }
+  return parsed;
+}
+
+/**
+ * Canonicalize an ACR docker /v2 URL against the identity-derived
+ * `{registry}.azurecr.io` host. Any other azurecr.io (or lookalike) fails.
+ */
+export function allowlistedAcrRegistryUrl(raw: string, registry: string): string {
+  const parsed = canonicalizeAcrHostUrl(raw, registry, 'registry');
+  const expected = acrRegistryHost(registry);
+  const path = parsed.pathname || '/';
+  if (!path.startsWith('/v2/')) {
+    throw new ContainerEgressError(
+      `Refusing ACR registry path '${path}' — only /v2/ on ${expected} is permitted`,
+    );
+  }
+  return `https://${expected}${path}${parsed.search}`;
+}
+
+/**
+ * ACR token exchange is on the same `{registry}.azurecr.io` host as inventory
+ * (`/oauth2/exchange`, `/oauth2/token`). Never a tenant token URL.
+ */
+export function allowlistedAcrOauthUrl(raw: string, registry: string): string {
+  const parsed = canonicalizeAcrHostUrl(raw, registry, 'oauth');
+  const expected = acrRegistryHost(registry);
+  const path = parsed.pathname || '/';
+  if (path !== '/oauth2/exchange' && path !== '/oauth2/token') {
+    throw new ContainerEgressError(
+      `Refusing ACR oauth path '${path}' — only /oauth2/exchange and /oauth2/token on ${expected} are permitted`,
+    );
+  }
+  return `https://${expected}${path}${parsed.search}`;
+}
+
+/**
+ * Blob GET on `{registry}.azurecr.io` may 302 on the same host. Follow only
+ * that exact host (HTTPS/443, no userinfo) — never data.azurecr.io,
+ * never a lookalike, never attach the registry bearer off-host.
+ */
+export function allowlistedAcrBlobRedirect(raw: string, registry: string): string {
+  const parsed = canonicalizeAcrHostUrl(raw, registry, 'blob redirect');
+  const host = parsed.hostname.toLowerCase().replace(/\.$/, '');
+  if (isAcrRegistryHost(host, registry)) {
+    const path = parsed.pathname || '/';
+    if (path.startsWith('/v2/')) {
+      return allowlistedAcrRegistryUrl(raw, registry);
+    }
+    const expected = acrRegistryHost(registry);
+    return `https://${expected}${path}${parsed.search}`;
+  }
+  throw new ContainerEgressError(
+    `Refusing ACR blob redirect host '${parsed.hostname}' — only ${acrRegistryHost(registry)} is allowlisted`,
+  );
+}
+
+function encodeAcrRepoPath(repository: string): string {
+  return wrapAzure(() => assertAcrRepository(repository))
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+}
+
+export function acrOauthExchangeUrl(registry: string): string {
+  const host = acrRegistryHost(registry);
+  return allowlistedAcrOauthUrl(`https://${host}/oauth2/exchange`, registry);
+}
+
+export function acrOauthTokenUrl(registry: string): string {
+  const host = acrRegistryHost(registry);
+  return allowlistedAcrOauthUrl(`https://${host}/oauth2/token`, registry);
+}
+
+export function acrManifestUrl(registry: string, repository: string, digest: string): string {
+  const host = acrRegistryHost(registry);
+  return allowlistedAcrRegistryUrl(
+    `https://${host}/v2/${encodeAcrRepoPath(repository)}/manifests/${digest}`,
+    registry,
+  );
+}
+
+export function acrBlobUrl(registry: string, repository: string, digest: string): string {
+  const host = acrRegistryHost(registry);
+  return allowlistedAcrRegistryUrl(
+    `https://${host}/v2/${encodeAcrRepoPath(repository)}/blobs/${digest}`,
+    registry,
+  );
+}
+
+export {
+  GCP_LOCATION_ID_RE,
+  GCP_PROJECT_ID_RE,
+  GCR_REPOSITORY_ID_RE,
+  GCP_STORAGE_HOST,
+  ACR_LOGIN_SUFFIX,
+  ACR_REGISTRY_NAME_RE,
+};
 
