@@ -30,7 +30,8 @@ export class ScansController {
    * the client. `conclusion` is computed from matching fail_build rules via
    * concludeScan; `deployConclusion` from matching block_deploy via
    * concludeDeploy. There is no write path for either. GitHub Checks (if any)
-   * are published separately on scanCompleted from concludeScan only.
+   * are published separately on scanCompleted from concludeScan only;
+   * Deployment statuses from concludeDeploy only.
    */
   @Get(':id')
   @RequirePermissions('scan:read')

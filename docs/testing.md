@@ -65,7 +65,9 @@ URLs, org-B 404 on another tenant's rule, CI GET `conclusion` failed from a
 matching fail_build rule plus `deployConclusion` blocked from block_deploy, and
 a valid PAT that cannot POST either conclusion field. GitHub Checks (orchestrator,
 `api.github.com` only) are unit-tested as an optional additive publisher of the
-same `concludeScan` result — they are not part of the e2e smoke.
+same `concludeScan` result — they are not part of the e2e smoke. GitHub Deployment
+statuses are the sibling publisher of `concludeDeploy` / `block_deploy` (same host
+allowlist; unit-tested only).
 
 ## Shared helpers: `@ctem/testing`
 

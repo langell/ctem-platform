@@ -8,9 +8,10 @@ import { ServiceProxy } from '../proxy/service-proxy';
  * CI and deploy tooling poll GET /v1/scans/:id with a PAT. `conclusion` is
  * computed upstream from matching fail_build rules; `deployConclusion` from
  * matching block_deploy. This proxy has no POST/PATCH for either and does not
- * call GitHub Checks (orchestrator publishes Checks on scanCompleted from
- * concludeScan only, additive). Org comes from the token. CORS and unknown
- * query forwarding stay comments.
+ * call GitHub Checks or Deployments (orchestrator publishes Checks on
+ * scanCompleted from concludeScan only, and Deployment statuses from
+ * concludeDeploy only — both additive). Org comes from the token. CORS and
+ * unknown query forwarding stay comments.
  */
 @ApiTags('scans')
 @ApiBearerAuth()

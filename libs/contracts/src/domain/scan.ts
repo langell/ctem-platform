@@ -27,7 +27,9 @@ export type ScanConclusion = z.infer<typeof ScanConclusion>;
 /**
  * Deploy tooling polls this on GET. Independent of `conclusion`: only a matching
  * `block_deploy` policy produces `blocked`. Callers cannot POST or PATCH it.
- * GitHub Checks stay mapped from `concludeScan` / `fail_build` only.
+ * GitHub Checks stay mapped from `concludeScan` / `fail_build` only. Optional
+ * GitHub Deployment statuses map this field from `concludeDeploy` when context
+ * is present — they do not replace GET.
  */
 export const ScanDeployConclusion = z.enum(['pending', 'allowed', 'blocked']);
 export type ScanDeployConclusion = z.infer<typeof ScanDeployConclusion>;
@@ -145,11 +147,13 @@ export const CreateScanRequest = z
       })
       .default({}),
     /**
-     * Scanner options plus optional GitHub Checks context (allowlisted keys
-     * under `options.github` or top-level): `repository` (`owner/name` or
-     * `owner`+`repo`), `sha` (40-char commit), optional `checkName` /
-     * `detailsUrl`. `detailsUrl` must be a CTEM URL. Client conclusion keys
-     * stay refused — they are not Checks context.
+     * Scanner options plus optional GitHub Checks / Deployments context
+     * (allowlisted keys under `options.github` or top-level): `repository`
+     * (`owner/name` or `owner`+`repo`), `sha` (40-char commit, Checks),
+     * `deploymentId` (positive integer GitHub deployment id, Deployments),
+     * optional `checkName` / `detailsUrl` / `environment` / `description` /
+     * `logUrl`. `detailsUrl` and `logUrl` must be a CTEM URL. Client
+     * conclusion keys stay refused — they are not Checks or Deployments context.
      */
     options: z.record(z.unknown()).default({}),
   })
