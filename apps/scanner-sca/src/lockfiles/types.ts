@@ -2,7 +2,7 @@ import type { ResolvedComponent } from '../sbom.parser';
 
 export type { ResolvedComponent };
 
-/** OSV ecosystem names — must match `SbomParser.ecosystemFromPurl`. */
+/** OSV ecosystem names — must match `ecosystemFromPurl`. */
 export const ECOSYSTEM = {
   npm: 'npm',
   pypi: 'PyPI',
@@ -32,6 +32,12 @@ export interface EcosystemParser {
   group: string;
   priority: number;
   matches: (fileName: string) => boolean;
+  /**
+   * Optional tie-break when several files match the same group at the same
+   * priority (e.g. `bom.json` vs `*.cdx.json`). Higher wins; equal ranks then
+   * pick the lexicographically first name.
+   */
+  fileRank?: (fileName: string) => number;
   /** Basenames we will read besides the lockfile itself. Never slurp the whole directory. */
   companionFiles?: string[];
   parse: (input: LockfileInput) => ResolvedComponent[];
