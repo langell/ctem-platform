@@ -29,8 +29,8 @@ export type ScanConclusion = z.infer<typeof ScanConclusion>;
  * Deploy tooling polls this on GET. Independent of `conclusion`: only a matching
  * `block_deploy` policy produces `blocked`. Callers cannot POST or PATCH it.
  * GitHub Checks stay mapped from `concludeScan` / `fail_build` only. Optional
- * GitHub Deployment statuses map this field from `concludeDeploy` when context
- * is present — they do not replace GET.
+ * GitHub Deployment statuses and GitLab Deployment updates map this field from
+ * `concludeDeploy` when context is present — they do not replace GET.
  */
 export const ScanDeployConclusion = z.enum(['pending', 'allowed', 'blocked']);
 export type ScanDeployConclusion = z.infer<typeof ScanDeployConclusion>;
@@ -160,6 +160,10 @@ export const CreateScanRequest = z
      * `path/with/namespace`, or a positive integer project id), `sha`
      * (40-char commit), optional `name` / `description` / `targetUrl` /
      * `ref`. `targetUrl` must be a CTEM URL. `ref` is a git ref, not a host.
+     * Optional GitLab Deployments context (same `options.gitlab` / top-level):
+     * reuse `projectId`; add `deploymentId` (positive integer GitLab
+     * deployment id). Optional `environment` is an attribute only, not a host.
+     * Missing `sha` is OK for Deployments (sha remains Commit-Status-only).
      * Tenant `baseUrl` / `apiUrl` / host keys on the scan are not the GitLab
      * API origin (gitlab.com, or the scan asset's GitLab connector `baseUrl`).
      *

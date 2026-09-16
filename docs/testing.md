@@ -67,7 +67,11 @@ a valid PAT that cannot POST either conclusion field. GitHub Checks (orchestrato
 `api.github.com` only) are unit-tested as an optional additive publisher of the
 same `concludeScan` result — they are not part of the e2e smoke. GitHub Deployment
 statuses are the sibling publisher of `concludeDeploy` / `block_deploy` (same host
-allowlist; unit-tested only).
+allowlist; unit-tested only). GitLab Commit Statuses are the sibling publisher of
+`concludeScan` / `fail_build` on the allowlisted GitLab API (unit-tested only).
+GitLab Deployment updates are the sibling publisher of `concludeDeploy` /
+`block_deploy` on that same GitLab allowlist (PUT existing `deploymentId` only;
+unit-tested only).
 
 ## Shared helpers: `@ctem/testing`
 

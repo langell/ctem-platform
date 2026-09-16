@@ -31,7 +31,8 @@ export class ScansController {
    * concludeScan; `deployConclusion` from matching block_deploy via
    * concludeDeploy. There is no write path for either. GitHub Checks and
    * GitLab Commit Statuses (if any) are published separately on scanCompleted
-   * from concludeScan only; Deployment statuses from concludeDeploy only.
+   * from concludeScan only; GitHub and GitLab Deployment updates from
+   * concludeDeploy only.
    */
   @Get(':id')
   @RequirePermissions('scan:read')

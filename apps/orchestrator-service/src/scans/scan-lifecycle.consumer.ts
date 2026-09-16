@@ -6,6 +6,7 @@ import { rootLogger } from '@ctem/observability';
 import { GithubChecksPublisher } from './github-checks.publisher';
 import { GithubDeploymentsPublisher } from './github-deployments.publisher';
 import { GitlabCommitStatusPublisher } from './gitlab-statuses.publisher';
+import { GitlabDeploymentsPublisher } from './gitlab-deployments.publisher';
 
 /**
  * Tracks job completions and closes out the parent scan. A scan with any failed
@@ -22,6 +23,7 @@ export class ScanLifecycleConsumer implements OnApplicationBootstrap {
     private readonly checks: GithubChecksPublisher,
     private readonly deployments: GithubDeploymentsPublisher,
     private readonly gitlabStatuses: GitlabCommitStatusPublisher,
+    private readonly gitlabDeployments: GitlabDeploymentsPublisher,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -76,14 +78,16 @@ export class ScanLifecycleConsumer implements OnApplicationBootstrap {
         status: scan.status,
       });
       this.log.info({ scanId: scan.id, status: scan.status }, 'scan completed');
-      // Additive Check Run from concludeScan, Deployment status from
-      // concludeDeploy, and GitLab Commit Status from concludeScan. Org is
-      // the signed event / scan row, never a client header. Any order is
-      // fine; each publisher soft-fails independently (do not roll back this
-      // terminal status or poison GET).
+      // Additive Check Run from concludeScan, GitHub Deployment status from
+      // concludeDeploy, GitLab Commit Status from concludeScan, and GitLab
+      // Deployment PUT from concludeDeploy. Org is the signed event / scan
+      // row, never a client header. Any order is fine; each publisher
+      // soft-fails independently (do not roll back this terminal status or
+      // poison GET).
       await this.checks.publishForCompletedScan(result.orgId, scan.id);
       await this.deployments.publishForCompletedScan(result.orgId, scan.id);
       await this.gitlabStatuses.publishForCompletedScan(result.orgId, scan.id);
+      await this.gitlabDeployments.publishForCompletedScan(result.orgId, scan.id);
     }
   }
 }

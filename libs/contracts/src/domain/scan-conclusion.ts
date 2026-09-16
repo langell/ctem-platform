@@ -12,6 +12,7 @@ import type { ScanConclusion, ScanDeployConclusion } from './scan';
  * Deploy tooling polls `concludeDeploy` on the same inputs. That gate looks
  * only for `block_deploy` and never overloads this function. GitHub Deployment
  * statuses reuse `concludeDeploy`; they do not take a client conclusion.
+ * GitLab Deployment updates reuse the same `concludeDeploy` result.
  */
 
 export interface PolicyMatchFinding {

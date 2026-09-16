@@ -16,6 +16,7 @@ import { ScanScheduleService } from './scans/scan-schedule.service';
 import { GithubChecksPublisher } from './scans/github-checks.publisher';
 import { GithubDeploymentsPublisher } from './scans/github-deployments.publisher';
 import { GitlabCommitStatusPublisher } from './scans/gitlab-statuses.publisher';
+import { GitlabDeploymentsPublisher } from './scans/gitlab-deployments.publisher';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { GitlabCommitStatusPublisher } from './scans/gitlab-statuses.publisher';
     GithubChecksPublisher,
     GithubDeploymentsPublisher,
     GitlabCommitStatusPublisher,
+    GitlabDeploymentsPublisher,
     { provide: APP_GUARD, useClass: InternalAuthGuard },
   ],
 })
