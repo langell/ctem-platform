@@ -7,6 +7,7 @@ import { currentTraceId, rootLogger } from '@ctem/observability';
 import { ScanPlannerService } from './scan-planner.service';
 import { GithubChecksPublisher } from './github-checks.publisher';
 import { GithubDeploymentsPublisher } from './github-deployments.publisher';
+import { GitlabCommitStatusPublisher } from './gitlab-statuses.publisher';
 
 export interface DispatchAsset {
   id: string;
@@ -61,6 +62,7 @@ export class ScanDispatcherService {
     private readonly bus: EventBus,
     @Optional() private readonly checks?: GithubChecksPublisher,
     @Optional() private readonly deployments?: GithubDeploymentsPublisher,
+    @Optional() private readonly gitlabStatuses?: GitlabCommitStatusPublisher,
   ) {}
 
   /**
@@ -154,11 +156,12 @@ export class ScanDispatcherService {
     this.log.info({ scanId: scan.id, jobs: jobs.length }, 'scan dispatched');
     const row = latest ?? scan;
     // Zero-asset (already terminal) scans never emit scanCompleted via lifecycle.
-    // Checks (concludeScan) and Deployments (concludeDeploy) both soft-fail
-    // independently — either order is fine.
+    // Checks (concludeScan), Deployments (concludeDeploy), and GitLab statuses
+    // (concludeScan) each soft-fail independently — any order is fine.
     if (row.status !== 'queued' && row.status !== 'running') {
       await this.checks?.publishForCompletedScan(orgId, scan.id);
       await this.deployments?.publishForCompletedScan(orgId, scan.id);
+      await this.gitlabStatuses?.publishForCompletedScan(orgId, scan.id);
     }
     return { ...row, jobsDispatched: jobs.length };
   }

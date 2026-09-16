@@ -3,13 +3,14 @@ import { SUBJECTS } from '@ctem/contracts';
 import { ScanLifecycleConsumer } from './scan-lifecycle.consumer';
 import type { GithubChecksPublisher } from './github-checks.publisher';
 import type { GithubDeploymentsPublisher } from './github-deployments.publisher';
+import type { GitlabCommitStatusPublisher } from './gitlab-statuses.publisher';
 
 const ORG = '4a6f9f4e-1111-4222-8333-444455556666';
 const SCAN = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const JOB = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 
-describe('ScanLifecycleConsumer GitHub Checks and Deployments wiring', () => {
-  it('publishes Checks and Deployments after scanCompleted using the event org, not a client header', async () => {
+describe('ScanLifecycleConsumer GitHub Checks, Deployments, and GitLab statuses wiring', () => {
+  it('publishes Checks, Deployments, and GitLab statuses after scanCompleted using the event org, not a client header', async () => {
     const terminal = { id: SCAN, status: 'succeeded', jobsCompleted: 1, jobsTotal: 1 };
     const tx = {
       scanJob: { update: vi.fn(async () => ({})), count: vi.fn(async () => 0) },
@@ -26,12 +27,14 @@ describe('ScanLifecycleConsumer GitHub Checks and Deployments wiring', () => {
     const bus = { publish: vi.fn(async () => undefined) };
     const checks = { publishForCompletedScan: vi.fn(async () => undefined) };
     const deployments = { publishForCompletedScan: vi.fn(async () => undefined) };
+    const gitlabStatuses = { publishForCompletedScan: vi.fn(async () => undefined) };
 
     const consumer = new ScanLifecycleConsumer(
       prisma as never,
       bus as never,
       checks as unknown as GithubChecksPublisher,
       deployments as unknown as GithubDeploymentsPublisher,
+      gitlabStatuses as unknown as GitlabCommitStatusPublisher,
     );
 
     await consumer.applyResult({
@@ -56,9 +59,10 @@ describe('ScanLifecycleConsumer GitHub Checks and Deployments wiring', () => {
     );
     expect(checks.publishForCompletedScan).toHaveBeenCalledWith(ORG, SCAN);
     expect(deployments.publishForCompletedScan).toHaveBeenCalledWith(ORG, SCAN);
+    expect(gitlabStatuses.publishForCompletedScan).toHaveBeenCalledWith(ORG, SCAN);
   });
 
-  it('does not publish Checks or Deployments until the last job completes', async () => {
+  it('does not publish Checks, Deployments, or GitLab statuses until the last job completes', async () => {
     const tx = {
       scanJob: { update: vi.fn(async () => ({})) },
       scan: { update: vi.fn(async () => ({ id: SCAN, jobsCompleted: 1, jobsTotal: 2 })) },
@@ -68,11 +72,13 @@ describe('ScanLifecycleConsumer GitHub Checks and Deployments wiring', () => {
     };
     const checks = { publishForCompletedScan: vi.fn(async () => undefined) };
     const deployments = { publishForCompletedScan: vi.fn(async () => undefined) };
+    const gitlabStatuses = { publishForCompletedScan: vi.fn(async () => undefined) };
     const consumer = new ScanLifecycleConsumer(
       prisma as never,
       { publish: vi.fn() } as never,
       checks as unknown as GithubChecksPublisher,
       deployments as unknown as GithubDeploymentsPublisher,
+      gitlabStatuses as unknown as GitlabCommitStatusPublisher,
     );
     await consumer.applyResult({
       jobId: JOB,
@@ -90,5 +96,6 @@ describe('ScanLifecycleConsumer GitHub Checks and Deployments wiring', () => {
     });
     expect(checks.publishForCompletedScan).not.toHaveBeenCalled();
     expect(deployments.publishForCompletedScan).not.toHaveBeenCalled();
+    expect(gitlabStatuses.publishForCompletedScan).not.toHaveBeenCalled();
   });
 });

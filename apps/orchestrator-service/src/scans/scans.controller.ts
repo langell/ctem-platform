@@ -29,9 +29,9 @@ export class ScansController {
    * CI- and deploy-facing GET. Org comes from the token (JWT or PAT), never
    * the client. `conclusion` is computed from matching fail_build rules via
    * concludeScan; `deployConclusion` from matching block_deploy via
-   * concludeDeploy. There is no write path for either. GitHub Checks (if any)
-   * are published separately on scanCompleted from concludeScan only;
-   * Deployment statuses from concludeDeploy only.
+   * concludeDeploy. There is no write path for either. GitHub Checks and
+   * GitLab Commit Statuses (if any) are published separately on scanCompleted
+   * from concludeScan only; Deployment statuses from concludeDeploy only.
    */
   @Get(':id')
   @RequirePermissions('scan:read')

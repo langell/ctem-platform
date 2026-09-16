@@ -5,6 +5,7 @@ import { SUBJECTS, ScanJobResult } from '@ctem/contracts';
 import { rootLogger } from '@ctem/observability';
 import { GithubChecksPublisher } from './github-checks.publisher';
 import { GithubDeploymentsPublisher } from './github-deployments.publisher';
+import { GitlabCommitStatusPublisher } from './gitlab-statuses.publisher';
 
 /**
  * Tracks job completions and closes out the parent scan. A scan with any failed
@@ -20,6 +21,7 @@ export class ScanLifecycleConsumer implements OnApplicationBootstrap {
     private readonly bus: EventBus,
     private readonly checks: GithubChecksPublisher,
     private readonly deployments: GithubDeploymentsPublisher,
+    private readonly gitlabStatuses: GitlabCommitStatusPublisher,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -74,12 +76,14 @@ export class ScanLifecycleConsumer implements OnApplicationBootstrap {
         status: scan.status,
       });
       this.log.info({ scanId: scan.id, status: scan.status }, 'scan completed');
-      // Additive Check Run from concludeScan and Deployment status from
-      // concludeDeploy. Org is the signed event / scan row, never a client
-      // header. Either order is fine; each publisher soft-fails independently
-      // (do not roll back this terminal status or poison GET).
+      // Additive Check Run from concludeScan, Deployment status from
+      // concludeDeploy, and GitLab Commit Status from concludeScan. Org is
+      // the signed event / scan row, never a client header. Any order is
+      // fine; each publisher soft-fails independently (do not roll back this
+      // terminal status or poison GET).
       await this.checks.publishForCompletedScan(result.orgId, scan.id);
       await this.deployments.publishForCompletedScan(result.orgId, scan.id);
+      await this.gitlabStatuses.publishForCompletedScan(result.orgId, scan.id);
     }
   }
 }
