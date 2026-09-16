@@ -16,6 +16,7 @@ import { AwsConnector } from './connectors/aws.connector';
 import { AzureConnector } from './connectors/azure.connector';
 import { GcpConnector } from './connectors/gcp.connector';
 import { AcrConnector } from './connectors/acr.connector';
+import { DockerhubConnector } from './connectors/dockerhub.connector';
 import { EcrConnector } from './connectors/ecr.connector';
 import { GcrConnector } from './connectors/gcr.connector';
 import { GhcrConnector } from './connectors/ghcr.connector';
@@ -48,6 +49,7 @@ import { KubernetesConnector } from './connectors/kubernetes.connector';
     EcrConnector,
     GcrConnector,
     AcrConnector,
+    DockerhubConnector,
     KubernetesConnector,
     DnsEnumConnector,
     { provide: APP_GUARD, useClass: InternalAuthGuard },
@@ -65,6 +67,7 @@ export class AppModule implements OnModuleInit {
     private readonly ecr: EcrConnector,
     private readonly gcr: GcrConnector,
     private readonly acr: AcrConnector,
+    private readonly dockerhub: DockerhubConnector,
     private readonly kubernetes: KubernetesConnector,
     private readonly dnsEnum: DnsEnumConnector,
   ) {}
@@ -80,6 +83,7 @@ export class AppModule implements OnModuleInit {
     this.registry.register(this.ecr);
     this.registry.register(this.gcr);
     this.registry.register(this.acr);
+    this.registry.register(this.dockerhub);
     this.registry.register(this.kubernetes);
     this.registry.register(this.dnsEnum);
   }
