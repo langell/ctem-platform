@@ -8,12 +8,14 @@ import {
 import type { PrismaTransaction } from '@ctem/db';
 
 /**
- * Shared loaders for CI GET, GitHub Checks, GitLab Commit Statuses, and
- * GitHub Deployment statuses. Inputs must stay identical so a Check or GitLab
- * status cannot drift from GET `conclusion` and a Deployment status cannot
- * drift from GET `deployConclusion`. Checks and GitLab Commit Statuses map
- * `concludeScan` / fail_build only; Deployment statuses map `concludeDeploy`
- * / block_deploy only. GitLab statuses are not mapped from block_deploy.
+ * Shared loaders for CI GET, GitHub Checks, GitLab Commit Statuses, GitHub
+ * Deployment statuses, and GitLab Deployment updates. Inputs must stay
+ * identical so a Check or GitLab commit status cannot drift from GET
+ * `conclusion` and a Deployment status cannot drift from GET
+ * `deployConclusion`. Checks and GitLab Commit Statuses map `concludeScan` /
+ * fail_build only; GitHub and GitLab Deployment publishers map
+ * `concludeDeploy` / block_deploy only. GitLab Commit Statuses are not mapped
+ * from block_deploy.
  */
 
 export interface ScanConclusionRow {
@@ -134,7 +136,7 @@ export function gitlabCommitStatusFromScan(conclusion: ScanConclusion): 'success
   return null;
 }
 
-/** Shared `concludeDeploy` loader for CI GET and GitHub Deployment statuses. */
+/** Shared `concludeDeploy` loader for CI GET and GitHub/GitLab Deployment publishers. */
 export async function deployConclusionForScan(
   tx: PrismaTransaction,
   scan: ScanConclusionRow,
@@ -143,11 +145,20 @@ export async function deployConclusionForScan(
   return deployConclusion;
 }
 
-/** Terminal GET `allowed`/`blocked` → Deployments API state. `pending` is not published. */
+/** Terminal GET `allowed`/`blocked` → GitHub Deployments API state. `pending` is not published. */
 export function deploymentStatusFromDeploy(
   deployConclusion: ScanDeployConclusion,
 ): 'success' | 'failure' | null {
   if (deployConclusion === 'allowed') return 'success';
   if (deployConclusion === 'blocked') return 'failure';
+  return null;
+}
+
+/** Terminal GET `allowed`/`blocked` → GitLab Deployment `status`. `pending` is not published. */
+export function gitlabDeploymentStatusFromDeploy(
+  deployConclusion: ScanDeployConclusion,
+): 'success' | 'failed' | null {
+  if (deployConclusion === 'allowed') return 'success';
+  if (deployConclusion === 'blocked') return 'failed';
   return null;
 }

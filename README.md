@@ -160,7 +160,19 @@ Publish requires GitLab CI context on the scan options (`options.gitlab` or the 
 - `sha` — full 40-char commit SHA
 - optional `name` (default `CTEM`), `description`, `targetUrl` (must be a CTEM URL under platform `CTEM_PUBLIC_URL`, or omit), and `ref` (git ref id, not a host)
 
-Missing `projectId`+`sha` skips the GitLab call (log) and is not a scan failure. GET conclusion is unchanged. Credentials are platform `env:GITLAB_*` (same class as GitLab discovery / SCA clone): prefer the scan/asset integration `credentialRef` when it is a usable `env:GITLAB_*` pointer; otherwise the platform default `env:GITLAB_TOKEN`. Unusable credentials fail closed (no API call). Egress is HTTPS only to `gitlab.com` by default, or the exact origin from the scan asset's GitLab AssetConnector `baseUrl` (same parse as discovery: https, no userinfo, no git@). Tenant scan options cannot set a free-form status host (`apiUrl` / `baseUrl` / `host` on the scan are ignored). Publish errors are soft-fail. GitLab Commit Statuses are create-only (no PATCH): the publisher lists existing statuses for the stable `name`+sha and skips a second POST when `description` already contains `scanId` (or `target_url` matches the CTEM scan URL). GitLab Deployments / Environments APIs are out of this slice.
+Missing `projectId`+`sha` skips the GitLab call (log) and is not a scan failure. GET conclusion is unchanged. Credentials are platform `env:GITLAB_*` (same class as GitLab discovery / SCA clone): prefer the scan/asset integration `credentialRef` when it is a usable `env:GITLAB_*` pointer; otherwise the platform default `env:GITLAB_TOKEN`. Unusable credentials fail closed (no API call). Egress is HTTPS only to `gitlab.com` by default, or the exact origin from the scan asset's GitLab AssetConnector `baseUrl` (same parse as discovery: https, no userinfo, no git@). Tenant scan options cannot set a free-form status host (`apiUrl` / `baseUrl` / `host` on the scan are ignored). Publish errors are soft-fail. GitLab Commit Statuses are create-only (no PATCH): the publisher lists existing statuses for the stable `name`+sha and skips a second POST when `description` already contains `scanId` (or `target_url` matches the CTEM scan URL). GitLab Environment protection / protected-environments write APIs are out of this slice.
+
+## GitLab Deployments (optional, additive)
+
+Policy `block_deploy` is still the deploy-facing `deployConclusion` on `GET /v1/scans/:id` (`concludeDeploy`). An optional GitLab Deployment **update** on the allowlisted GitLab API maps that same result (`blocked` → `status=failed`, `allowed` → `status=success`; `pending` is not published). It does **not** replace GET and is not mapped from `fail_build` / `concludeScan`. GitLab Commit Statuses stay mapped from `fail_build` only; GitHub Deployment statuses stay mapped from `block_deploy` only.
+
+Publish requires GitLab Deployments context on the scan options (`options.gitlab` or the same top-level keys):
+
+- `projectId` — same shape as Commit Statuses (preferred `path/with/namespace`, or a positive integer project id)
+- `deploymentId` — positive integer GitLab deployment id of an **existing** deployment (CTEM never POSTs / creates one)
+- optional `environment` (attribute only, not a host)
+
+Missing `projectId`+`deploymentId` skips the GitLab call (log) and is not a scan failure. Missing `sha` is OK for this publisher (sha remains Commit-Status-only). GET `deployConclusion` is unchanged. Credentials and egress match Commit Statuses (`env:GITLAB_*`, HTTPS `gitlab.com` or the scan asset's GitLab connector `baseUrl` — tenant scan host keys are ignored). Publish errors are soft-fail. Idempotency: GET the existing deployment and skip the PUT when `status` already matches the terminal result. Environment protection / approval-rules write APIs are out.
 
 ## Not yet built
 
