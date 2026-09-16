@@ -13,7 +13,7 @@ export interface DiscoveryContext {
  * Asset discovery connectors. Each one turns an external system into a stream of
  * upsert requests; the service handles persistence, archival and events.
  * GitHub, GitLab (gitlab.com or explicit `baseUrl`), AWS, GCP, Azure, GHCR,
- * ECR, GCR / Artifact Registry, ACR, Kubernetes (managed EKS/GKE/AKS), and DNS
+ * ECR, GCR / Artifact Registry, ACR, Docker Hub, Kubernetes (managed EKS/GKE/AKS), and DNS
  * enum (crt.sh + OS resolver) are registered; this remains the extension
  * point for further providers.
  */
@@ -48,6 +48,7 @@ export class ConnectorRegistry {
  *   ecr                  -> container images keyed by digest (ECR API; no layer pull)
  *   gcr                  -> container images keyed by digest (Artifact Registry API; no layer pull)
  *   acr                  -> container images keyed by digest (ARM + ACR catalog/manifest list; no layer pull)
+ *   dockerhub            -> container images keyed by digest (Hub API on hub.docker.com; no layer pull)
  *   kubernetes           -> managed EKS/GKE/AKS clusters as kubernetes_workload
  *                           (control-plane APIs only; never kube-apiserver)
  *   dns_enum             -> org-owned apex + CT/OS names as domain
@@ -65,6 +66,7 @@ export const PLANNED_CONNECTORS = [
   'ecr',
   'gcr',
   'acr',
+  'dockerhub',
   'kubernetes',
   'dns_enum',
   'cert_transparency',

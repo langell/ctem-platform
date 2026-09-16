@@ -6,7 +6,7 @@ import { createPrivateKey } from 'node:crypto';
  *
  *   env:<VAR>  — platform-operated only. Reads a process environment variable
  *                whose name is allowlisted (`GITHUB_*`, `GITLAB_*`, `AWS_*`,
- *                `GCP_*`, or `AZURE_*`). This is not a tenant-writable secret store: a
+ *                `GCP_*`, `AZURE_*`, or `DOCKERHUB_*`). This is not a tenant-writable secret store: a
  *                tenant-supplied credentialRef cannot read DATABASE_URL, PATH,
  *                INTERNAL_TOKEN_SECRET, or other replica secrets. Every
  *                integration that points at the same env name shares that
@@ -17,7 +17,7 @@ import { createPrivateKey } from 'node:crypto';
  */
 
 /** Platform-controlled names only — not an open read of process.env. */
-const ENV_ALLOWLIST = /^(GITHUB|GITLAB|AWS|GCP|AZURE)_[A-Z0-9_]+$/;
+const ENV_ALLOWLIST = /^(GITHUB|GITLAB|AWS|GCP|AZURE|DOCKERHUB)_[A-Z0-9_]+$/;
 
 export function resolveCredential(ref: string | null): string | undefined {
   if (!ref) return undefined;
@@ -29,7 +29,7 @@ export function resolveCredential(ref: string | null): string | undefined {
   if (scheme === 'env') {
     if (!key || !ENV_ALLOWLIST.test(key)) {
       throw new Error(
-        `credentialRef 'env:${key || '<empty>'}' is not allowlisted — env: is platform-operated and only GITHUB_* / GITLAB_* / AWS_* / GCP_* / AZURE_* names are permitted`,
+        `credentialRef 'env:${key || '<empty>'}' is not allowlisted — env: is platform-operated and only GITHUB_* / GITLAB_* / AWS_* / GCP_* / AZURE_* / DOCKERHUB_* names are permitted`,
       );
     }
     return process.env[key] || undefined;
@@ -258,5 +258,78 @@ export function requireAzureCredentials(credentialRef: string | null): AzureCred
     tenantId: assertUsableAzureGuid(tenantId, 'AZURE_TENANT_ID'),
     clientId: assertUsableAzureGuid(clientId, 'AZURE_CLIENT_ID'),
     clientSecret: secret,
+  };
+}
+
+export interface DockerhubCredentials {
+  username: string;
+  token: string;
+}
+
+const DOCKERHUB_ENV_NAME = /^DOCKERHUB_[A-Z0-9_]+$/;
+
+/** Docker Hub usernames are identifiers, never hosts or URLs. */
+const DOCKERHUB_USERNAME_RE = /^[\w.-]+$/;
+
+function assertUsableDockerhubUsername(value: string): string {
+  const trimmed = value.trim();
+  if (
+    !trimmed ||
+    /^https?:\/\//i.test(trimmed) ||
+    !DOCKERHUB_USERNAME_RE.test(trimmed) ||
+    /docker\.(io|com)$/i.test(trimmed)
+  ) {
+    throw new Error('Docker Hub discovery fails closed — DOCKERHUB_USERNAME is unusable');
+  }
+  return trimmed;
+}
+
+/**
+ * Docker Hub discovery has no unauthenticated public path. The integration
+ * pointer must be `env:DOCKERHUB_*`, and the platform-operated pair
+ * `DOCKERHUB_USERNAME` + `DOCKERHUB_TOKEN` must both be usable. A missing
+ * token must not list public repositories and report empty success (that
+ * would archiveStale unseen digests).
+ */
+export function requireDockerhubCredentials(
+  credentialRef: string | null,
+): DockerhubCredentials {
+  if (!credentialRef) {
+    throw new Error(
+      'Docker Hub discovery requires a usable credentialRef (env:DOCKERHUB_*) — refusing unauthenticated listing',
+    );
+  }
+
+  const sep = credentialRef.indexOf(':');
+  const scheme = sep === -1 ? credentialRef : credentialRef.slice(0, sep);
+  const key = sep === -1 ? '' : credentialRef.slice(sep + 1);
+  if (scheme !== 'env' || !key || !DOCKERHUB_ENV_NAME.test(key)) {
+    // Non-allowlisted names throw here without reading the secret (DATABASE_URL).
+    // Allowlisted-but-not-DOCKERHUB names (GITHUB_*, AWS_*) are refused after that check.
+    resolveCredential(credentialRef);
+    throw new Error(
+      `credentialRef '${credentialRef}' is not an env:DOCKERHUB_* pointer — Docker Hub discovery only accepts platform-operated DOCKERHUB_* names`,
+    );
+  }
+
+  const pointed = resolveCredential(credentialRef);
+  if (!pointed) {
+    throw new Error(
+      `credentialRef '${credentialRef}' is set but cannot be used — refusing to list without usable DOCKERHUB_* credentials`,
+    );
+  }
+
+  const username = resolveCredential('env:DOCKERHUB_USERNAME');
+  const token = resolveCredential('env:DOCKERHUB_TOKEN');
+  const secret = token?.trim();
+  if (!username || !secret) {
+    throw new Error(
+      'Docker Hub discovery fails closed without usable DOCKERHUB_USERNAME and DOCKERHUB_TOKEN',
+    );
+  }
+
+  return {
+    username: assertUsableDockerhubUsername(username),
+    token: secret,
   };
 }
