@@ -695,7 +695,6 @@ describe('publishGitlabDeployment never leaves the allowlisted origin and never 
       vi.fn(async (url: string, init?: { method?: string }) => {
         urls.push(String(url));
         methods.push(init?.method ?? 'GET');
-        const parsed = new URL(String(url));
         if ((init?.method ?? 'GET') === 'GET') {
           return new Response(JSON.stringify({ id: DEPLOYMENT_ID, status: 'running' }), { status: 200 });
         }
