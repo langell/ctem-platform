@@ -5,6 +5,7 @@ import {
   requireAzureCredentials,
   requireGcpCredentials,
   requireGithubToken,
+  requireQuayToken,
   resolveCredential,
 } from './credentials';
 
@@ -27,6 +28,8 @@ afterEach(() => {
   delete process.env.AZURE_CLIENT_ID;
   delete process.env.AZURE_CLIENT_SECRET;
   delete process.env.AZURE_TEST_TOKEN;
+  delete process.env.QUAY_TOKEN;
+  delete process.env.QUAY_TEST_TOKEN;
 });
 
 describe('resolveCredential', () => {
@@ -57,6 +60,11 @@ describe('resolveCredential', () => {
   it('reads an allowlisted AZURE_* env var', () => {
     process.env.AZURE_TENANT_ID = '22222222-2222-2222-2222-222222222222';
     expect(resolveCredential('env:AZURE_TENANT_ID')).toBe('22222222-2222-2222-2222-222222222222');
+  });
+
+  it('reads an allowlisted QUAY_* env var', () => {
+    process.env.QUAY_TOKEN = 'quay_test';
+    expect(resolveCredential('env:QUAY_TOKEN')).toBe('quay_test');
   });
 
   it('returns undefined when an allowlisted name is unset (public-listing path)', () => {
@@ -105,6 +113,38 @@ describe('requireGithubToken', () => {
   it('returns the token when the ref points at a usable GITHUB_* name', () => {
     process.env.GITHUB_TOKEN = 'ghp_test';
     expect(requireGithubToken('env:GITHUB_TOKEN')).toBe('ghp_test');
+  });
+});
+
+describe('requireQuayToken', () => {
+  it('fails closed when credentialRef is missing', () => {
+    expect(() => requireQuayToken(null)).toThrow(/env:QUAY_\*/);
+  });
+
+  it('fails closed when the pointed QUAY_* env var is empty', () => {
+    expect(() => requireQuayToken('env:QUAY_TOKEN')).toThrow(/cannot be used/);
+  });
+
+  it('refuses an AWS_* ref even when a QUAY_TOKEN is present', () => {
+    process.env.QUAY_TOKEN = 'quay_test';
+    process.env.AWS_ACCESS_KEY_ID = 'AKIATEST';
+    expect(() => requireQuayToken('env:AWS_ACCESS_KEY_ID')).toThrow(/env:QUAY_\*/);
+  });
+
+  it('refuses a GITHUB_* ref even when a QUAY_TOKEN is present', () => {
+    process.env.QUAY_TOKEN = 'quay_test';
+    process.env.GITHUB_TOKEN = 'ghp_test';
+    expect(() => requireQuayToken('env:GITHUB_TOKEN')).toThrow(/env:QUAY_\*/);
+  });
+
+  it('refuses env:DATABASE_URL without reading the secret', () => {
+    process.env.DATABASE_URL = 'postgres://should-not-leak';
+    expect(() => requireQuayToken('env:DATABASE_URL')).toThrow(/not allowlisted/);
+  });
+
+  it('returns the token when the ref points at a usable QUAY_* name', () => {
+    process.env.QUAY_TOKEN = 'quay_test';
+    expect(requireQuayToken('env:QUAY_TOKEN')).toBe('quay_test');
   });
 });
 

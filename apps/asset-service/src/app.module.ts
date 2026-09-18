@@ -19,6 +19,7 @@ import { AcrConnector } from './connectors/acr.connector';
 import { EcrConnector } from './connectors/ecr.connector';
 import { GcrConnector } from './connectors/gcr.connector';
 import { GhcrConnector } from './connectors/ghcr.connector';
+import { QuayConnector } from './connectors/quay.connector';
 import { GitHubConnector } from './connectors/github.connector';
 import { GitLabConnector } from './connectors/gitlab.connector';
 import { DnsEnumConnector } from './connectors/dns.connector';
@@ -48,6 +49,7 @@ import { KubernetesConnector } from './connectors/kubernetes.connector';
     EcrConnector,
     GcrConnector,
     AcrConnector,
+    QuayConnector,
     KubernetesConnector,
     DnsEnumConnector,
     { provide: APP_GUARD, useClass: InternalAuthGuard },
@@ -65,6 +67,7 @@ export class AppModule implements OnModuleInit {
     private readonly ecr: EcrConnector,
     private readonly gcr: GcrConnector,
     private readonly acr: AcrConnector,
+    private readonly quay: QuayConnector,
     private readonly kubernetes: KubernetesConnector,
     private readonly dnsEnum: DnsEnumConnector,
   ) {}
@@ -80,6 +83,7 @@ export class AppModule implements OnModuleInit {
     this.registry.register(this.ecr);
     this.registry.register(this.gcr);
     this.registry.register(this.acr);
+    this.registry.register(this.quay);
     this.registry.register(this.kubernetes);
     this.registry.register(this.dnsEnum);
   }
