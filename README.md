@@ -69,7 +69,7 @@ Shared fixtures (factories, a test OIDC issuer, RLS-aware db clients) are in `@c
 | `scanner-asm`           | `asm` — external attack surface, subdomain takeover, CT/NS enum on `domain` |
 | `scanner-cspm`          | `cloud_posture` — read-only AWS/GCP/Azure posture on `cloud_resource`     |
 
-**Shared libraries** — `@ctem/contracts` (zod schemas + event catalog), `@ctem/db` (Prisma + RLS), `@ctem/auth`, `@ctem/events`, `@ctem/coordination` (Redis leader leases), `@ctem/storage`, `@ctem/config`, `@ctem/observability`, `@ctem/service-kit`, `@ctem/scanner-sdk`.
+**Shared libraries** — `@ctem/contracts` (zod schemas + event catalog), `@ctem/db` (Prisma + RLS), `@ctem/auth`, `@ctem/events`, `@ctem/coordination` (Redis leader leases), `@ctem/resilience` (inter-service circuit breaker + retry budget), `@ctem/storage`, `@ctem/config`, `@ctem/observability`, `@ctem/service-kit`, `@ctem/scanner-sdk`.
 
 ## How a scan flows
 
