@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { CircuitBreakerConfigError } from './errors';
-import { CircuitOpenError } from './errors';
+import { CircuitBreakerConfigError, CircuitOpenError } from './errors';
 import { DEFAULT_CIRCUIT_BREAKER_CONFIG } from './config';
 import { InternalHttpPolicy } from './http-policy';
 import { isRetryableHttpStatus, retryDelayMs } from './retry';
@@ -102,8 +101,8 @@ describe('InternalHttpPolicy', () => {
     const probe = vi.fn().mockResolvedValue(ok(200));
     await expect(p.execute('identity', probe)).resolves.toMatchObject({ status: 200 });
     expect(probe).toHaveBeenCalledTimes(1);
-    const next = vi.fn().mockResolvedValue(ok(204));
-    await expect(p.execute('identity', next)).resolves.toMatchObject({ status: 204 });
+    const next = vi.fn().mockResolvedValue(ok(200));
+    await expect(p.execute('identity', next)).resolves.toMatchObject({ status: 200 });
     expect(next).toHaveBeenCalledTimes(1);
   });
 
