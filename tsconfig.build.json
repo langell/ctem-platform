@@ -17,6 +17,9 @@
       "path": "libs/coordination"
     },
     {
+      "path": "libs/resilience"
+    },
+    {
       "path": "libs/db"
     },
     {

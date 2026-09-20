@@ -32,6 +32,9 @@
       "path": "../../libs/coordination"
     },
     {
+      "path": "../../libs/resilience"
+    },
+    {
       "path": "../../libs/service-kit"
     }
   ]

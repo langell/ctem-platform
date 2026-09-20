@@ -7,6 +7,7 @@ export const workspaceAliases = {
   '@ctem/observability': resolve(__dirname, 'libs/observability/src/index.ts'),
   '@ctem/events': resolve(__dirname, 'libs/events/src/index.ts'),
   '@ctem/coordination': resolve(__dirname, 'libs/coordination/src/index.ts'),
+  '@ctem/resilience': resolve(__dirname, 'libs/resilience/src/index.ts'),
   '@ctem/db': resolve(__dirname, 'libs/db/src/index.ts'),
   '@ctem/auth': resolve(__dirname, 'libs/auth/src/index.ts'),
   '@ctem/storage': resolve(__dirname, 'libs/storage/src/index.ts'),
