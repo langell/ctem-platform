@@ -3,6 +3,7 @@ import {
   optionalGithubToken,
   requireAwsCredentials,
   requireAzureCredentials,
+  requireDockerhubCredentials,
   requireGcpCredentials,
   requireGithubToken,
 } from './container.credential';
@@ -22,6 +23,8 @@ afterEach(() => {
   delete process.env.AZURE_TENANT_ID;
   delete process.env.AZURE_CLIENT_ID;
   delete process.env.AZURE_CLIENT_SECRET;
+  delete process.env.DOCKERHUB_USERNAME;
+  delete process.env.DOCKERHUB_TOKEN;
 });
 
 describe('requireGithubToken', () => {
@@ -185,6 +188,65 @@ describe('requireAzureCredentials', () => {
       tenantId: AZURE_TENANT,
       clientId: AZURE_CLIENT,
       clientSecret: 'super-secret',
+    });
+  });
+});
+
+describe('requireDockerhubCredentials', () => {
+  function setDockerhubPair(): void {
+    process.env.DOCKERHUB_USERNAME = 'acme';
+    process.env.DOCKERHUB_TOKEN = 'dckr_pat_test';
+  }
+
+  it('fails closed when credentialRef is missing', () => {
+    expect(() => requireDockerhubCredentials(null)).toThrow(/env:DOCKERHUB_\*/);
+  });
+
+  it('fails closed when the pointed DOCKERHUB_* env var is empty', () => {
+    expect(() => requireDockerhubCredentials('env:DOCKERHUB_TOKEN')).toThrow(/cannot be used/);
+  });
+
+  it('fails closed when the username/token pair is incomplete', () => {
+    process.env.DOCKERHUB_USERNAME = 'acme';
+    expect(() => requireDockerhubCredentials('env:DOCKERHUB_USERNAME')).toThrow(
+      /DOCKERHUB_USERNAME and DOCKERHUB_TOKEN/,
+    );
+  });
+
+  it('fails closed when DOCKERHUB_USERNAME is unusable', () => {
+    process.env.DOCKERHUB_USERNAME = 'https://evil.example';
+    process.env.DOCKERHUB_TOKEN = 'dckr_pat_test';
+    expect(() => requireDockerhubCredentials('env:DOCKERHUB_USERNAME')).toThrow(/unusable/);
+  });
+
+  it('fails closed when DOCKERHUB_USERNAME is a docker.io host id', () => {
+    process.env.DOCKERHUB_USERNAME = 'registry-1.docker.io';
+    process.env.DOCKERHUB_TOKEN = 'dckr_pat_test';
+    expect(() => requireDockerhubCredentials('env:DOCKERHUB_USERNAME')).toThrow(/unusable/);
+  });
+
+  it('refuses a GITHUB_* ref even when Docker Hub keys are present', () => {
+    process.env.GITHUB_TOKEN = 'ghp_test';
+    setDockerhubPair();
+    expect(() => requireDockerhubCredentials('env:GITHUB_TOKEN')).toThrow(/env:DOCKERHUB_\*/);
+  });
+
+  it('refuses an AWS_* ref even when Docker Hub keys are present', () => {
+    process.env.AWS_ACCESS_KEY_ID = 'AKIATEST';
+    setDockerhubPair();
+    expect(() => requireDockerhubCredentials('env:AWS_ACCESS_KEY_ID')).toThrow(/env:DOCKERHUB_\*/);
+  });
+
+  it('refuses env:DATABASE_URL without reading the secret', () => {
+    process.env.DATABASE_URL = 'postgres://should-not-leak';
+    expect(() => requireDockerhubCredentials('env:DATABASE_URL')).toThrow(/not allowlisted/);
+  });
+
+  it('returns the platform pair when the ref and both keys are set', () => {
+    setDockerhubPair();
+    expect(requireDockerhubCredentials('env:DOCKERHUB_TOKEN')).toEqual({
+      username: 'acme',
+      token: 'dckr_pat_test',
     });
   });
 });

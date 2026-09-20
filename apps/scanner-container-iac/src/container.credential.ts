@@ -1,18 +1,21 @@
 /**
- * Same allowlist as GHCR / ECR / GCR / ACR discovery (`apps/asset-service` credentials).
- * Platform-operated `env:GITHUB_*` (GHCR), `env:AWS_*` (ECR), `env:GCP_*`
- * (GCR / Artifact Registry), and `env:AZURE_*` (ACR). A missing or unusable
- * pointer must fail the pull — never empty-succeed.
+ * Same allowlist as GHCR / ECR / GCR / ACR / Docker Hub discovery
+ * (`apps/asset-service` credentials). Platform-operated `env:GITHUB_*`
+ * (GHCR), `env:AWS_*` (ECR), `env:GCP_*` (GCR / Artifact Registry),
+ * `env:AZURE_*` (ACR), and `env:DOCKERHUB_*` (Docker Hub). A missing or
+ * unusable pointer must fail the pull — never empty-succeed.
  */
 
 import { createPrivateKey } from 'node:crypto';
 
-const ENV_ALLOWLIST = /^(GITHUB|GITLAB|AWS|GCP|AZURE)_[A-Z0-9_]+$/;
+const ENV_ALLOWLIST = /^(GITHUB|GITLAB|AWS|GCP|AZURE|DOCKERHUB)_[A-Z0-9_]+$/;
 const GITHUB_ENV_NAME = /^GITHUB_[A-Z0-9_]+$/;
 const AWS_ENV_NAME = /^AWS_[A-Z0-9_]+$/;
 const GCP_ENV_NAME = /^GCP_[A-Z0-9_]+$/;
 const AZURE_ENV_NAME = /^AZURE_[A-Z0-9_]+$/;
+const DOCKERHUB_ENV_NAME = /^DOCKERHUB_[A-Z0-9_]+$/;
 const AZURE_GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const DOCKERHUB_USERNAME_RE = /^[\w.-]+$/;
 
 export class ContainerCredentialError extends Error {
   constructor(message: string) {
@@ -31,7 +34,7 @@ function resolveCredential(ref: string | null): string | undefined {
   if (scheme === 'env') {
     if (!key || !ENV_ALLOWLIST.test(key)) {
       throw new ContainerCredentialError(
-        `credentialRef 'env:${key || '<empty>'}' is not allowlisted — env: is platform-operated and only GITHUB_* / GITLAB_* / AWS_* / GCP_* / AZURE_* names are permitted`,
+        `credentialRef 'env:${key || '<empty>'}' is not allowlisted — env: is platform-operated and only GITHUB_* / GITLAB_* / AWS_* / GCP_* / AZURE_* / DOCKERHUB_* names are permitted`,
       );
     }
     return process.env[key] || undefined;
@@ -250,5 +253,70 @@ export function requireAzureCredentials(credentialRef: string | null): AzureCred
     tenantId: assertUsableAzureGuid(tenantId, 'AZURE_TENANT_ID'),
     clientId: assertUsableAzureGuid(clientId, 'AZURE_CLIENT_ID'),
     clientSecret: secret,
+  };
+}
+
+export interface DockerhubCredentials {
+  username: string;
+  token: string;
+}
+
+function assertUsableDockerhubUsername(value: string): string {
+  const trimmed = value.trim();
+  if (
+    !trimmed ||
+    /^https?:\/\//i.test(trimmed) ||
+    !DOCKERHUB_USERNAME_RE.test(trimmed) ||
+    /docker\.(io|com)$/i.test(trimmed)
+  ) {
+    throw new ContainerCredentialError('Docker Hub pull fails closed — DOCKERHUB_USERNAME is unusable');
+  }
+  return trimmed;
+}
+
+/**
+ * Docker Hub pulls have no unauthenticated path (same class as Docker Hub
+ * discovery). The integration pointer must be `env:DOCKERHUB_*`, and the
+ * platform-operated pair `DOCKERHUB_USERNAME` + `DOCKERHUB_TOKEN` must both
+ * be usable. A missing or unusable pointer must not empty-succeed.
+ */
+export function requireDockerhubCredentials(
+  credentialRef: string | null,
+): DockerhubCredentials {
+  if (!credentialRef) {
+    throw new ContainerCredentialError(
+      'Docker Hub pull requires a usable credentialRef (env:DOCKERHUB_*) — refusing unauthenticated pull',
+    );
+  }
+
+  const sep = credentialRef.indexOf(':');
+  const scheme = sep === -1 ? credentialRef : credentialRef.slice(0, sep);
+  const key = sep === -1 ? '' : credentialRef.slice(sep + 1);
+  if (scheme !== 'env' || !key || !DOCKERHUB_ENV_NAME.test(key)) {
+    resolveCredential(credentialRef);
+    throw new ContainerCredentialError(
+      `credentialRef '${credentialRef}' is not an env:DOCKERHUB_* pointer — Docker Hub pulls only accept platform-operated DOCKERHUB_* names`,
+    );
+  }
+
+  const pointed = resolveCredential(credentialRef);
+  if (!pointed) {
+    throw new ContainerCredentialError(
+      `credentialRef '${credentialRef}' is set but cannot be used — refusing to pull without usable DOCKERHUB_* credentials`,
+    );
+  }
+
+  const username = resolveCredential('env:DOCKERHUB_USERNAME');
+  const token = resolveCredential('env:DOCKERHUB_TOKEN');
+  const secret = token?.trim();
+  if (!username || !secret) {
+    throw new ContainerCredentialError(
+      'Docker Hub pull fails closed without usable DOCKERHUB_USERNAME and DOCKERHUB_TOKEN',
+    );
+  }
+
+  return {
+    username: assertUsableDockerhubUsername(username),
+    token: secret,
   };
 }

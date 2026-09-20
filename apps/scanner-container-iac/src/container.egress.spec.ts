@@ -4,6 +4,9 @@ import {
   allowlistedAcrBlobRedirect,
   allowlistedAcrOauthUrl,
   allowlistedAcrRegistryUrl,
+  allowlistedDockerhubAuthUrl,
+  allowlistedDockerhubBlobRedirect,
+  allowlistedDockerhubRegistryUrl,
   allowlistedEcrApiUrl,
   allowlistedEcrBlobRedirect,
   allowlistedEcrRegistryUrl,
@@ -16,6 +19,9 @@ import {
   acrOauthExchangeUrl,
   acrOauthTokenUrl,
   acrRegistryHost,
+  dockerhubBlobUrl,
+  dockerhubManifestUrl,
+  dockerhubTokenUrl,
   ecrApiUrl,
   ecrBlobUrl,
   ecrManifestUrl,
@@ -28,6 +34,8 @@ import {
   ghcrManifestUrl,
   ghcrTokenUrl,
   isAcrRegistryHost,
+  isDockerhubAuthHost,
+  isDockerhubRegistryHost,
   isEcrApiHost,
   isEcrBlobS3Host,
   isEcrRegistryHost,
@@ -229,6 +237,61 @@ describe('refuseTenantWritableRegistry', () => {
         registry: 'acmeprod',
         loginServer: 'acmeprod.azurecr.io',
         repository: 'payments-api',
+      }),
+    ).not.toThrow();
+  });
+
+  it('refuses tenant Docker Hub registry / index / auth URL override fields and allows ids', () => {
+    expect(() =>
+      refuseTenantWritableRegistry({
+        namespace: 'acme',
+        registryUrl: 'https://registry-1.docker.io',
+      }),
+    ).toThrow(/tenant-writable/);
+    expect(() =>
+      refuseTenantWritableRegistry({
+        namespace: 'acme',
+        dockerhubUrl: 'https://hub.docker.com',
+      }),
+    ).toThrow(/tenant-writable/);
+    expect(() =>
+      refuseTenantWritableRegistry({
+        namespace: 'acme',
+        index: 'docker.io',
+      }),
+    ).toThrow(/tenant-writable/);
+    expect(() =>
+      refuseTenantWritableRegistry({
+        namespace: 'acme',
+        indexUrl: 'https://index.docker.io/v1/',
+      }),
+    ).toThrow(/tenant-writable/);
+    expect(() =>
+      refuseTenantWritableRegistry({
+        namespace: 'acme',
+        dockerIoHost: 'registry-1.docker.io',
+      }),
+    ).toThrow(/tenant-writable/);
+    expect(() =>
+      refuseTenantWritableRegistry({
+        namespace: 'acme',
+        authUrl: 'https://auth.docker.io/token',
+      }),
+    ).toThrow(/tenant-writable/);
+    expect(() => refuseTenantWritableRegistry({ namespace: 'https://registry-1.docker.io' })).toThrow(
+      /namespace is an id/,
+    );
+    expect(() => refuseTenantWritableRegistry({ namespace: 'registry-1.docker.io' })).toThrow(
+      /namespace is an id/,
+    );
+    expect(() => refuseTenantWritableRegistry({ namespace: 'index.docker.io' })).toThrow(
+      /namespace is an id/,
+    );
+    expect(() =>
+      refuseTenantWritableRegistry({
+        namespace: 'acme',
+        repository: 'payments-api',
+        digest: DIGEST,
       }),
     ).not.toThrow();
   });
@@ -492,6 +555,85 @@ describe('allowlistedAcrBlobRedirect', () => {
         ACR_REGISTRY,
       ),
     ).toThrow(/acmeprod\.azurecr\.io/);
+  });
+});
+
+describe('isDockerhubRegistryHost / isDockerhubAuthHost', () => {
+  it('pins exact registry-1.docker.io and auth.docker.io hosts', () => {
+    expect(isDockerhubRegistryHost('registry-1.docker.io')).toBe(true);
+    expect(isDockerhubRegistryHost('REGISTRY-1.DOCKER.IO')).toBe(true);
+    expect(isDockerhubRegistryHost('registry-1.docker.io.')).toBe(true);
+    expect(isDockerhubRegistryHost('registry-1.docker.io.evil.example')).toBe(false);
+    expect(isDockerhubRegistryHost('docker.io')).toBe(false);
+    expect(isDockerhubRegistryHost('index.docker.io')).toBe(false);
+    expect(isDockerhubRegistryHost('hub.docker.com')).toBe(false);
+    expect(isDockerhubRegistryHost('auth.docker.io')).toBe(false);
+    expect(isDockerhubAuthHost('auth.docker.io')).toBe(true);
+    expect(isDockerhubAuthHost('AUTH.DOCKER.IO')).toBe(true);
+    expect(isDockerhubAuthHost('auth.docker.io.evil.example')).toBe(false);
+    expect(isDockerhubAuthHost('hub.docker.com')).toBe(false);
+    expect(isDockerhubAuthHost('registry-1.docker.io')).toBe(false);
+  });
+});
+
+describe('allowlistedDockerhubRegistryUrl / dockerhubManifestUrl', () => {
+  it('builds registry-1.docker.io URLs from namespace/repository ids, never a tenant URL', () => {
+    expect(dockerhubManifestUrl('acme', 'payments-api', DIGEST)).toBe(
+      `https://registry-1.docker.io/v2/acme/payments-api/manifests/${DIGEST}`,
+    );
+    expect(dockerhubBlobUrl('library', 'ubuntu', DIGEST)).toBe(
+      `https://registry-1.docker.io/v2/library/ubuntu/blobs/${DIGEST}`,
+    );
+    expect(dockerhubTokenUrl('acme', 'payments-api')).toBe(
+      'https://auth.docker.io/token?service=registry.docker.io&scope=repository%3Aacme%2Fpayments-api%3Apull',
+    );
+    expect(() =>
+      allowlistedDockerhubRegistryUrl('https://docker.io/v2/library/nginx/manifests/sha256:abc'),
+    ).toThrow(/only registry-1\.docker\.io/);
+    expect(() =>
+      allowlistedDockerhubRegistryUrl('https://index.docker.io/v2/acme/app/manifests/x'),
+    ).toThrow(/only registry-1\.docker\.io/);
+    expect(() =>
+      allowlistedDockerhubRegistryUrl('https://registry-1.docker.io.evil.example/v2/app/manifests/x'),
+    ).toThrow(/only registry-1\.docker\.io/);
+    expect(() =>
+      allowlistedDockerhubRegistryUrl('https://hub.docker.com/v2/repositories/acme/app'),
+    ).toThrow(/only registry-1\.docker\.io/);
+    expect(() =>
+      allowlistedDockerhubRegistryUrl(`http://registry-1.docker.io/v2/acme/app/manifests/${DIGEST}`),
+    ).toThrow(/non-https/);
+    expect(() =>
+      allowlistedDockerhubAuthUrl('https://hub.docker.com/v2/users/login'),
+    ).toThrow(/only auth\.docker\.io/);
+    expect(() =>
+      allowlistedDockerhubAuthUrl('https://auth.docker.io/v2/token'),
+    ).toThrow(/only \/token/);
+  });
+});
+
+describe('allowlistedDockerhubBlobRedirect', () => {
+  it('allows the pinned registry-1.docker.io host and refuses CDN / other registries', () => {
+    expect(
+      allowlistedDockerhubBlobRedirect(`https://registry-1.docker.io/v2/acme/payments-api/blobs/${DIGEST}`),
+    ).toContain('registry-1.docker.io');
+    expect(() =>
+      allowlistedDockerhubBlobRedirect('https://production.cloudflare.docker.com/registry-v2/blobs/x'),
+    ).toThrow(/registry-1\.docker\.io/);
+    expect(() =>
+      allowlistedDockerhubBlobRedirect('https://registry-1.docker.io.evil.example/blob'),
+    ).toThrow(/registry-1\.docker\.io/);
+    expect(() => allowlistedDockerhubBlobRedirect('https://docker.io/v2/library/nginx/blobs/x')).toThrow(
+      /registry-1\.docker\.io/,
+    );
+    expect(() => allowlistedDockerhubBlobRedirect('https://index.docker.io/v1/')).toThrow(
+      /registry-1\.docker\.io/,
+    );
+    expect(() => allowlistedDockerhubBlobRedirect('https://ghcr.io/v2/acme/app/blobs/x')).toThrow(
+      /registry-1\.docker\.io/,
+    );
+    expect(() =>
+      allowlistedDockerhubBlobRedirect('https://acmeprod.azurecr.io/v2/app/blobs/x'),
+    ).toThrow(/registry-1\.docker\.io/);
   });
 });
 

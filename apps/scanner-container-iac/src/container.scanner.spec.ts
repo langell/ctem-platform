@@ -15,6 +15,7 @@ import { ContainerPullError, type ImagePuller, type LayerSnapshot } from './oci/
 import type { EcrImagePuller } from './oci/ecr.registry';
 import type { GcrImagePuller } from './oci/gcr.registry';
 import type { AcrImagePuller } from './oci/acr.registry';
+import type { DockerhubImagePuller } from './oci/dockerhub.registry';
 import type { VulnMatcher } from '@ctem/vuln-intel';
 
 const DIGEST = `sha256:${'a'.repeat(64)}`;
@@ -33,6 +34,9 @@ const AZURE_CLIENT = '33333333-3333-3333-3333-333333333333';
 const RG = 'rg-prod';
 const ACR_REGISTRY = 'acmeprod';
 const ACR_KEY = `acr:${SUB}/${RG}/${ACR_REGISTRY}/payments-api@${DIGEST}`;
+const DOCKERHUB_NS = 'acme';
+const DOCKERHUB_REPO = 'payments-api';
+const DOCKERHUB_KEY = `dockerhub:${DOCKERHUB_NS}/${DOCKERHUB_REPO}@${DIGEST}`;
 const gcpPem = generateKeyPairSync('rsa', { modulusLength: 2048 })
   .privateKey.export({ type: 'pkcs8', format: 'pem' })
   .toString();
@@ -149,6 +153,14 @@ function unusedAcr(): AcrImagePuller {
   };
 }
 
+function unusedDockerhub(): DockerhubImagePuller {
+  return {
+    pull: vi.fn(async () => {
+      throw new Error('Docker Hub puller must not be called for GHCR/ECR/GCR/ACR identities');
+    }),
+  };
+}
+
 function ecrPuller(layers: LayerSnapshot[], spy?: (ref: unknown) => void): EcrImagePuller {
   return {
     pull: vi.fn(async (ref, _creds, checkDeadline) => {
@@ -179,12 +191,23 @@ function acrPuller(layers: LayerSnapshot[], spy?: (ref: unknown) => void): AcrIm
   };
 }
 
+function dockerhubPuller(layers: LayerSnapshot[], spy?: (ref: unknown) => void): DockerhubImagePuller {
+  return {
+    pull: vi.fn(async (ref, _creds, checkDeadline) => {
+      spy?.(ref);
+      if (!checkDeadline()) throw new ContainerPullError('Job deadline exceeded mid-pull');
+      return { digest: DIGEST, owner: DOCKERHUB_NS, name: DOCKERHUB_REPO, layers };
+    }),
+  };
+}
+
 function scanner(
   matcher = matchingMatcher(),
   registry?: ImagePuller,
   ecr?: EcrImagePuller,
   gcr?: GcrImagePuller,
   acr?: AcrImagePuller,
+  dockerhub?: DockerhubImagePuller,
 ): ContainerScanner {
   return new ContainerScanner(
     matcher as unknown as VulnMatcher,
@@ -192,6 +215,7 @@ function scanner(
     (ecr ?? unusedEcr()) as never,
     (gcr ?? unusedGcr()) as never,
     (acr ?? unusedAcr()) as never,
+    (dockerhub ?? unusedDockerhub()) as never,
   );
 }
 
@@ -234,6 +258,17 @@ function acrTarget(overrides: Record<string, unknown> = {}): Record<string, unkn
   };
 }
 
+function dockerhubTarget(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    kind: 'container_image',
+    externalKey: DOCKERHUB_KEY,
+    namespace: DOCKERHUB_NS,
+    repository: DOCKERHUB_REPO,
+    digest: DIGEST,
+    ...overrides,
+  };
+}
+
 afterEach(() => {
   delete process.env.GITHUB_TOKEN;
   delete process.env.AWS_ACCESS_KEY_ID;
@@ -244,6 +279,8 @@ afterEach(() => {
   delete process.env.AZURE_TENANT_ID;
   delete process.env.AZURE_CLIENT_ID;
   delete process.env.AZURE_CLIENT_SECRET;
+  delete process.env.DOCKERHUB_USERNAME;
+  delete process.env.DOCKERHUB_TOKEN;
 });
 
 describe('ContainerScanner.supports', () => {
@@ -324,6 +361,25 @@ describe('ContainerScanner.execute', () => {
         }),
       ),
     ).rejects.toThrow(/loginServer|tenant-writable/);
+    await expect(
+      s.execute(
+        ctx({
+          target: {
+            kind: 'container_image',
+            externalKey: DOCKERHUB_KEY,
+            registryUrl: 'https://registry-1.docker.io',
+          },
+        }),
+      ),
+    ).rejects.toThrow(ContainerEgressError);
+    await expect(
+      s.execute(
+        ctx({
+          options: { index: 'docker.io' },
+          target: dockerhubTarget(),
+        }),
+      ),
+    ).rejects.toThrow(/tenant-writable/);
     expect(registry.pull).not.toHaveBeenCalled();
   });
 
@@ -366,6 +422,26 @@ describe('ContainerScanner.execute', () => {
         }),
       ),
     ).rejects.toThrow(/non-digest|malformed/);
+    await expect(
+      s.execute(
+        ctx({
+          target: {
+            kind: 'container_image',
+            externalKey: `quay:acme/app@${DIGEST}`,
+          },
+        }),
+      ),
+    ).rejects.toThrow(/non-digest|malformed/);
+    await expect(
+      s.execute(
+        ctx({
+          target: {
+            kind: 'container_image',
+            externalKey: `dockerhub:acme/app:latest`,
+          },
+        }),
+      ),
+    ).rejects.toThrow(ContainerIdentityError);
     await expect(
       s.execute(
         ctx({
@@ -525,6 +601,66 @@ describe('ContainerScanner.execute', () => {
     ).toThrow(/registry is an id|does not match|tenant-writable/);
   });
 
+  it('accepts a Docker Hub digest identity and refuses a tag, tenant URL, or host override', () => {
+    expect(parseContainerImageRef(dockerhubTarget())).toEqual({
+      kind: 'dockerhub',
+      namespace: DOCKERHUB_NS,
+      repository: DOCKERHUB_REPO,
+      digest: DIGEST,
+    });
+    expect(
+      parseContainerImageRef({
+        kind: 'container_image',
+        namespace: DOCKERHUB_NS,
+        repository: DOCKERHUB_REPO,
+        digest: DIGEST,
+      }),
+    ).toEqual({
+      kind: 'dockerhub',
+      namespace: DOCKERHUB_NS,
+      repository: DOCKERHUB_REPO,
+      digest: DIGEST,
+    });
+    expect(() =>
+      parseContainerImageRef({
+        kind: 'container_image',
+        externalKey: `dockerhub:${DOCKERHUB_NS}/${DOCKERHUB_REPO}:latest`,
+      }),
+    ).toThrow(ContainerIdentityError);
+    expect(() =>
+      parseContainerImageRef({
+        kind: 'container_image',
+        externalKey: `dockerhub:${DOCKERHUB_NS}/${DOCKERHUB_REPO}@sha256:deadbeef`,
+      }),
+    ).toThrow(ContainerIdentityError);
+    expect(() =>
+      parseContainerImageRef({
+        kind: 'container_image',
+        externalKey: DOCKERHUB_KEY,
+        registryUrl: 'https://registry-1.docker.io',
+      }),
+    ).toThrow(ContainerEgressError);
+    expect(() =>
+      parseContainerImageRef({
+        kind: 'container_image',
+        externalKey: DOCKERHUB_KEY,
+        index: 'docker.io',
+      }),
+    ).toThrow(/tenant-writable/);
+    expect(() =>
+      parseContainerImageRef({
+        kind: 'container_image',
+        externalKey: `dockerhub:registry-1.docker.io/${DOCKERHUB_REPO}@${DIGEST}`,
+      }),
+    ).toThrow(/namespace|tenant-writable|not a valid/);
+    expect(() =>
+      parseContainerImageRef({
+        kind: 'container_image',
+        externalKey: `quay:${DOCKERHUB_NS}/${DOCKERHUB_REPO}@${DIGEST}`,
+      }),
+    ).toThrow(/non-digest|malformed/);
+  });
+
   it('scans an ECR-discovered digest through the same inventory + vuln match', async () => {
     process.env.AWS_ACCESS_KEY_ID = 'AKIATEST';
     process.env.AWS_SECRET_ACCESS_KEY = 'secret';
@@ -644,6 +780,86 @@ describe('ContainerScanner.execute', () => {
       s.execute(ctx({ target: acrTarget(), credentialRef: 'env:GITHUB_TOKEN' })),
     ).rejects.toThrow(/env:AZURE_\*/);
     expect(acr.pull).not.toHaveBeenCalled();
+  });
+
+  it('scans a Docker Hub-discovered digest through the same inventory + vuln match', async () => {
+    process.env.DOCKERHUB_USERNAME = 'acme';
+    process.env.DOCKERHUB_TOKEN = 'dckr_pat_test';
+    const layers = [
+      layer(LAYER_BASE, { 'lib/apk/db/installed': APK_DB }),
+      layer(LAYER_APP, { 'app/node_modules/lodash/package.json': LODASH_JSON }),
+    ];
+    const dockerhub = dockerhubPuller(layers);
+    const matcher = matchingMatcher(['openssl', 'lodash']);
+    const outcome = await scanner(
+      matcher,
+      unusedGhcr(),
+      unusedEcr(),
+      unusedGcr(),
+      unusedAcr(),
+      dockerhub,
+    ).execute(
+      ctx({
+        target: dockerhubTarget(),
+        credentialRef: 'env:DOCKERHUB_TOKEN',
+      }),
+    );
+    expect(dockerhub.pull).toHaveBeenCalledOnce();
+    expect(outcome.findings.length).toBeGreaterThanOrEqual(2);
+    expect((outcome.rawOutput as { image: string }).image).toBe(
+      `registry-1.docker.io/${DOCKERHUB_NS}/${DOCKERHUB_REPO}@${DIGEST}`,
+    );
+    expect((outcome.rawOutput as { complete: boolean; truncated: boolean }).complete).toBe(true);
+    expect((outcome.rawOutput as { truncated: boolean }).truncated).toBe(false);
+  });
+
+  it('fails a Docker Hub pull when DOCKERHUB_* credentials are missing or not env:DOCKERHUB_*', async () => {
+    const dockerhub = dockerhubPuller([]);
+    const s = scanner(matchingMatcher(), unusedGhcr(), unusedEcr(), unusedGcr(), unusedAcr(), dockerhub);
+    await expect(
+      s.execute(ctx({ target: dockerhubTarget(), credentialRef: null })),
+    ).rejects.toThrow(ContainerCredentialError);
+    await expect(
+      s.execute(ctx({ target: dockerhubTarget(), credentialRef: 'env:DOCKERHUB_TOKEN' })),
+    ).rejects.toThrow(/cannot be used/);
+    process.env.GITHUB_TOKEN = 'ghp_test';
+    await expect(
+      s.execute(ctx({ target: dockerhubTarget(), credentialRef: 'env:GITHUB_TOKEN' })),
+    ).rejects.toThrow(/env:DOCKERHUB_\*/);
+    expect(dockerhub.pull).not.toHaveBeenCalled();
+  });
+
+  it('fails a Docker Hub pull that is incomplete or hits the deadline mid-pull', async () => {
+    process.env.DOCKERHUB_USERNAME = 'acme';
+    process.env.DOCKERHUB_TOKEN = 'dckr_pat_test';
+    const failPull: DockerhubImagePuller = {
+      pull: vi.fn(async () => {
+        throw new ContainerPullError('Docker Hub blob GET returned 502 — refusing pull');
+      }),
+    };
+    await expect(
+      scanner(matchingMatcher(), unusedGhcr(), unusedEcr(), unusedGcr(), unusedAcr(), failPull).execute(
+        ctx({ target: dockerhubTarget(), credentialRef: 'env:DOCKERHUB_TOKEN' }),
+      ),
+    ).rejects.toThrow(ContainerPullError);
+
+    const midPull: DockerhubImagePuller = {
+      pull: vi.fn(async (_ref, _creds, checkDeadline) => {
+        if (!checkDeadline()) throw new ContainerPullError('Job deadline exceeded mid-pull');
+        return { digest: DIGEST, owner: DOCKERHUB_NS, name: DOCKERHUB_REPO, layers: [] };
+      }),
+    };
+    let allow = true;
+    await expect(
+      scanner(matchingMatcher(), unusedGhcr(), unusedEcr(), unusedGcr(), unusedAcr(), midPull).execute({
+        ...ctx({ target: dockerhubTarget(), credentialRef: 'env:DOCKERHUB_TOKEN' }),
+        checkDeadline: () => {
+          const ok = allow;
+          allow = false;
+          return ok;
+        },
+      }),
+    ).rejects.toThrow(/deadline/);
   });
 
   it('fails an ACR pull that is incomplete or hits the deadline mid-pull', async () => {
@@ -908,6 +1124,8 @@ describe('ContainerScanner.execute', () => {
       'oci/ecr.registry.ts',
       'oci/gcr.registry.ts',
       'oci/acr.registry.ts',
+      'oci/dockerhub.registry.ts',
+      'dockerhub.egress.ts',
       'oci/tar.ts',
       'inventory/packages.ts',
     ]
