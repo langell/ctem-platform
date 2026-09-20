@@ -8,10 +8,9 @@ import {
   dockerhubBlobUrl,
   dockerhubManifestUrl,
   dockerhubTokenUrl,
-  isDockerhubRegistryHost,
   ContainerEgressError,
 } from '../container.egress';
-import { DockerhubEgressError } from '../dockerhub.egress';
+import { DockerhubEgressError, isDockerhubRegistryHost } from '../dockerhub.egress';
 import {
   ContainerPullError,
   MAX_IMAGE_LAYERS,

@@ -980,5 +980,7 @@ export {
   DOCKERHUB_REGISTRY_HOST,
   DOCKERHUB_REGISTRY_SERVICE,
   DOCKERHUB_REPOSITORY_RE,
+  isDockerhubAuthHost,
+  isDockerhubRegistryHost,
 };
 
