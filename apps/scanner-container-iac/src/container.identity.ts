@@ -4,9 +4,11 @@
  *   `ecr:{accountId}/{repositoryName}@sha256:<64 hex>` — ECR content digest
  *   `gcr:{project}/{location}/{repository}/{image}@sha256:<64 hex>` — Artifact Registry
  *   `acr:{subscriptionId}/{resourceGroup}/{registry}/{repository}@sha256:<64 hex>` — ACR
+ *   `dockerhub:{namespace}/{repository}@sha256:<64 hex>` — Docker Hub content digest
  * Never a mutable tag. Region / location / project / repository / registry
- * / subscription / resource group are ids, not hosts. The ECR region is not
- * encoded in the externalKey; GCR location and ACR registry are.
+ * / subscription / resource group / namespace are ids, not hosts. The ECR
+ * region is not encoded in the externalKey; GCR location and ACR registry
+ * are. Docker Hub registry host is derived as `registry-1.docker.io`.
  */
 
 import { AWS_REGION_RE } from './aws.egress';
@@ -23,6 +25,13 @@ import {
   assertAzureResourceGroup,
 } from './azure.egress';
 import { AWS_ACCOUNT_RE, ContainerEgressError, refuseTenantWritableRegistry } from './container.egress';
+import {
+  DOCKERHUB_NAMESPACE_RE,
+  DOCKERHUB_REPOSITORY_RE,
+  DockerhubEgressError,
+  assertDockerhubNamespace,
+  assertDockerhubRepository,
+} from './dockerhub.egress';
 import { GCP_LOCATION_ID_RE, GCP_PROJECT_ID_RE, GCR_REPOSITORY_ID_RE } from './gcp.egress';
 
 export const SHA256_DIGEST_RE = /^sha256:[a-f0-9]{64}$/i;
@@ -32,8 +41,11 @@ export const GCR_EXTERNAL_KEY_RE =
   /^gcr:([^/@]+)\/([^/@]+)\/([^/@]+)\/(.+)@(sha256:[a-f0-9]{64})$/i;
 export const ACR_EXTERNAL_KEY_RE =
   /^acr:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/([^/@]+)\/([a-z0-9]{5,50})\/(.+)@(sha256:[a-f0-9]{64})$/i;
+export const DOCKERHUB_EXTERNAL_KEY_RE =
+  /^dockerhub:([^/@]+)\/([^/@]+)@(sha256:[a-f0-9]{64})$/i;
 export { AWS_ACCOUNT_RE, GCP_LOCATION_ID_RE, GCP_PROJECT_ID_RE, GCR_REPOSITORY_ID_RE };
 export { AZURE_GUID_RE, ACR_REGISTRY_NAME_RE, ACR_REPOSITORY_RE, AZURE_RESOURCE_GROUP_RE };
+export { DOCKERHUB_NAMESPACE_RE, DOCKERHUB_REPOSITORY_RE };
 
 export class ContainerIdentityError extends Error {
   constructor(message: string) {
@@ -75,11 +87,19 @@ export interface AcrImageRef {
   digest: string;
 }
 
+export interface DockerhubImageRef {
+  kind: 'dockerhub';
+  namespace: string;
+  repository: string;
+  digest: string;
+}
+
 export type ContainerImageRef =
   | (GhcrImageRef & { kind: 'ghcr' })
   | EcrImageRef
   | GcrImageRef
-  | AcrImageRef;
+  | AcrImageRef
+  | DockerhubImageRef;
 
 function failIdentity(message: string): never {
   throw new ContainerIdentityError(message);
@@ -412,8 +432,77 @@ export function parseAcrImageRef(
 }
 
 /**
- * Accept GHCR, ECR, GCR/Artifact Registry, or ACR digest identities. Other
- * registries (Docker Hub, Quay) are refused. Pull is by digest only.
+ * Parse `externalKey` / attributes for
+ * `dockerhub:{namespace}/{repository}@sha256:<digest>`.
+ * Namespace / repository are ids — never a tenant `docker.io` /
+ * `registry-1.docker.io` / `index.docker.io` host. Pull host is derived
+ * as `registry-1.docker.io`.
+ */
+export function parseDockerhubImageRef(
+  target: Record<string, unknown>,
+  options: Record<string, unknown> = {},
+): DockerhubImageRef {
+  refuseTenantWritableRegistry(options);
+  refuseTenantWritableRegistry(target);
+
+  const key = typeof target.externalKey === 'string' ? target.externalKey.trim() : '';
+  let fromKey: { namespace: string; repository: string; digest: string } | undefined;
+  if (key) {
+    const match = DOCKERHUB_EXTERNAL_KEY_RE.exec(key);
+    if (!match) {
+      failIdentity(
+        `Refusing non-digest or malformed container identity '${key}' — expected dockerhub:{namespace}/{repository}@sha256:<64 hex>`,
+      );
+    }
+    fromKey = {
+      namespace: match[1]!,
+      repository: match[2]!,
+      digest: match[3]!.toLowerCase(),
+    };
+    assertDockerhubIdentityParts(fromKey);
+  }
+
+  const attrs = asRecord(target.attributes);
+  const namespaceAttr = stringAttr(target.namespace) ?? stringAttr(attrs.namespace);
+  const repoAttr = stringAttr(target.repository) ?? stringAttr(attrs.repository);
+  const digestAttr = stringAttr(target.digest) ?? stringAttr(attrs.digest);
+
+  if (fromKey) {
+    if (namespaceAttr && namespaceAttr !== fromKey.namespace) {
+      failIdentity('Container asset namespace does not match dockerhub: identity — refusing pull');
+    }
+    if (repoAttr && repoAttr !== fromKey.repository) {
+      failIdentity('Container asset repository does not match dockerhub: identity — refusing pull');
+    }
+    if (digestAttr) {
+      if (!SHA256_DIGEST_RE.test(digestAttr)) {
+        failIdentity(`Refusing non-digest container attribute digest '${digestAttr}'`);
+      }
+      if (digestAttr.toLowerCase() !== fromKey.digest) {
+        failIdentity('Container asset digest does not match dockerhub: identity — refusing pull');
+      }
+    }
+    return { kind: 'dockerhub', ...fromKey };
+  }
+
+  if (namespaceAttr && repoAttr && digestAttr && SHA256_DIGEST_RE.test(digestAttr)) {
+    const parts = {
+      namespace: namespaceAttr,
+      repository: repoAttr,
+      digest: digestAttr.toLowerCase(),
+    };
+    assertDockerhubIdentityParts(parts);
+    return { kind: 'dockerhub', ...parts };
+  }
+
+  failIdentity(
+    'Refusing container_image without dockerhub:{namespace}/{repository}@sha256:<digest> identity — no tag fallback, no other registry',
+  );
+}
+
+/**
+ * Accept GHCR, ECR, GCR/Artifact Registry, ACR, or Docker Hub digest
+ * identities. Other registries (Quay) are refused. Pull is by digest only.
  */
 export function parseContainerImageRef(
   target: Record<string, unknown>,
@@ -436,8 +525,11 @@ export function parseContainerImageRef(
     if (ACR_EXTERNAL_KEY_RE.test(key)) {
       return parseAcrImageRef(target, options);
     }
+    if (DOCKERHUB_EXTERNAL_KEY_RE.test(key)) {
+      return parseDockerhubImageRef(target, options);
+    }
     failIdentity(
-      `Refusing non-digest or malformed container identity '${key}' — expected ghcr:owner/name@sha256:<64 hex>, ecr:{accountId}/{repositoryName}@sha256:<64 hex>, gcr:{project}/{location}/{repository}/{image}@sha256:<64 hex>, or acr:{subscriptionId}/{resourceGroup}/{registry}/{repository}@sha256:<64 hex>`,
+      `Refusing non-digest or malformed container identity '${key}' — expected ghcr:owner/name@sha256:<64 hex>, ecr:{accountId}/{repositoryName}@sha256:<64 hex>, gcr:{project}/{location}/{repository}/{image}@sha256:<64 hex>, acr:{subscriptionId}/{resourceGroup}/{registry}/{repository}@sha256:<64 hex>, or dockerhub:{namespace}/{repository}@sha256:<64 hex>`,
     );
   }
 
@@ -453,6 +545,7 @@ export function parseContainerImageRef(
   const subscriptionAttr =
     stringAttr(target.subscriptionId) ?? stringAttr(attrs.subscriptionId);
   const registryAttr = stringAttr(target.registry) ?? stringAttr(attrs.registry);
+  const namespaceAttr = stringAttr(target.namespace) ?? stringAttr(attrs.namespace);
 
   if (
     projectAttr &&
@@ -476,6 +569,19 @@ export function parseContainerImageRef(
   ) {
     return parseAcrImageRef(target, options);
   }
+  if (
+    namespaceAttr &&
+    DOCKERHUB_NAMESPACE_RE.test(namespaceAttr) &&
+    repoAttr &&
+    DOCKERHUB_REPOSITORY_RE.test(repoAttr) &&
+    digestAttr &&
+    SHA256_DIGEST_RE.test(digestAttr) &&
+    !accountAttr &&
+    !projectAttr &&
+    !subscriptionAttr
+  ) {
+    return parseDockerhubImageRef(target, options);
+  }
   if (ownerAttr && nameAttr && digestAttr && SHA256_DIGEST_RE.test(digestAttr) && !accountAttr) {
     return { kind: 'ghcr', ...parseGhcrImageRef(target, options) };
   }
@@ -484,7 +590,7 @@ export function parseContainerImageRef(
   }
 
   failIdentity(
-    'Refusing container_image without ghcr:, ecr:, gcr:, or acr: digest identity — no tag fallback, no other registry',
+    'Refusing container_image without ghcr:, ecr:, gcr:, acr:, or dockerhub: digest identity — no tag fallback, no other registry',
   );
 }
 
@@ -537,6 +643,22 @@ function wrapAzureIdentity<T>(fn: () => T): T {
     return fn();
   } catch (err) {
     if (err instanceof AzureEgressError) {
+      throw new ContainerEgressError(err.message);
+    }
+    throw err;
+  }
+}
+
+function assertDockerhubIdentityParts(parts: { namespace: string; repository: string }): void {
+  wrapDockerhubIdentity(() => assertDockerhubNamespace(parts.namespace));
+  wrapDockerhubIdentity(() => assertDockerhubRepository(parts.repository));
+}
+
+function wrapDockerhubIdentity<T>(fn: () => T): T {
+  try {
+    return fn();
+  } catch (err) {
+    if (err instanceof DockerhubEgressError) {
       throw new ContainerEgressError(err.message);
     }
     throw err;

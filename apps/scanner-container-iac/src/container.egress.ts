@@ -2,10 +2,11 @@
  * Container-scan egress allowlist. Layer pull talks to `ghcr.io` (GHCR),
  * AWS ECR API + `*.dkr.ecr.{region}.amazonaws.com` (ECR digest identities),
  * `{location}-docker.pkg.dev` (GCR / Artifact Registry digest identities),
- * or `{registry}.azurecr.io` (ACR digest identities).
+ * `{registry}.azurecr.io` (ACR digest identities), or Docker Hub
+ * `registry-1.docker.io` (manifest/blobs) + `auth.docker.io` (token).
  * HTTPS/443 only. Tenant config/body/query/options cannot set a registry host.
- * Identity is a content digest — never a tag, never Docker Hub / Quay.
- * Location / project / repository / registry are ids; the docker host is derived.
+ * Identity is a content digest — never a tag, never Quay. Location / project
+ * / repository / registry / namespace are ids; the docker host is derived.
  */
 
 import { AWS_API_SUFFIX, AWS_REGION_RE, AwsEgressError, allowlistedAwsUrl } from './aws.egress';
@@ -27,6 +28,19 @@ import {
   assertGcpProjectId,
   assertGcrRepositoryId,
 } from './gcp.egress';
+import {
+  DOCKERHUB_AUTH_HOST,
+  DOCKERHUB_NAMESPACE_RE,
+  DOCKERHUB_REGISTRY_HOST,
+  DOCKERHUB_REGISTRY_SERVICE,
+  DOCKERHUB_REPOSITORY_RE,
+  DockerhubEgressError,
+  assertDockerhubNamespace,
+  assertDockerhubRepository,
+  isDockerhubAuthHost,
+  isDockerhubRegistryHost,
+  isForbiddenDockerHostId,
+} from './dockerhub.egress';
 
 export const GHCR_REGISTRY_HOST = 'ghcr.io';
 export const GHCR_REGISTRY_ORIGIN = 'https://ghcr.io';
@@ -86,6 +100,29 @@ export const TENANT_REGISTRY_KEYS = [
   'arUrl',
   'arHost',
   'dockerUrl',
+  'dockerhubUrl',
+  'dockerHubUrl',
+  'dockerhubHost',
+  'dockerHubHost',
+  'hubUrl',
+  'hubHost',
+  'hubEndpoint',
+  'index',
+  'indexUrl',
+  'indexHost',
+  'indexDockerIo',
+  'dockerIo',
+  'dockerIoUrl',
+  'dockerIoHost',
+  'registryEndpoint',
+  'authUrl',
+  'authHost',
+  'tokenUrl',
+  'tokenUri',
+  'token_uri',
+  'dockerhubTokenUrl',
+  'dockerhubAuthUrl',
+  'dockerhubRegistryUrl',
 ] as const;
 
 export function isGhcrRegistryHost(hostname: string): boolean {
@@ -200,14 +237,14 @@ export function refuseTenantWritableRegistry(config: Record<string, unknown>): v
     const value = config[key];
     if (value != null && value !== '') {
       throw new ContainerEgressError(
-        `Refusing tenant-writable container registry endpoint (${key}) — pulls are ghcr.io / ECR / Artifact Registry / ACR digest only, not tenant-configurable`,
+        `Refusing tenant-writable container registry endpoint (${key}) — pulls are ghcr.io / ECR / Artifact Registry / ACR / Docker Hub digest only, not tenant-configurable`,
       );
     }
   }
   const owner = config.owner;
   if (typeof owner === 'string' && /^https?:\/\//i.test(owner.trim())) {
     throw new ContainerEgressError(
-      "Refusing tenant-writable container registry endpoint (owner) — pulls are ghcr.io / ECR / Artifact Registry / ACR digest only, not tenant-configurable",
+      "Refusing tenant-writable container registry endpoint (owner) — pulls are ghcr.io / ECR / Artifact Registry / ACR / Docker Hub digest only, not tenant-configurable",
     );
   }
   const region = config.region;
@@ -287,6 +324,14 @@ export function refuseTenantWritableRegistry(config: Record<string, unknown>): v
     if (!isAcrLoginServerHost(host)) {
       throw new ContainerEgressError(
         `Refusing tenant-writable container registry endpoint (loginServer) — only {name}.${ACR_LOGIN_SUFFIX} is allowlisted`,
+      );
+    }
+  }
+  const namespace = config.namespace;
+  if (typeof namespace === 'string' && namespace.length > 0) {
+    if (/^https?:\/\//i.test(namespace.trim()) || isForbiddenDockerHostId(namespace.trim())) {
+      throw new ContainerEgressError(
+        "Refusing tenant-writable container registry endpoint (namespace) — namespace is an id, not a host",
       );
     }
   }
@@ -790,6 +835,139 @@ export function acrBlobUrl(registry: string, repository: string, digest: string)
   );
 }
 
+function wrapDockerhub<T>(fn: () => T): T {
+  try {
+    return fn();
+  } catch (err) {
+    if (err instanceof DockerhubEgressError) {
+      throw new ContainerEgressError(err.message);
+    }
+    throw err;
+  }
+}
+
+function canonicalizeDockerhubHostUrl(
+  raw: string,
+  allowed: (hostname: string) => boolean,
+  expected: string,
+  label: string,
+): URL {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new ContainerEgressError(`Refusing unparseable Docker Hub ${label} URL`);
+  }
+  if (parsed.protocol !== 'https:') {
+    throw new ContainerEgressError(`Refusing non-https Docker Hub ${label} URL — only https is permitted`);
+  }
+  if (parsed.port && parsed.port !== '443') {
+    throw new ContainerEgressError(`Refusing Docker Hub ${label} URL with a non-default port`);
+  }
+  if (parsed.username || parsed.password) {
+    throw new ContainerEgressError(`Refusing Docker Hub ${label} URL that embeds userinfo`);
+  }
+  if (!allowed(parsed.hostname)) {
+    throw new ContainerEgressError(
+      `Refusing Docker Hub ${label} host '${parsed.hostname}' — only ${expected} is allowlisted`,
+    );
+  }
+  return parsed;
+}
+
+/**
+ * Canonicalize a Docker Hub token URL against exact `auth.docker.io`.
+ * Path is `/token` only. Never `hub.docker.com`, never a tenant realm.
+ */
+export function allowlistedDockerhubAuthUrl(raw: string): string {
+  const parsed = canonicalizeDockerhubHostUrl(
+    raw,
+    isDockerhubAuthHost,
+    DOCKERHUB_AUTH_HOST,
+    'auth',
+  );
+  const path = parsed.pathname || '/';
+  if (path !== '/token' && !path.startsWith('/token')) {
+    throw new ContainerEgressError(
+      `Refusing Docker Hub auth path '${path}' — only /token on ${DOCKERHUB_AUTH_HOST} is permitted`,
+    );
+  }
+  return `https://${DOCKERHUB_AUTH_HOST}${path}${parsed.search}`;
+}
+
+/**
+ * Canonicalize a Docker Hub registry /v2 URL against exact
+ * `registry-1.docker.io`. Refuse `docker.io`, `index.docker.io`, CDNs,
+ * and suffix-confused lookalikes.
+ */
+export function allowlistedDockerhubRegistryUrl(raw: string): string {
+  const parsed = canonicalizeDockerhubHostUrl(
+    raw,
+    isDockerhubRegistryHost,
+    DOCKERHUB_REGISTRY_HOST,
+    'registry',
+  );
+  const path = parsed.pathname || '/';
+  if (!path.startsWith('/v2/')) {
+    throw new ContainerEgressError(
+      `Refusing Docker Hub registry path '${path}' — only /v2/ on ${DOCKERHUB_REGISTRY_HOST} is permitted`,
+    );
+  }
+  return `https://${DOCKERHUB_REGISTRY_HOST}${path}${parsed.search}`;
+}
+
+/**
+ * Blob GET on `registry-1.docker.io` may 302. Follow only that exact host
+ * (HTTPS/443, no userinfo) — never a CDN, never `docker.io`, never
+ * `index.docker.io`. Do not attach DOCKERHUB_* Basic off this host.
+ */
+export function allowlistedDockerhubBlobRedirect(raw: string): string {
+  const parsed = canonicalizeDockerhubHostUrl(
+    raw,
+    isDockerhubRegistryHost,
+    DOCKERHUB_REGISTRY_HOST,
+    'blob redirect',
+  );
+  const host = parsed.hostname.toLowerCase().replace(/\.$/, '');
+  if (isDockerhubRegistryHost(host)) {
+    const path = parsed.pathname || '/';
+    if (path.startsWith('/v2/')) {
+      return allowlistedDockerhubRegistryUrl(raw);
+    }
+    return `https://${DOCKERHUB_REGISTRY_HOST}${path}${parsed.search}`;
+  }
+  throw new ContainerEgressError(
+    `Refusing Docker Hub blob redirect host '${parsed.hostname}' — only ${DOCKERHUB_REGISTRY_HOST} is allowlisted`,
+  );
+}
+
+function encodeDockerhubRepoPath(namespace: string, repository: string): string {
+  const ns = wrapDockerhub(() => assertDockerhubNamespace(namespace));
+  const repo = wrapDockerhub(() => assertDockerhubRepository(repository));
+  return [ns, repo].map(encodeURIComponent).join('/');
+}
+
+export function dockerhubTokenUrl(namespace: string, repository: string): string {
+  const ns = wrapDockerhub(() => assertDockerhubNamespace(namespace));
+  const repo = wrapDockerhub(() => assertDockerhubRepository(repository));
+  const scope = `repository:${ns}/${repo}:pull`;
+  return allowlistedDockerhubAuthUrl(
+    `https://${DOCKERHUB_AUTH_HOST}/token?service=${encodeURIComponent(DOCKERHUB_REGISTRY_SERVICE)}&scope=${encodeURIComponent(scope)}`,
+  );
+}
+
+export function dockerhubManifestUrl(namespace: string, repository: string, digest: string): string {
+  return allowlistedDockerhubRegistryUrl(
+    `https://${DOCKERHUB_REGISTRY_HOST}/v2/${encodeDockerhubRepoPath(namespace, repository)}/manifests/${digest}`,
+  );
+}
+
+export function dockerhubBlobUrl(namespace: string, repository: string, digest: string): string {
+  return allowlistedDockerhubRegistryUrl(
+    `https://${DOCKERHUB_REGISTRY_HOST}/v2/${encodeDockerhubRepoPath(namespace, repository)}/blobs/${digest}`,
+  );
+}
+
 export {
   GCP_LOCATION_ID_RE,
   GCP_PROJECT_ID_RE,
@@ -797,5 +975,12 @@ export {
   GCP_STORAGE_HOST,
   ACR_LOGIN_SUFFIX,
   ACR_REGISTRY_NAME_RE,
+  DOCKERHUB_AUTH_HOST,
+  DOCKERHUB_NAMESPACE_RE,
+  DOCKERHUB_REGISTRY_HOST,
+  DOCKERHUB_REGISTRY_SERVICE,
+  DOCKERHUB_REPOSITORY_RE,
+  isDockerhubAuthHost,
+  isDockerhubRegistryHost,
 };
 

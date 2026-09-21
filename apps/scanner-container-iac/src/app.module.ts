@@ -7,6 +7,7 @@ import { ContainerScanner } from './container.scanner';
 import { IacScanner } from './iac.scanner';
 import { MisconfigRules } from './misconfig.rules';
 import { AcrRegistry } from './oci/acr.registry';
+import { DockerhubRegistry } from './oci/dockerhub.registry';
 import { EcrRegistry } from './oci/ecr.registry';
 import { GcrRegistry } from './oci/gcr.registry';
 import { GhcrRegistry } from './oci/registry';
@@ -29,6 +30,7 @@ import { GhcrRegistry } from './oci/registry';
       EcrRegistry,
       GcrRegistry,
       AcrRegistry,
+      DockerhubRegistry,
     ]),
   ],
 })
