@@ -9,13 +9,15 @@ import {
   requireDockerhubCredentials,
   requireGcpCredentials,
   requireGithubToken,
+  requireQuayToken,
   ContainerCredentialError,
 } from './container.credential';
 import { AwsEgressError } from './aws.egress';
 import { AzureEgressError } from './azure.egress';
-import { ContainerEgressError, acrRegistryHost, DOCKERHUB_REGISTRY_HOST } from './container.egress';
+import { ContainerEgressError, acrRegistryHost, DOCKERHUB_REGISTRY_HOST, QUAY_REGISTRY_HOST } from './container.egress';
 import { DockerhubEgressError } from './dockerhub.egress';
 import { GcpEgressError } from './gcp.egress';
+import { QuayEgressError } from './quay.egress';
 import {
   isPrivateContainerImage,
   parseContainerImageRef,
@@ -27,6 +29,7 @@ import { AcrRegistry } from './oci/acr.registry';
 import { DockerhubRegistry } from './oci/dockerhub.registry';
 import { EcrRegistry } from './oci/ecr.registry';
 import { GcrRegistry } from './oci/gcr.registry';
+import { QuayRegistry } from './oci/quay.registry';
 import { LayerUnpackError } from './oci/tar';
 
 export class ContainerScanError extends Error {
@@ -51,15 +54,16 @@ const TENANT_ANALYZER_KEYS = [
 
 /**
  * Container image scanning over GHCR-, ECR-, GCR/Artifact Registry-,
- * ACR-, and Docker Hub-discovered `container_image` assets.
+ * ACR-, Docker Hub-, and Quay-discovered `container_image` assets.
  *
  * Pull allowlisted `ghcr.io`, `{account}.dkr.ecr.{region}.amazonaws.com`,
- * `{location}-docker.pkg.dev`, `{registry}.azurecr.io`, or
- * `registry-1.docker.io` (token on `auth.docker.io`) digests
- * in-process (manifest + layer blobs), inventory OS/app packages per
- * layer, and match the shared vuln mirror. `kubernetes_workload` is not
- * claimed by `supports()` and still throws if execute is invoked for it.
- * `repository` / `iac_stack` belong to IacScanner.
+ * `{location}-docker.pkg.dev`, `{registry}.azurecr.io`,
+ * `registry-1.docker.io` (token on `auth.docker.io`), or `quay.io`
+ * (token on `quay.io` `/v2/auth`) digests in-process (manifest + layer
+ * blobs), inventory OS/app packages per layer, and match the shared vuln
+ * mirror. `kubernetes_workload` is not claimed by `supports()` and still
+ * throws if execute is invoked for it. `repository` / `iac_stack` belong
+ * to IacScanner.
  */
 @Injectable()
 export class ContainerScanner extends BaseScanner {
@@ -74,6 +78,7 @@ export class ContainerScanner extends BaseScanner {
     private readonly gcrRegistry: GcrRegistry,
     private readonly acrRegistry: AcrRegistry,
     private readonly dockerhubRegistry: DockerhubRegistry,
+    private readonly quayRegistry: QuayRegistry,
   ) {
     super();
   }
@@ -120,6 +125,7 @@ export class ContainerScanner extends BaseScanner {
         err instanceof GcpEgressError ||
         err instanceof AzureEgressError ||
         err instanceof DockerhubEgressError ||
+        err instanceof QuayEgressError ||
         err instanceof ContainerPullError ||
         err instanceof ContainerInventoryError ||
         err instanceof LayerUnpackError
@@ -143,7 +149,9 @@ export class ContainerScanner extends BaseScanner {
             ? `${ref.location}-docker.pkg.dev/${ref.projectId}/${ref.repository}/${ref.image}@${ref.digest}`
             : ref.kind === 'acr'
               ? `${acrRegistryHost(ref.registry)}/${ref.repository}@${ref.digest}`
-              : `${DOCKERHUB_REGISTRY_HOST}/${ref.namespace}/${ref.repository}@${ref.digest}`;
+              : ref.kind === 'dockerhub'
+                ? `${DOCKERHUB_REGISTRY_HOST}/${ref.namespace}/${ref.repository}@${ref.digest}`
+                : `${QUAY_REGISTRY_HOST}/${ref.namespace}/${ref.repository}@${ref.digest}`;
 
     ctx.log(`pulling ${image}`);
     const pulled =
@@ -173,11 +181,17 @@ export class ContainerScanner extends BaseScanner {
                   requireAzureCredentials(ctx.job.credentialRef),
                   ctx.checkDeadline,
                 )
-              : await this.dockerhubRegistry.pull(
-                  ref,
-                  requireDockerhubCredentials(ctx.job.credentialRef),
-                  ctx.checkDeadline,
-                );
+              : ref.kind === 'dockerhub'
+                ? await this.dockerhubRegistry.pull(
+                    ref,
+                    requireDockerhubCredentials(ctx.job.credentialRef),
+                    ctx.checkDeadline,
+                  )
+                : await this.quayRegistry.pull(
+                    ref,
+                    requireQuayToken(ctx.job.credentialRef),
+                    ctx.checkDeadline,
+                  );
 
     if (!ctx.checkDeadline()) {
       throw new ContainerScanError('Job deadline exceeded after pull — refusing incomplete inventory');

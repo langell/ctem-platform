@@ -2,11 +2,13 @@
  * Container-scan egress allowlist. Layer pull talks to `ghcr.io` (GHCR),
  * AWS ECR API + `*.dkr.ecr.{region}.amazonaws.com` (ECR digest identities),
  * `{location}-docker.pkg.dev` (GCR / Artifact Registry digest identities),
- * `{registry}.azurecr.io` (ACR digest identities), or Docker Hub
- * `registry-1.docker.io` (manifest/blobs) + `auth.docker.io` (token).
- * HTTPS/443 only. Tenant config/body/query/options cannot set a registry host.
- * Identity is a content digest — never a tag, never Quay. Location / project
- * / repository / registry / namespace are ids; the docker host is derived.
+ * `{registry}.azurecr.io` (ACR digest identities), Docker Hub
+ * `registry-1.docker.io` (manifest/blobs) + `auth.docker.io` (token), or
+ * Quay `quay.io` (manifest + blob + token `/v2/auth`). HTTPS/443 only.
+ * Tenant config/body/query/options cannot set a registry host. Identity is
+ * a content digest — never a tag, never a self-hosted Quay host. Location
+ * / project / repository / registry / namespace are ids; the docker host
+ * is derived.
  */
 
 import { AWS_API_SUFFIX, AWS_REGION_RE, AwsEgressError, allowlistedAwsUrl } from './aws.egress';
@@ -41,6 +43,18 @@ import {
   isDockerhubRegistryHost,
   isForbiddenDockerHostId,
 } from './dockerhub.egress';
+import {
+  QUAY_NAMESPACE_RE,
+  QUAY_REGISTRY_HOST,
+  QUAY_REGISTRY_SERVICE,
+  QUAY_REPOSITORY_RE,
+  QuayEgressError,
+  assertQuayNamespace,
+  assertQuayRepository,
+  isForbiddenQuayHostId,
+  isQuayAuthHost,
+  isQuayRegistryHost,
+} from './quay.egress';
 
 export const GHCR_REGISTRY_HOST = 'ghcr.io';
 export const GHCR_REGISTRY_ORIGIN = 'https://ghcr.io';
@@ -123,6 +137,16 @@ export const TENANT_REGISTRY_KEYS = [
   'dockerhubTokenUrl',
   'dockerhubAuthUrl',
   'dockerhubRegistryUrl',
+  'quayUrl',
+  'quayHost',
+  'quayIo',
+  'quayEndpoint',
+  'enterpriseUrl',
+  'enterpriseHost',
+  'selfHosted',
+  'selfHostedUrl',
+  'authority',
+  'hostname',
 ] as const;
 
 export function isGhcrRegistryHost(hostname: string): boolean {
@@ -237,14 +261,14 @@ export function refuseTenantWritableRegistry(config: Record<string, unknown>): v
     const value = config[key];
     if (value != null && value !== '') {
       throw new ContainerEgressError(
-        `Refusing tenant-writable container registry endpoint (${key}) — pulls are ghcr.io / ECR / Artifact Registry / ACR / Docker Hub digest only, not tenant-configurable`,
+        `Refusing tenant-writable container registry endpoint (${key}) — pulls are ghcr.io / ECR / Artifact Registry / ACR / Docker Hub / Quay digest only, not tenant-configurable`,
       );
     }
   }
   const owner = config.owner;
   if (typeof owner === 'string' && /^https?:\/\//i.test(owner.trim())) {
     throw new ContainerEgressError(
-      "Refusing tenant-writable container registry endpoint (owner) — pulls are ghcr.io / ECR / Artifact Registry / ACR / Docker Hub digest only, not tenant-configurable",
+      "Refusing tenant-writable container registry endpoint (owner) — pulls are ghcr.io / ECR / Artifact Registry / ACR / Docker Hub / Quay digest only, not tenant-configurable",
     );
   }
   const region = config.region;
@@ -329,7 +353,11 @@ export function refuseTenantWritableRegistry(config: Record<string, unknown>): v
   }
   const namespace = config.namespace;
   if (typeof namespace === 'string' && namespace.length > 0) {
-    if (/^https?:\/\//i.test(namespace.trim()) || isForbiddenDockerHostId(namespace.trim())) {
+    if (
+      /^https?:\/\//i.test(namespace.trim()) ||
+      isForbiddenDockerHostId(namespace.trim()) ||
+      isForbiddenQuayHostId(namespace.trim())
+    ) {
       throw new ContainerEgressError(
         "Refusing tenant-writable container registry endpoint (namespace) — namespace is an id, not a host",
       );
@@ -968,6 +996,118 @@ export function dockerhubBlobUrl(namespace: string, repository: string, digest: 
   );
 }
 
+function wrapQuay<T>(fn: () => T): T {
+  try {
+    return fn();
+  } catch (err) {
+    if (err instanceof QuayEgressError) {
+      throw new ContainerEgressError(err.message);
+    }
+    throw err;
+  }
+}
+
+function canonicalizeQuayHostUrl(raw: string, label: string): URL {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new ContainerEgressError(`Refusing unparseable Quay ${label} URL`);
+  }
+  if (parsed.protocol !== 'https:') {
+    throw new ContainerEgressError(`Refusing non-https Quay ${label} URL — only https is permitted`);
+  }
+  if (parsed.port && parsed.port !== '443') {
+    throw new ContainerEgressError(`Refusing Quay ${label} URL with a non-default port`);
+  }
+  if (parsed.username || parsed.password) {
+    throw new ContainerEgressError(`Refusing Quay ${label} URL that embeds userinfo`);
+  }
+  if (!isQuayRegistryHost(parsed.hostname)) {
+    throw new ContainerEgressError(
+      `Refusing Quay ${label} host '${parsed.hostname}' — only ${QUAY_REGISTRY_HOST} is allowlisted`,
+    );
+  }
+  return parsed;
+}
+
+/**
+ * Canonicalize a Quay token URL against exact `quay.io`. Path is `/v2/auth`
+ * only. Never a tenant realm, never `/api/v1/`, never a self-hosted host.
+ */
+export function allowlistedQuayAuthUrl(raw: string): string {
+  const parsed = canonicalizeQuayHostUrl(raw, 'auth');
+  const path = parsed.pathname || '/';
+  if (path !== '/v2/auth' && !path.startsWith('/v2/auth/')) {
+    throw new ContainerEgressError(
+      `Refusing Quay auth path '${path}' — only /v2/auth on ${QUAY_REGISTRY_HOST} is permitted`,
+    );
+  }
+  return `https://${QUAY_REGISTRY_HOST}${path}${parsed.search}`;
+}
+
+/**
+ * Canonicalize a Quay registry /v2 URL against exact `quay.io`. Refuse
+ * CDNs, `cdn.quay.io`, suffix-confused lookalikes, and self-hosted hosts.
+ */
+export function allowlistedQuayRegistryUrl(raw: string): string {
+  const parsed = canonicalizeQuayHostUrl(raw, 'registry');
+  const path = parsed.pathname || '/';
+  if (!path.startsWith('/v2/')) {
+    throw new ContainerEgressError(
+      `Refusing Quay registry path '${path}' — only /v2/ on ${QUAY_REGISTRY_HOST} is permitted`,
+    );
+  }
+  return `https://${QUAY_REGISTRY_HOST}${path}${parsed.search}`;
+}
+
+/**
+ * Blob GET on `quay.io` may 302. Follow only that exact host (HTTPS/443,
+ * no userinfo) — never a CDN, never a self-hosted Quay. Do not attach
+ * QUAY_* Bearer off this host.
+ */
+export function allowlistedQuayBlobRedirect(raw: string): string {
+  const parsed = canonicalizeQuayHostUrl(raw, 'blob redirect');
+  const host = parsed.hostname.toLowerCase().replace(/\.$/, '');
+  if (isQuayRegistryHost(host)) {
+    const path = parsed.pathname || '/';
+    if (path.startsWith('/v2/')) {
+      return allowlistedQuayRegistryUrl(raw);
+    }
+    return `https://${QUAY_REGISTRY_HOST}${path}${parsed.search}`;
+  }
+  throw new ContainerEgressError(
+    `Refusing Quay blob redirect host '${parsed.hostname}' — only ${QUAY_REGISTRY_HOST} is allowlisted`,
+  );
+}
+
+function encodeQuayRepoPath(namespace: string, repository: string): string {
+  const ns = wrapQuay(() => assertQuayNamespace(namespace));
+  const repo = wrapQuay(() => assertQuayRepository(repository));
+  return [ns, ...repo.split('/')].map(encodeURIComponent).join('/');
+}
+
+export function quayTokenUrl(namespace: string, repository: string): string {
+  const ns = wrapQuay(() => assertQuayNamespace(namespace));
+  const repo = wrapQuay(() => assertQuayRepository(repository));
+  const scope = `repository:${ns}/${repo}:pull`;
+  return allowlistedQuayAuthUrl(
+    `https://${QUAY_REGISTRY_HOST}/v2/auth?service=${encodeURIComponent(QUAY_REGISTRY_SERVICE)}&scope=${encodeURIComponent(scope)}`,
+  );
+}
+
+export function quayManifestUrl(namespace: string, repository: string, digest: string): string {
+  return allowlistedQuayRegistryUrl(
+    `https://${QUAY_REGISTRY_HOST}/v2/${encodeQuayRepoPath(namespace, repository)}/manifests/${digest}`,
+  );
+}
+
+export function quayBlobUrl(namespace: string, repository: string, digest: string): string {
+  return allowlistedQuayRegistryUrl(
+    `https://${QUAY_REGISTRY_HOST}/v2/${encodeQuayRepoPath(namespace, repository)}/blobs/${digest}`,
+  );
+}
+
 export {
   GCP_LOCATION_ID_RE,
   GCP_PROJECT_ID_RE,
@@ -982,5 +1122,11 @@ export {
   DOCKERHUB_REPOSITORY_RE,
   isDockerhubAuthHost,
   isDockerhubRegistryHost,
+  QUAY_NAMESPACE_RE,
+  QUAY_REGISTRY_HOST,
+  QUAY_REGISTRY_SERVICE,
+  QUAY_REPOSITORY_RE,
+  isQuayAuthHost,
+  isQuayRegistryHost,
 };
 

@@ -5,10 +5,13 @@
  *   `gcr:{project}/{location}/{repository}/{image}@sha256:<64 hex>` — Artifact Registry
  *   `acr:{subscriptionId}/{resourceGroup}/{registry}/{repository}@sha256:<64 hex>` — ACR
  *   `dockerhub:{namespace}/{repository}@sha256:<64 hex>` — Docker Hub content digest
+ *   `quay:{namespace}/{repository}@sha256:<64 hex>` — Quay.io content digest
  * Never a mutable tag. Region / location / project / repository / registry
  * / subscription / resource group / namespace are ids, not hosts. The ECR
  * region is not encoded in the externalKey; GCR location and ACR registry
  * are. Docker Hub registry host is derived as `registry-1.docker.io`.
+ * Quay registry host is derived as `quay.io` (never a tenant / self-hosted
+ * Quay host).
  */
 
 import { AWS_REGION_RE } from './aws.egress';
@@ -32,6 +35,13 @@ import {
   assertDockerhubNamespace,
   assertDockerhubRepository,
 } from './dockerhub.egress';
+import {
+  QUAY_NAMESPACE_RE,
+  QUAY_REPOSITORY_RE,
+  QuayEgressError,
+  assertQuayNamespace,
+  assertQuayRepository,
+} from './quay.egress';
 import { GCP_LOCATION_ID_RE, GCP_PROJECT_ID_RE, GCR_REPOSITORY_ID_RE } from './gcp.egress';
 
 export const SHA256_DIGEST_RE = /^sha256:[a-f0-9]{64}$/i;
@@ -43,9 +53,12 @@ export const ACR_EXTERNAL_KEY_RE =
   /^acr:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/([^/@]+)\/([a-z0-9]{5,50})\/(.+)@(sha256:[a-f0-9]{64})$/i;
 export const DOCKERHUB_EXTERNAL_KEY_RE =
   /^dockerhub:([^/@]+)\/([^/@]+)@(sha256:[a-f0-9]{64})$/i;
+export const QUAY_EXTERNAL_KEY_RE =
+  /^quay:([^/@]+)\/(.+)@(sha256:[a-f0-9]{64})$/i;
 export { AWS_ACCOUNT_RE, GCP_LOCATION_ID_RE, GCP_PROJECT_ID_RE, GCR_REPOSITORY_ID_RE };
 export { AZURE_GUID_RE, ACR_REGISTRY_NAME_RE, ACR_REPOSITORY_RE, AZURE_RESOURCE_GROUP_RE };
 export { DOCKERHUB_NAMESPACE_RE, DOCKERHUB_REPOSITORY_RE };
+export { QUAY_NAMESPACE_RE, QUAY_REPOSITORY_RE };
 
 export class ContainerIdentityError extends Error {
   constructor(message: string) {
@@ -94,12 +107,20 @@ export interface DockerhubImageRef {
   digest: string;
 }
 
+export interface QuayImageRef {
+  kind: 'quay';
+  namespace: string;
+  repository: string;
+  digest: string;
+}
+
 export type ContainerImageRef =
   | (GhcrImageRef & { kind: 'ghcr' })
   | EcrImageRef
   | GcrImageRef
   | AcrImageRef
-  | DockerhubImageRef;
+  | DockerhubImageRef
+  | QuayImageRef;
 
 function failIdentity(message: string): never {
   throw new ContainerIdentityError(message);
@@ -501,8 +522,76 @@ export function parseDockerhubImageRef(
 }
 
 /**
- * Accept GHCR, ECR, GCR/Artifact Registry, ACR, or Docker Hub digest
- * identities. Other registries (Quay) are refused. Pull is by digest only.
+ * Parse `externalKey` / attributes for
+ * `quay:{namespace}/{repository}@sha256:<digest>`.
+ * Namespace / repository are ids — never a tenant `quay.io` /
+ * self-hosted Quay host. Pull host is derived as `quay.io`.
+ */
+export function parseQuayImageRef(
+  target: Record<string, unknown>,
+  options: Record<string, unknown> = {},
+): QuayImageRef {
+  refuseTenantWritableRegistry(options);
+  refuseTenantWritableRegistry(target);
+
+  const key = typeof target.externalKey === 'string' ? target.externalKey.trim() : '';
+  let fromKey: { namespace: string; repository: string; digest: string } | undefined;
+  if (key) {
+    const match = QUAY_EXTERNAL_KEY_RE.exec(key);
+    if (!match) {
+      failIdentity(
+        `Refusing non-digest or malformed container identity '${key}' — expected quay:{namespace}/{repository}@sha256:<64 hex>`,
+      );
+    }
+    fromKey = {
+      namespace: match[1]!,
+      repository: match[2]!,
+      digest: match[3]!.toLowerCase(),
+    };
+    assertQuayIdentityParts(fromKey);
+  }
+
+  const attrs = asRecord(target.attributes);
+  const namespaceAttr = stringAttr(target.namespace) ?? stringAttr(attrs.namespace);
+  const repoAttr = stringAttr(target.repository) ?? stringAttr(attrs.repository);
+  const digestAttr = stringAttr(target.digest) ?? stringAttr(attrs.digest);
+
+  if (fromKey) {
+    if (namespaceAttr && namespaceAttr !== fromKey.namespace) {
+      failIdentity('Container asset namespace does not match quay: identity — refusing pull');
+    }
+    if (repoAttr && repoAttr !== fromKey.repository) {
+      failIdentity('Container asset repository does not match quay: identity — refusing pull');
+    }
+    if (digestAttr) {
+      if (!SHA256_DIGEST_RE.test(digestAttr)) {
+        failIdentity(`Refusing non-digest container attribute digest '${digestAttr}'`);
+      }
+      if (digestAttr.toLowerCase() !== fromKey.digest) {
+        failIdentity('Container asset digest does not match quay: identity — refusing pull');
+      }
+    }
+    return { kind: 'quay', ...fromKey };
+  }
+
+  if (namespaceAttr && repoAttr && digestAttr && SHA256_DIGEST_RE.test(digestAttr)) {
+    const parts = {
+      namespace: namespaceAttr,
+      repository: repoAttr,
+      digest: digestAttr.toLowerCase(),
+    };
+    assertQuayIdentityParts(parts);
+    return { kind: 'quay', ...parts };
+  }
+
+  failIdentity(
+    'Refusing container_image without quay:{namespace}/{repository}@sha256:<digest> identity — no tag fallback, no other registry',
+  );
+}
+
+/**
+ * Accept GHCR, ECR, GCR/Artifact Registry, ACR, Docker Hub, or Quay digest
+ * identities. Other registries are refused. Pull is by digest only.
  */
 export function parseContainerImageRef(
   target: Record<string, unknown>,
@@ -528,8 +617,11 @@ export function parseContainerImageRef(
     if (DOCKERHUB_EXTERNAL_KEY_RE.test(key)) {
       return parseDockerhubImageRef(target, options);
     }
+    if (QUAY_EXTERNAL_KEY_RE.test(key)) {
+      return parseQuayImageRef(target, options);
+    }
     failIdentity(
-      `Refusing non-digest or malformed container identity '${key}' — expected ghcr:owner/name@sha256:<64 hex>, ecr:{accountId}/{repositoryName}@sha256:<64 hex>, gcr:{project}/{location}/{repository}/{image}@sha256:<64 hex>, acr:{subscriptionId}/{resourceGroup}/{registry}/{repository}@sha256:<64 hex>, or dockerhub:{namespace}/{repository}@sha256:<64 hex>`,
+      `Refusing non-digest or malformed container identity '${key}' — expected ghcr:owner/name@sha256:<64 hex>, ecr:{accountId}/{repositoryName}@sha256:<64 hex>, gcr:{project}/{location}/{repository}/{image}@sha256:<64 hex>, acr:{subscriptionId}/{resourceGroup}/{registry}/{repository}@sha256:<64 hex>, dockerhub:{namespace}/{repository}@sha256:<64 hex>, or quay:{namespace}/{repository}@sha256:<64 hex>`,
     );
   }
 
@@ -546,6 +638,7 @@ export function parseContainerImageRef(
     stringAttr(target.subscriptionId) ?? stringAttr(attrs.subscriptionId);
   const registryAttr = stringAttr(target.registry) ?? stringAttr(attrs.registry);
   const namespaceAttr = stringAttr(target.namespace) ?? stringAttr(attrs.namespace);
+  const sourceAttr = stringAttr(target.source) ?? stringAttr(attrs.source);
 
   if (
     projectAttr &&
@@ -570,6 +663,20 @@ export function parseContainerImageRef(
     return parseAcrImageRef(target, options);
   }
   if (
+    sourceAttr === 'quay' &&
+    namespaceAttr &&
+    QUAY_NAMESPACE_RE.test(namespaceAttr) &&
+    repoAttr &&
+    QUAY_REPOSITORY_RE.test(repoAttr) &&
+    digestAttr &&
+    SHA256_DIGEST_RE.test(digestAttr) &&
+    !accountAttr &&
+    !projectAttr &&
+    !subscriptionAttr
+  ) {
+    return parseQuayImageRef(target, options);
+  }
+  if (
     namespaceAttr &&
     DOCKERHUB_NAMESPACE_RE.test(namespaceAttr) &&
     repoAttr &&
@@ -578,7 +685,8 @@ export function parseContainerImageRef(
     SHA256_DIGEST_RE.test(digestAttr) &&
     !accountAttr &&
     !projectAttr &&
-    !subscriptionAttr
+    !subscriptionAttr &&
+    sourceAttr !== 'quay'
   ) {
     return parseDockerhubImageRef(target, options);
   }
@@ -590,7 +698,7 @@ export function parseContainerImageRef(
   }
 
   failIdentity(
-    'Refusing container_image without ghcr:, ecr:, gcr:, acr:, or dockerhub: digest identity — no tag fallback, no other registry',
+    'Refusing container_image without ghcr:, ecr:, gcr:, acr:, dockerhub:, or quay: digest identity — no tag fallback, no other registry',
   );
 }
 
@@ -659,6 +767,22 @@ function wrapDockerhubIdentity<T>(fn: () => T): T {
     return fn();
   } catch (err) {
     if (err instanceof DockerhubEgressError) {
+      throw new ContainerEgressError(err.message);
+    }
+    throw err;
+  }
+}
+
+function assertQuayIdentityParts(parts: { namespace: string; repository: string }): void {
+  wrapQuayIdentity(() => assertQuayNamespace(parts.namespace));
+  wrapQuayIdentity(() => assertQuayRepository(parts.repository));
+}
+
+function wrapQuayIdentity<T>(fn: () => T): T {
+  try {
+    return fn();
+  } catch (err) {
+    if (err instanceof QuayEgressError) {
       throw new ContainerEgressError(err.message);
     }
     throw err;

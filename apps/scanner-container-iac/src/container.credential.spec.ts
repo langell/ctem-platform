@@ -6,6 +6,7 @@ import {
   requireDockerhubCredentials,
   requireGcpCredentials,
   requireGithubToken,
+  requireQuayToken,
 } from './container.credential';
 import { generateKeyPairSync } from 'node:crypto';
 
@@ -25,6 +26,7 @@ afterEach(() => {
   delete process.env.AZURE_CLIENT_SECRET;
   delete process.env.DOCKERHUB_USERNAME;
   delete process.env.DOCKERHUB_TOKEN;
+  delete process.env.QUAY_TOKEN;
 });
 
 describe('requireGithubToken', () => {
@@ -248,5 +250,43 @@ describe('requireDockerhubCredentials', () => {
       username: 'acme',
       token: 'dckr_pat_test',
     });
+  });
+});
+
+describe('requireQuayToken', () => {
+  it('fails closed when credentialRef is missing', () => {
+    expect(() => requireQuayToken(null)).toThrow(/env:QUAY_\*/);
+  });
+
+  it('fails closed when the pointed QUAY_* env var is empty', () => {
+    expect(() => requireQuayToken('env:QUAY_TOKEN')).toThrow(/cannot be used/);
+  });
+
+  it('refuses a GITHUB_* ref even when a QUAY_TOKEN is present', () => {
+    process.env.GITHUB_TOKEN = 'ghp_test';
+    process.env.QUAY_TOKEN = 'quay_test';
+    expect(() => requireQuayToken('env:GITHUB_TOKEN')).toThrow(/env:QUAY_\*/);
+  });
+
+  it('refuses a DOCKERHUB_* ref even when a QUAY_TOKEN is present', () => {
+    process.env.DOCKERHUB_TOKEN = 'dckr_pat_test';
+    process.env.QUAY_TOKEN = 'quay_test';
+    expect(() => requireQuayToken('env:DOCKERHUB_TOKEN')).toThrow(/env:QUAY_\*/);
+  });
+
+  it('refuses an AWS_* ref even when a QUAY_TOKEN is present', () => {
+    process.env.AWS_ACCESS_KEY_ID = 'AKIATEST';
+    process.env.QUAY_TOKEN = 'quay_test';
+    expect(() => requireQuayToken('env:AWS_ACCESS_KEY_ID')).toThrow(/env:QUAY_\*/);
+  });
+
+  it('refuses env:DATABASE_URL without reading the secret', () => {
+    process.env.DATABASE_URL = 'postgres://should-not-leak';
+    expect(() => requireQuayToken('env:DATABASE_URL')).toThrow(/not allowlisted/);
+  });
+
+  it('returns the token when the ref points at a usable QUAY_* name', () => {
+    process.env.QUAY_TOKEN = 'quay_test';
+    expect(requireQuayToken('env:QUAY_TOKEN')).toBe('quay_test');
   });
 });

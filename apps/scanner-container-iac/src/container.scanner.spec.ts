@@ -16,6 +16,7 @@ import type { EcrImagePuller } from './oci/ecr.registry';
 import type { GcrImagePuller } from './oci/gcr.registry';
 import type { AcrImagePuller } from './oci/acr.registry';
 import type { DockerhubImagePuller } from './oci/dockerhub.registry';
+import type { QuayImagePuller } from './oci/quay.registry';
 import type { VulnMatcher } from '@ctem/vuln-intel';
 
 const DIGEST = `sha256:${'a'.repeat(64)}`;
@@ -37,6 +38,9 @@ const ACR_KEY = `acr:${SUB}/${RG}/${ACR_REGISTRY}/payments-api@${DIGEST}`;
 const DOCKERHUB_NS = 'acme';
 const DOCKERHUB_REPO = 'payments-api';
 const DOCKERHUB_KEY = `dockerhub:${DOCKERHUB_NS}/${DOCKERHUB_REPO}@${DIGEST}`;
+const QUAY_NS = 'acme';
+const QUAY_REPO = 'payments-api';
+const QUAY_KEY = `quay:${QUAY_NS}/${QUAY_REPO}@${DIGEST}`;
 const gcpPem = generateKeyPairSync('rsa', { modulusLength: 2048 })
   .privateKey.export({ type: 'pkcs8', format: 'pem' })
   .toString();
@@ -156,7 +160,15 @@ function unusedAcr(): AcrImagePuller {
 function unusedDockerhub(): DockerhubImagePuller {
   return {
     pull: vi.fn(async () => {
-      throw new Error('Docker Hub puller must not be called for GHCR/ECR/GCR/ACR identities');
+      throw new Error('Docker Hub puller must not be called for GHCR/ECR/GCR/ACR/Quay identities');
+    }),
+  };
+}
+
+function unusedQuay(): QuayImagePuller {
+  return {
+    pull: vi.fn(async () => {
+      throw new Error('Quay puller must not be called for GHCR/ECR/GCR/ACR/Docker Hub identities');
     }),
   };
 }
@@ -201,6 +213,16 @@ function dockerhubPuller(layers: LayerSnapshot[], spy?: (ref: unknown) => void):
   };
 }
 
+function quayPuller(layers: LayerSnapshot[], spy?: (ref: unknown) => void): QuayImagePuller {
+  return {
+    pull: vi.fn(async (ref, _token, checkDeadline) => {
+      spy?.(ref);
+      if (!checkDeadline()) throw new ContainerPullError('Job deadline exceeded mid-pull');
+      return { digest: DIGEST, owner: QUAY_NS, name: QUAY_REPO, layers };
+    }),
+  };
+}
+
 function scanner(
   matcher = matchingMatcher(),
   registry?: ImagePuller,
@@ -208,6 +230,7 @@ function scanner(
   gcr?: GcrImagePuller,
   acr?: AcrImagePuller,
   dockerhub?: DockerhubImagePuller,
+  quay?: QuayImagePuller,
 ): ContainerScanner {
   return new ContainerScanner(
     matcher as unknown as VulnMatcher,
@@ -216,6 +239,7 @@ function scanner(
     (gcr ?? unusedGcr()) as never,
     (acr ?? unusedAcr()) as never,
     (dockerhub ?? unusedDockerhub()) as never,
+    (quay ?? unusedQuay()) as never,
   );
 }
 
@@ -269,6 +293,18 @@ function dockerhubTarget(overrides: Record<string, unknown> = {}): Record<string
   };
 }
 
+function quayTarget(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    kind: 'container_image',
+    externalKey: QUAY_KEY,
+    source: 'quay',
+    namespace: QUAY_NS,
+    repository: QUAY_REPO,
+    digest: DIGEST,
+    ...overrides,
+  };
+}
+
 afterEach(() => {
   delete process.env.GITHUB_TOKEN;
   delete process.env.AWS_ACCESS_KEY_ID;
@@ -281,6 +317,7 @@ afterEach(() => {
   delete process.env.AZURE_CLIENT_SECRET;
   delete process.env.DOCKERHUB_USERNAME;
   delete process.env.DOCKERHUB_TOKEN;
+  delete process.env.QUAY_TOKEN;
 });
 
 describe('ContainerScanner.supports', () => {
@@ -380,6 +417,33 @@ describe('ContainerScanner.execute', () => {
         }),
       ),
     ).rejects.toThrow(/tenant-writable/);
+    await expect(
+      s.execute(
+        ctx({
+          target: {
+            kind: 'container_image',
+            externalKey: QUAY_KEY,
+            quayUrl: 'https://quay.io',
+          },
+        }),
+      ),
+    ).rejects.toThrow(ContainerEgressError);
+    await expect(
+      s.execute(
+        ctx({
+          options: { host: 'quay.acme.example' },
+          target: quayTarget(),
+        }),
+      ),
+    ).rejects.toThrow(/tenant-writable/);
+    await expect(
+      s.execute(
+        ctx({
+          options: { baseUrl: 'https://registry.internal' },
+          target: quayTarget(),
+        }),
+      ),
+    ).rejects.toThrow(/tenant-writable/);
     expect(registry.pull).not.toHaveBeenCalled();
   });
 
@@ -427,7 +491,17 @@ describe('ContainerScanner.execute', () => {
         ctx({
           target: {
             kind: 'container_image',
-            externalKey: `quay:acme/app@${DIGEST}`,
+            externalKey: `quay:acme/app:latest`,
+          },
+        }),
+      ),
+    ).rejects.toThrow(/non-digest|malformed/);
+    await expect(
+      s.execute(
+        ctx({
+          target: {
+            kind: 'container_image',
+            externalKey: `quay.io/acme/app@${DIGEST}`,
           },
         }),
       ),
@@ -653,12 +727,99 @@ describe('ContainerScanner.execute', () => {
         externalKey: `dockerhub:registry-1.docker.io/${DOCKERHUB_REPO}@${DIGEST}`,
       }),
     ).toThrow(/namespace|tenant-writable|not a valid/);
+  });
+
+  it('accepts a Quay digest identity and refuses a tag, tenant URL, or self-hosted host', () => {
+    expect(parseContainerImageRef(quayTarget())).toEqual({
+      kind: 'quay',
+      namespace: QUAY_NS,
+      repository: QUAY_REPO,
+      digest: DIGEST,
+    });
+    expect(
+      parseContainerImageRef({
+        kind: 'container_image',
+        source: 'quay',
+        namespace: QUAY_NS,
+        repository: QUAY_REPO,
+        digest: DIGEST,
+      }),
+    ).toEqual({
+      kind: 'quay',
+      namespace: QUAY_NS,
+      repository: QUAY_REPO,
+      digest: DIGEST,
+    });
+    expect(
+      parseContainerImageRef(
+        quayTarget({
+          repository: 'team/api',
+          externalKey: `quay:${QUAY_NS}/team/api@${DIGEST}`,
+        }),
+      ),
+    ).toMatchObject({
+      kind: 'quay',
+      repository: 'team/api',
+    });
     expect(() =>
       parseContainerImageRef({
         kind: 'container_image',
-        externalKey: `quay:${DOCKERHUB_NS}/${DOCKERHUB_REPO}@${DIGEST}`,
+        externalKey: `quay:${QUAY_NS}/${QUAY_REPO}:latest`,
       }),
-    ).toThrow(/non-digest|malformed/);
+    ).toThrow(ContainerIdentityError);
+    expect(() =>
+      parseContainerImageRef({
+        kind: 'container_image',
+        externalKey: `quay:${QUAY_NS}/${QUAY_REPO}@sha256:deadbeef`,
+      }),
+    ).toThrow(ContainerIdentityError);
+    expect(() =>
+      parseContainerImageRef({
+        kind: 'container_image',
+        externalKey: QUAY_KEY,
+        quayUrl: 'https://quay.io',
+      }),
+    ).toThrow(ContainerEgressError);
+    expect(() =>
+      parseContainerImageRef({
+        kind: 'container_image',
+        externalKey: QUAY_KEY,
+        host: 'quay.acme.example',
+      }),
+    ).toThrow(/tenant-writable/);
+    expect(() =>
+      parseContainerImageRef({
+        kind: 'container_image',
+        externalKey: QUAY_KEY,
+        baseUrl: 'https://registry.internal',
+      }),
+    ).toThrow(/tenant-writable/);
+    expect(() =>
+      parseContainerImageRef({
+        kind: 'container_image',
+        externalKey: QUAY_KEY,
+        authority: 'quay.enterprise.example',
+      }),
+    ).toThrow(/tenant-writable/);
+    expect(() =>
+      parseContainerImageRef({
+        kind: 'container_image',
+        externalKey: `quay:quay.io/${QUAY_REPO}@${DIGEST}`,
+      }),
+    ).toThrow(/namespace|tenant-writable|not a valid/);
+    expect(
+      parseContainerImageRef({
+        kind: 'container_image',
+        namespace: DOCKERHUB_NS,
+        repository: DOCKERHUB_REPO,
+        digest: DIGEST,
+      }),
+    ).toEqual({
+      kind: 'dockerhub',
+      namespace: DOCKERHUB_NS,
+      repository: DOCKERHUB_REPO,
+      digest: DIGEST,
+    });
   });
 
   it('scans an ECR-discovered digest through the same inventory + vuln match', async () => {
@@ -827,6 +988,112 @@ describe('ContainerScanner.execute', () => {
       s.execute(ctx({ target: dockerhubTarget(), credentialRef: 'env:GITHUB_TOKEN' })),
     ).rejects.toThrow(/env:DOCKERHUB_\*/);
     expect(dockerhub.pull).not.toHaveBeenCalled();
+  });
+
+  it('scans a Quay-discovered digest through the same inventory + vuln match', async () => {
+    process.env.QUAY_TOKEN = 'quay_test';
+    const layers = [
+      layer(LAYER_BASE, { 'lib/apk/db/installed': APK_DB }),
+      layer(LAYER_APP, { 'app/node_modules/lodash/package.json': LODASH_JSON }),
+    ];
+    const quay = quayPuller(layers);
+    const matcher = matchingMatcher(['openssl', 'lodash']);
+    const outcome = await scanner(
+      matcher,
+      unusedGhcr(),
+      unusedEcr(),
+      unusedGcr(),
+      unusedAcr(),
+      unusedDockerhub(),
+      quay,
+    ).execute(
+      ctx({
+        target: quayTarget(),
+        credentialRef: 'env:QUAY_TOKEN',
+      }),
+    );
+    expect(quay.pull).toHaveBeenCalledOnce();
+    expect(outcome.findings.length).toBeGreaterThanOrEqual(2);
+    expect((outcome.rawOutput as { image: string }).image).toBe(
+      `quay.io/${QUAY_NS}/${QUAY_REPO}@${DIGEST}`,
+    );
+    expect((outcome.rawOutput as { complete: boolean; truncated: boolean }).complete).toBe(true);
+    expect((outcome.rawOutput as { truncated: boolean }).truncated).toBe(false);
+  });
+
+  it('fails a Quay pull when QUAY_* credentials are missing or not env:QUAY_*', async () => {
+    const quay = quayPuller([]);
+    const s = scanner(
+      matchingMatcher(),
+      unusedGhcr(),
+      unusedEcr(),
+      unusedGcr(),
+      unusedAcr(),
+      unusedDockerhub(),
+      quay,
+    );
+    await expect(
+      s.execute(ctx({ target: quayTarget(), credentialRef: null })),
+    ).rejects.toThrow(ContainerCredentialError);
+    await expect(
+      s.execute(ctx({ target: quayTarget(), credentialRef: 'env:QUAY_TOKEN' })),
+    ).rejects.toThrow(/cannot be used/);
+    process.env.GITHUB_TOKEN = 'ghp_test';
+    await expect(
+      s.execute(ctx({ target: quayTarget(), credentialRef: 'env:GITHUB_TOKEN' })),
+    ).rejects.toThrow(/env:QUAY_\*/);
+    process.env.DOCKERHUB_USERNAME = 'acme';
+    process.env.DOCKERHUB_TOKEN = 'dckr_pat_test';
+    await expect(
+      s.execute(ctx({ target: quayTarget(), credentialRef: 'env:DOCKERHUB_TOKEN' })),
+    ).rejects.toThrow(/env:QUAY_\*/);
+    expect(quay.pull).not.toHaveBeenCalled();
+  });
+
+  it('fails a Quay pull that is incomplete or hits the deadline mid-pull', async () => {
+    process.env.QUAY_TOKEN = 'quay_test';
+    const failPull: QuayImagePuller = {
+      pull: vi.fn(async () => {
+        throw new ContainerPullError('Quay blob GET returned 502 — refusing pull');
+      }),
+    };
+    await expect(
+      scanner(
+        matchingMatcher(),
+        unusedGhcr(),
+        unusedEcr(),
+        unusedGcr(),
+        unusedAcr(),
+        unusedDockerhub(),
+        failPull,
+      ).execute(ctx({ target: quayTarget(), credentialRef: 'env:QUAY_TOKEN' })),
+    ).rejects.toThrow(ContainerPullError);
+
+    const midPull: QuayImagePuller = {
+      pull: vi.fn(async (_ref, _token, checkDeadline) => {
+        if (!checkDeadline()) throw new ContainerPullError('Job deadline exceeded mid-pull');
+        return { digest: DIGEST, owner: QUAY_NS, name: QUAY_REPO, layers: [] };
+      }),
+    };
+    let allow = true;
+    await expect(
+      scanner(
+        matchingMatcher(),
+        unusedGhcr(),
+        unusedEcr(),
+        unusedGcr(),
+        unusedAcr(),
+        unusedDockerhub(),
+        midPull,
+      ).execute({
+        ...ctx({ target: quayTarget(), credentialRef: 'env:QUAY_TOKEN' }),
+        checkDeadline: () => {
+          const ok = allow;
+          allow = false;
+          return ok;
+        },
+      }),
+    ).rejects.toThrow(/deadline/);
   });
 
   it('fails a Docker Hub pull that is incomplete or hits the deadline mid-pull', async () => {
@@ -1126,6 +1393,8 @@ describe('ContainerScanner.execute', () => {
       'oci/acr.registry.ts',
       'oci/dockerhub.registry.ts',
       'dockerhub.egress.ts',
+      'oci/quay.registry.ts',
+      'quay.egress.ts',
       'oci/tar.ts',
       'inventory/packages.ts',
     ]

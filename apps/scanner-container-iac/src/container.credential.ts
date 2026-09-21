@@ -1,19 +1,21 @@
 /**
- * Same allowlist as GHCR / ECR / GCR / ACR / Docker Hub discovery
+ * Same allowlist as GHCR / ECR / GCR / ACR / Docker Hub / Quay discovery
  * (`apps/asset-service` credentials). Platform-operated `env:GITHUB_*`
  * (GHCR), `env:AWS_*` (ECR), `env:GCP_*` (GCR / Artifact Registry),
- * `env:AZURE_*` (ACR), and `env:DOCKERHUB_*` (Docker Hub). A missing or
- * unusable pointer must fail the pull — never empty-succeed.
+ * `env:AZURE_*` (ACR), `env:DOCKERHUB_*` (Docker Hub), and `env:QUAY_*`
+ * (Quay). A missing or unusable pointer must fail the pull — never
+ * empty-succeed.
  */
 
 import { createPrivateKey } from 'node:crypto';
 
-const ENV_ALLOWLIST = /^(GITHUB|GITLAB|AWS|GCP|AZURE|DOCKERHUB)_[A-Z0-9_]+$/;
+const ENV_ALLOWLIST = /^(GITHUB|GITLAB|AWS|GCP|AZURE|QUAY|DOCKERHUB)_[A-Z0-9_]+$/;
 const GITHUB_ENV_NAME = /^GITHUB_[A-Z0-9_]+$/;
 const AWS_ENV_NAME = /^AWS_[A-Z0-9_]+$/;
 const GCP_ENV_NAME = /^GCP_[A-Z0-9_]+$/;
 const AZURE_ENV_NAME = /^AZURE_[A-Z0-9_]+$/;
 const DOCKERHUB_ENV_NAME = /^DOCKERHUB_[A-Z0-9_]+$/;
+const QUAY_ENV_NAME = /^QUAY_[A-Z0-9_]+$/;
 const AZURE_GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DOCKERHUB_USERNAME_RE = /^[\w.-]+$/;
 
@@ -34,7 +36,7 @@ function resolveCredential(ref: string | null): string | undefined {
   if (scheme === 'env') {
     if (!key || !ENV_ALLOWLIST.test(key)) {
       throw new ContainerCredentialError(
-        `credentialRef 'env:${key || '<empty>'}' is not allowlisted — env: is platform-operated and only GITHUB_* / GITLAB_* / AWS_* / GCP_* / AZURE_* / DOCKERHUB_* names are permitted`,
+        `credentialRef 'env:${key || '<empty>'}' is not allowlisted — env: is platform-operated and only GITHUB_* / GITLAB_* / AWS_* / GCP_* / AZURE_* / QUAY_* / DOCKERHUB_* names are permitted`,
       );
     }
     return process.env[key] || undefined;
@@ -319,4 +321,36 @@ export function requireDockerhubCredentials(
     username: assertUsableDockerhubUsername(username),
     token: secret,
   };
+}
+
+/**
+ * Quay pulls have no unauthenticated path (same class as Quay discovery).
+ * The integration pointer must be `env:QUAY_*`, and the pointed token
+ * must be usable. A missing or unusable pointer must not empty-succeed.
+ */
+export function requireQuayToken(credentialRef: string | null): string {
+  if (!credentialRef) {
+    throw new ContainerCredentialError(
+      'Quay pull requires a usable credentialRef (env:QUAY_*) — refusing unauthenticated pull',
+    );
+  }
+
+  const sep = credentialRef.indexOf(':');
+  const scheme = sep === -1 ? credentialRef : credentialRef.slice(0, sep);
+  const key = sep === -1 ? '' : credentialRef.slice(sep + 1);
+  if (scheme !== 'env' || !key || !QUAY_ENV_NAME.test(key)) {
+    resolveCredential(credentialRef);
+    throw new ContainerCredentialError(
+      `credentialRef '${credentialRef}' is not an env:QUAY_* pointer — Quay pulls only accept platform-operated QUAY_* names`,
+    );
+  }
+
+  const token = resolveCredential(credentialRef);
+  if (!token || !token.trim()) {
+    throw new ContainerCredentialError(
+      `credentialRef '${credentialRef}' is set but cannot be used — refusing to pull without usable QUAY_* credentials`,
+    );
+  }
+
+  return token.trim();
 }
