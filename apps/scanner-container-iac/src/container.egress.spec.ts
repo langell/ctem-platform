@@ -14,6 +14,9 @@ import {
   allowlistedGcrRegistryUrl,
   allowlistedGhcrBlobRedirect,
   allowlistedGhcrUrl,
+  allowlistedQuayAuthUrl,
+  allowlistedQuayBlobRedirect,
+  allowlistedQuayRegistryUrl,
   acrBlobUrl,
   acrManifestUrl,
   acrOauthExchangeUrl,
@@ -41,6 +44,11 @@ import {
   isEcrRegistryHost,
   isGcrRegistryHost,
   isGhcrRegistryHost,
+  isQuayAuthHost,
+  isQuayRegistryHost,
+  quayBlobUrl,
+  quayManifestUrl,
+  quayTokenUrl,
   refuseTenantWritableRegistry,
 } from './container.egress';
 
@@ -285,6 +293,67 @@ describe('refuseTenantWritableRegistry', () => {
       /namespace is an id/,
     );
     expect(() => refuseTenantWritableRegistry({ namespace: 'index.docker.io' })).toThrow(
+      /namespace is an id/,
+    );
+    expect(() =>
+      refuseTenantWritableRegistry({
+        namespace: 'acme',
+        repository: 'payments-api',
+        digest: DIGEST,
+      }),
+    ).not.toThrow();
+  });
+
+  it('refuses tenant Quay registry / self-hosted URL override fields and allows ids', () => {
+    expect(() =>
+      refuseTenantWritableRegistry({
+        namespace: 'acme',
+        quayUrl: 'https://quay.io',
+      }),
+    ).toThrow(/tenant-writable/);
+    expect(() =>
+      refuseTenantWritableRegistry({
+        namespace: 'acme',
+        quayHost: 'quay.acme.example',
+      }),
+    ).toThrow(/tenant-writable/);
+    expect(() =>
+      refuseTenantWritableRegistry({
+        namespace: 'acme',
+        host: 'quay.enterprise.example',
+      }),
+    ).toThrow(/tenant-writable/);
+    expect(() =>
+      refuseTenantWritableRegistry({
+        namespace: 'acme',
+        baseUrl: 'https://registry.internal',
+      }),
+    ).toThrow(/tenant-writable/);
+    expect(() =>
+      refuseTenantWritableRegistry({
+        namespace: 'acme',
+        authority: 'quay.acme.example',
+      }),
+    ).toThrow(/tenant-writable/);
+    expect(() =>
+      refuseTenantWritableRegistry({
+        namespace: 'acme',
+        selfHosted: true,
+      }),
+    ).toThrow(/tenant-writable/);
+    expect(() =>
+      refuseTenantWritableRegistry({
+        namespace: 'acme',
+        enterpriseUrl: 'https://quay.acme.example',
+      }),
+    ).toThrow(/tenant-writable/);
+    expect(() => refuseTenantWritableRegistry({ namespace: 'https://quay.io' })).toThrow(
+      /namespace is an id/,
+    );
+    expect(() => refuseTenantWritableRegistry({ namespace: 'quay.io' })).toThrow(
+      /namespace is an id/,
+    );
+    expect(() => refuseTenantWritableRegistry({ namespace: 'cdn.quay.io' })).toThrow(
       /namespace is an id/,
     );
     expect(() =>
@@ -634,6 +703,84 @@ describe('allowlistedDockerhubBlobRedirect', () => {
     expect(() =>
       allowlistedDockerhubBlobRedirect('https://acmeprod.azurecr.io/v2/app/blobs/x'),
     ).toThrow(/registry-1\.docker\.io/);
+  });
+});
+
+describe('isQuayRegistryHost / isQuayAuthHost', () => {
+  it('pins exact quay.io and refuses suffix confusion / self-hosted hosts', () => {
+    expect(isQuayRegistryHost('quay.io')).toBe(true);
+    expect(isQuayRegistryHost('QUAY.IO')).toBe(true);
+    expect(isQuayRegistryHost('quay.io.')).toBe(true);
+    expect(isQuayRegistryHost('quay.io.evil.example')).toBe(false);
+    expect(isQuayRegistryHost('cdn.quay.io')).toBe(false);
+    expect(isQuayRegistryHost('www.quay.io')).toBe(false);
+    expect(isQuayRegistryHost('notquay.io')).toBe(false);
+    expect(isQuayRegistryHost('quay.example.com')).toBe(false);
+    expect(isQuayRegistryHost('ghcr.io')).toBe(false);
+    expect(isQuayAuthHost('quay.io')).toBe(true);
+    expect(isQuayAuthHost('cdn.quay.io')).toBe(false);
+  });
+});
+
+describe('allowlistedQuayRegistryUrl / quayManifestUrl', () => {
+  it('builds quay.io URLs from namespace/repository ids, never a tenant URL', () => {
+    expect(quayManifestUrl('acme', 'payments-api', DIGEST)).toBe(
+      `https://quay.io/v2/acme/payments-api/manifests/${DIGEST}`,
+    );
+    expect(quayBlobUrl('acme', 'team/api', DIGEST)).toBe(
+      `https://quay.io/v2/acme/team/api/blobs/${DIGEST}`,
+    );
+    expect(quayTokenUrl('acme', 'payments-api')).toBe(
+      'https://quay.io/v2/auth?service=quay.io&scope=repository%3Aacme%2Fpayments-api%3Apull',
+    );
+    expect(() =>
+      allowlistedQuayRegistryUrl('https://cdn.quay.io/v2/acme/app/manifests/sha256:abc'),
+    ).toThrow(/only quay\.io/);
+    expect(() =>
+      allowlistedQuayRegistryUrl('https://quay.io.evil.example/v2/app/manifests/x'),
+    ).toThrow(/only quay\.io/);
+    expect(() =>
+      allowlistedQuayRegistryUrl('https://quay.acme.example/v2/acme/app/manifests/x'),
+    ).toThrow(/only quay\.io/);
+    expect(() =>
+      allowlistedQuayRegistryUrl('https://ghcr.io/v2/acme/app/manifests/sha256:abc'),
+    ).toThrow(/only quay\.io/);
+    expect(() =>
+      allowlistedQuayRegistryUrl(`http://quay.io/v2/acme/app/manifests/${DIGEST}`),
+    ).toThrow(/non-https/);
+    expect(() => allowlistedQuayAuthUrl('https://quay.io/token')).toThrow(/only \/v2\/auth/);
+    expect(() => allowlistedQuayAuthUrl('https://quay.io/api/v1/repository')).toThrow(
+      /only \/v2\/auth/,
+    );
+    expect(() => allowlistedQuayAuthUrl('https://quay.acme.example/v2/auth')).toThrow(
+      /only quay\.io/,
+    );
+  });
+});
+
+describe('allowlistedQuayBlobRedirect', () => {
+  it('allows the pinned quay.io host and refuses CDN / self-hosted / other registries', () => {
+    expect(
+      allowlistedQuayBlobRedirect(`https://quay.io/v2/acme/payments-api/blobs/${DIGEST}`),
+    ).toContain('quay.io');
+    expect(() =>
+      allowlistedQuayBlobRedirect('https://cdn.quay.io/v2/acme/payments-api/blobs/x'),
+    ).toThrow(/quay\.io/);
+    expect(() =>
+      allowlistedQuayBlobRedirect('https://quay.io.evil.example/blob'),
+    ).toThrow(/quay\.io/);
+    expect(() =>
+      allowlistedQuayBlobRedirect('https://quay.acme.example/v2/acme/app/blobs/x'),
+    ).toThrow(/quay\.io/);
+    expect(() => allowlistedQuayBlobRedirect('https://ghcr.io/v2/acme/app/blobs/x')).toThrow(
+      /quay\.io/,
+    );
+    expect(() =>
+      allowlistedQuayBlobRedirect('https://registry-1.docker.io/v2/acme/app/blobs/x'),
+    ).toThrow(/quay\.io/);
+    expect(() =>
+      allowlistedQuayBlobRedirect('https://acmeprod.azurecr.io/v2/app/blobs/x'),
+    ).toThrow(/quay\.io/);
   });
 });
 

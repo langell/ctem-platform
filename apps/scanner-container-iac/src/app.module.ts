@@ -11,6 +11,7 @@ import { DockerhubRegistry } from './oci/dockerhub.registry';
 import { EcrRegistry } from './oci/ecr.registry';
 import { GcrRegistry } from './oci/gcr.registry';
 import { GhcrRegistry } from './oci/registry';
+import { QuayRegistry } from './oci/quay.registry';
 
 /**
  * Two scanner types, one process. Container and IaC share a deployable but are
@@ -31,6 +32,7 @@ import { GhcrRegistry } from './oci/registry';
       GcrRegistry,
       AcrRegistry,
       DockerhubRegistry,
+      QuayRegistry,
     ]),
   ],
 })
