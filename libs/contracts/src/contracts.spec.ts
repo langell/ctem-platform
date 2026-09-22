@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   CreatePolicyRequest,
   CreateScanRequest,
+  IngestSbomRequest,
+  SCAN_KICK_EVENT,
   Scan,
+  ScanKickMeterRecord,
   UpdatePolicyRequest,
   EVENT_SCHEMAS,
   InviteMemberRequest,
@@ -509,5 +512,29 @@ describe('promoteScaValidation', () => {
     ];
     expect(verdicts).not.toContain('not_exploitable');
     expect(verdicts).not.toContain('compensating_control');
+  });
+});
+
+describe('scan.kick meter record', () => {
+  it('parses the minimal record and accepts CI external_id as externalId', () => {
+    const record = ScanKickMeterRecord.parse({
+      eventId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      orgId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      scanId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      source: 'schedule',
+      scannerTypes: ['sca'],
+      occurredAt: '2026-09-22T00:00:00.000Z',
+    });
+    expect(record.source).toBe('schedule');
+    expect(SCAN_KICK_EVENT).toBe('scan.kick');
+    expect(CreateScanRequest.parse({ scannerType: 'sca', external_id: 'build-7' }).externalId).toBe('build-7');
+    expect(
+      IngestSbomRequest.parse({
+        assetExternalKey: 'github:acme/api',
+        format: 'cyclonedx-json',
+        artifactKey: 'sbom/1',
+        external_id: 'build-7',
+      }).externalId,
+    ).toBe('build-7');
   });
 });

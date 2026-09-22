@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, Req } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Post, Query, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { RequirePermissions } from '@ctem/auth';
 import type { CreateScanRequest, IngestSbomRequest } from '@ctem/contracts';
@@ -34,14 +34,42 @@ export class ScansProxyController {
 
   @Post()
   @RequirePermissions('scan:run')
-  create(@Req() req: never, @Body() body: CreateScanRequest) {
-    return this.proxy.forward('orchestrator', 'POST', '/internal/scans', req, { body });
+  create(
+    @Req() req: never,
+    @Headers('idempotency-key') idempotencyKey: string | string[] | undefined,
+    @Body() body: CreateScanRequest,
+  ) {
+    return this.proxy.forward('orchestrator', 'POST', '/internal/scans', req, {
+      body,
+      headers: idempotencyForwardHeaders(idempotencyKey),
+    });
   }
 
   /** CI uploads an SBOM instead of granting us repo access — the fastest path to first value. */
   @Post('sbom')
   @RequirePermissions('scan:run')
-  ingestSbom(@Req() req: never, @Body() body: IngestSbomRequest) {
-    return this.proxy.forward('orchestrator', 'POST', '/internal/scans/sbom', req, { body });
+  ingestSbom(
+    @Req() req: never,
+    @Headers('idempotency-key') idempotencyKey: string | string[] | undefined,
+    @Body() body: IngestSbomRequest,
+  ) {
+    return this.proxy.forward('orchestrator', 'POST', '/internal/scans/sbom', req, {
+      body,
+      headers: idempotencyForwardHeaders(idempotencyKey),
+    });
   }
+}
+
+/**
+ * Forward the client key so orchestrator can dedupe the accept. The gateway
+ * does not emit `scan.kick`. Principal headers are applied by the proxy after
+ * this map, so a client cannot override them by naming the same header.
+ */
+function idempotencyForwardHeaders(
+  value: string | string[] | undefined,
+): Record<string, string> | undefined {
+  const raw = Array.isArray(value) ? value[0] : value;
+  const key = raw?.trim();
+  if (!key) return undefined;
+  return { 'idempotency-key': key };
 }

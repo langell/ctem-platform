@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { AuditMeta, OrgId } from '../common';
+import { AuditMeta, OrgId, SCAN_KICK_IDEMPOTENCY_KEY_MAX } from '../common';
 
 /** One scanner family per CTEM discovery surface. Adding a scanner = adding a value here. */
 export const ScannerType = z.enum([
@@ -62,6 +62,46 @@ export function findClientConclusionKeys(input: unknown): string[] {
     }
   }
   return hits;
+}
+
+/**
+ * CI callers send `external_id`. The meter dedupes on one field, `externalId`,
+ * which is the same slot as the `Idempotency-Key` header.
+ */
+export function aliasCiExternalId(input: unknown): unknown {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return input;
+  const record = { ...(input as Record<string, unknown>) };
+  if (!Object.prototype.hasOwnProperty.call(record, 'external_id')) return record;
+  const snake = record.external_id;
+  delete record.external_id;
+  if (record.externalId === undefined) {
+    record.externalId = snake;
+    return record;
+  }
+  if (record.externalId !== snake) {
+    delete record.externalId;
+    record.externalIdConflict = true;
+  }
+  return record;
+}
+
+const kickIdempotencyFields = {
+  /**
+   * CI correlation id (`external_id` accepted as an alias). Same dedupe slot as
+   * the `Idempotency-Key` header, scoped to the token org. Not stored on the scan.
+   */
+  externalId: z.string().trim().min(1).max(SCAN_KICK_IDEMPOTENCY_KEY_MAX).optional(),
+  /** Present only when `externalId` and `external_id` disagree. */
+  externalIdConflict: z.literal(true).optional(),
+};
+
+function refuseExternalIdConflict(value: { externalIdConflict?: true }, ctx: z.RefinementCtx): void {
+  if (value.externalIdConflict) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'externalId and external_id disagree — refusing scan create',
+    });
+  }
 }
 
 function refuseClientConclusion(
@@ -136,7 +176,9 @@ export const Scan = z
   .merge(AuditMeta);
 export type Scan = z.infer<typeof Scan>;
 
-export const CreateScanRequest = z
+export const CreateScanRequest = z.preprocess(
+  aliasCiExternalId,
+  z
   .object({
     scannerType: ScannerType,
     /** Empty selector means "everything in scope for this scanner". */
@@ -171,27 +213,41 @@ export const CreateScanRequest = z
      * or GitLab status context.
      */
     options: z.record(z.unknown()).default({}),
+    ...kickIdempotencyFields,
   })
   .strict()
-  .superRefine(refuseClientConclusion);
+  .superRefine((value, ctx) => {
+    refuseClientConclusion(value, ctx);
+    refuseExternalIdConflict(value, ctx);
+  })
+  .transform(({ externalIdConflict: _conflict, ...rest }) => rest),
+);
 export type CreateScanRequest = z.infer<typeof CreateScanRequest>;
 
 /** SBOM ingest is a first-class path: CI uploads a CycloneDX doc instead of us cloning the repo. */
 export const SbomFormat = z.enum(['cyclonedx-json', 'spdx-json', 'syft-json']);
-export const IngestSbomRequest = z
-  .object({
-    assetExternalKey: z.string(),
-    format: SbomFormat,
-    /** Object-store key of an already-uploaded document. */
-    artifactKey: z.string().optional(),
-    /** Or the document itself, inline — the ingest endpoint stores it. */
-    document: z.record(z.unknown()).optional(),
-    ref: z.string().optional(),
-    commitSha: z.string().optional(),
-  })
-  .strict()
-  .refine((r) => Boolean(r.artifactKey) !== Boolean(r.document), {
-    message: 'Provide exactly one of artifactKey or document',
-  })
-  .superRefine(refuseClientConclusion);
+export const IngestSbomRequest = z.preprocess(
+  aliasCiExternalId,
+  z
+    .object({
+      assetExternalKey: z.string(),
+      format: SbomFormat,
+      /** Object-store key of an already-uploaded document. */
+      artifactKey: z.string().optional(),
+      /** Or the document itself, inline — the ingest endpoint stores it. */
+      document: z.record(z.unknown()).optional(),
+      ref: z.string().optional(),
+      commitSha: z.string().optional(),
+      ...kickIdempotencyFields,
+    })
+    .strict()
+    .refine((r) => Boolean(r.artifactKey) !== Boolean(r.document), {
+      message: 'Provide exactly one of artifactKey or document',
+    })
+    .superRefine((value, ctx) => {
+      refuseClientConclusion(value, ctx);
+      refuseExternalIdConflict(value, ctx);
+    })
+    .transform(({ externalIdConflict: _conflict, ...rest }) => rest),
+);
 export type IngestSbomRequest = z.infer<typeof IngestSbomRequest>;

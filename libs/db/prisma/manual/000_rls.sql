@@ -28,7 +28,7 @@ DO $$
 DECLARE
   t text;
   tenant_tables text[] := ARRAY[
-    'assets', 'asset_edges', 'integrations', 'scans', 'scan_jobs',
+    'assets', 'asset_edges', 'integrations', 'scans', 'scan_jobs', 'scan_kicks',
     'findings', 'finding_events', 'sbom_components', 'policies',
     'risk_exceptions', 'audit_logs', 'api_tokens', 'memberships',
     'membership_invites'

@@ -57,7 +57,7 @@ export class ServiceProxy {
     method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
     path: string,
     req: { principalHeaders: { value: string; signature: string } },
-    init: { body?: unknown; query?: Record<string, unknown> } = {},
+    init: { body?: unknown; query?: Record<string, unknown>; headers?: Record<string, string> } = {},
   ): Promise<T> {
     const url = new URL(path, this.baseUrl(service));
     for (const [k, v] of Object.entries(init.query ?? {})) {
@@ -73,6 +73,7 @@ export class ServiceProxy {
           headers: {
             'content-type': 'application/json',
             'x-trace-id': currentTraceId(),
+            ...init.headers,
             [PRINCIPAL_HEADER]: req.principalHeaders.value,
             [PRINCIPAL_SIGNATURE_HEADER]: req.principalHeaders.signature,
           },
