@@ -5,16 +5,67 @@
  * only over-reports `reachable`. Missing a real crate root is the failure mode.
  */
 
-/** Prelude / path keywords. `use` is not a crate: `use ::foo` is an absolute use-tree. */
-const RUST_NON_CRATE_ROOTS = new Set([
-  'std',
-  'core',
-  'alloc',
+/** Prelude roots that are never crates.io packages. */
+const RUST_NON_CRATE_ROOTS = new Set(['std', 'core', 'alloc', 'crate', 'self', 'super', 'Self']);
+
+/**
+ * Keywords that are themselves a path root (`crate::`, `self::`, `super::`, `Self::`).
+ * Every other keyword is a token boundary: `impl ::serde` names `serde`, not `impl`.
+ */
+const RUST_PATH_KEYWORDS = new Set(['crate', 'self', 'super', 'Self']);
+
+const RUST_KEYWORDS = new Set([
+  'as',
+  'async',
+  'await',
+  'break',
+  'const',
+  'continue',
   'crate',
+  'dyn',
+  'else',
+  'enum',
+  'extern',
+  'false',
+  'fn',
+  'for',
+  'if',
+  'impl',
+  'in',
+  'let',
+  'loop',
+  'match',
+  'mod',
+  'move',
+  'mut',
+  'pub',
+  'ref',
+  'return',
   'self',
-  'super',
   'Self',
+  'static',
+  'struct',
+  'super',
+  'trait',
+  'true',
+  'type',
+  'unsafe',
   'use',
+  'where',
+  'while',
+  'abstract',
+  'become',
+  'box',
+  'do',
+  'final',
+  'macro',
+  'override',
+  'priv',
+  'typeof',
+  'unsized',
+  'virtual',
+  'yield',
+  'try',
 ]);
 
 export function isRustSource(fileName: string): boolean {
@@ -69,14 +120,19 @@ export function cargoTomlDeclaresDependencyRename(content: string): boolean {
   return false;
 }
 
+/** `include!`, `include! { … }`, and `include![ … ]` all pull in outside source. */
 function hasIncludeMacro(source: string): boolean {
-  return /\binclude\s*!\s*\(/.test(source);
+  return /\binclude\s*!\s*[({[]/.test(source);
 }
 
 function addCrate(packages: Set<string>, ident: string): void {
   const name = ident.startsWith('r#') ? ident.slice(2) : ident;
-  if (!name || RUST_NON_CRATE_ROOTS.has(name)) return;
+  if (!name || RUST_NON_CRATE_ROOTS.has(name) || isNonPathKeyword(name)) return;
   packages.add(name);
+}
+
+function isNonPathKeyword(name: string): boolean {
+  return RUST_KEYWORDS.has(name) && !RUST_PATH_KEYWORDS.has(name);
 }
 
 function collectPathRoots(source: string, packages: Set<string>): void {
@@ -95,7 +151,10 @@ function collectPathRoots(source: string, packages: Set<string>): void {
   }
 }
 
-/** `foo::bar` — `bar` continues `foo`. `::foo` at a path start is the root. */
+/**
+ * `foo::bar` — `bar` continues `foo`. A leading `::crate` after `->`, `}`, or a
+ * non-path keyword is a new crate root. `->` is not a generic closer.
+ */
 function isPathContinuation(source: string, identStart: number): boolean {
   let j = identStart - 1;
   while (j >= 0 && isWs(source[j]!)) j -= 1;
@@ -104,7 +163,30 @@ function isPathContinuation(source: string, identStart: number): boolean {
   while (k >= 0 && isWs(source[k]!)) k -= 1;
   if (k < 0) return false;
   const prev = source[k]!;
-  return /[A-Za-z0-9_]/.test(prev) || prev === '>' || prev === '}';
+  if (prev === '>') return source[k - 1] !== '-';
+  if (!isIdentCont(prev)) return false;
+  const ident = identEndingAt(source, k);
+  if (!ident) return false;
+  const bare = ident.startsWith('r#') ? ident.slice(2) : ident;
+  if (RUST_PATH_KEYWORDS.has(bare)) return true;
+  if (RUST_KEYWORDS.has(bare)) return false;
+  return true;
+}
+
+function identEndingAt(source: string, end: number): string | undefined {
+  let start = end;
+  while (start >= 0 && isIdentCont(source[start] ?? '')) start -= 1;
+  start += 1;
+  if (start > end || !isIdentStart(source[start] ?? '')) return undefined;
+  if (
+    start >= 2 &&
+    source[start - 2] === 'r' &&
+    source[start - 1] === '#' &&
+    !isIdentCont(source[start - 3] ?? '')
+  ) {
+    return source.slice(start - 2, end + 1);
+  }
+  return source.slice(start, end + 1);
 }
 
 function collectExternCrates(source: string, packages: Set<string>): void {
@@ -455,22 +537,28 @@ function lineDeclaresPackageRename(line: string): boolean {
   while (i < line.length) {
     const current = line[i]!;
     if (current === '"' || current === "'") {
-      i = skipTomlString(line, i);
+      const end = skipTomlString(line, i);
+      const raw = line[end - 1] === current ? line.slice(i + 1, end - 1) : '';
+      if (raw === 'package' && packageValueFollows(line, end)) return true;
+      i = end;
       continue;
     }
     if (isTomlKeyAt(line, i, 'package')) {
-      let j = skipWsIndex(line, i + 'package'.length);
-      if (line[j] !== '=') {
-        i += 1;
-        continue;
-      }
-      j = skipWsIndex(line, j + 1);
-      const quote = line[j];
-      if ((quote === '"' || quote === "'") && skipTomlString(line, j) > j + 2) return true;
+      if (packageValueFollows(line, i + 'package'.length)) return true;
+      i += 'package'.length;
+      continue;
     }
     i += 1;
   }
   return false;
+}
+
+function packageValueFollows(line: string, afterKey: number): boolean {
+  let j = skipWsIndex(line, afterKey);
+  if (line[j] !== '=') return false;
+  j = skipWsIndex(line, j + 1);
+  const quote = line[j];
+  return (quote === '"' || quote === "'") && skipTomlString(line, j) > j + 2;
 }
 
 function isTomlKeyAt(line: string, index: number, key: string): boolean {

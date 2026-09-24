@@ -1,7 +1,8 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
+import { dirname, join, relative, sep } from 'node:path';
 import { Injectable } from '@nestjs/common';
 import { rootLogger } from '@ctem/observability';
-import { listRepoFiles, MAX_WALK_FILES, type RepoFile } from '../lockfiles/walk';
+import { listRepoFiles, MAX_WALK_DEPTH, MAX_WALK_FILES, type RepoFile } from '../lockfiles/walk';
 import { extractGoImports, isGoSource } from './golang';
 import { extractJsImports, isJavascriptSource } from './javascript';
 import { extractPyImports, isPythonSource } from './python';
@@ -22,6 +23,12 @@ const log = rootLogger.child({ component: 'sca-reachability' });
 
 /** Same order of magnitude as lockfiles: refuse a multi-megabyte "source" file. */
 export const MAX_SOURCE_BYTES = 1 * 1024 * 1024;
+
+/**
+ * Cap for the crate `src/**` walk. The shared repo walk skips `bin` / `build` /
+ * `dist`, so this walk is what sees `src/bin`. Hitting the cap sets truncated.
+ */
+const MAX_CRATE_SRC_FILES = MAX_WALK_FILES;
 
 export interface ReachabilityAnalyzerPort {
   analyze(workDir: string, checkDeadline?: () => boolean): Promise<ReachabilityGraph>;
@@ -50,7 +57,8 @@ export class ReachabilityAnalyzer implements ReachabilityAnalyzerPort {
 
     await noteCargoDependencyRenames(files, graph, checkDeadline);
 
-    const source = files.filter((file) => isFirstPartySource(file));
+    const crateSrc = await listCrateSrcRustFiles(workDir, files, graph, checkDeadline);
+    const source = [...files.filter((file) => isFirstPartySource(file)), ...crateSrc];
     let parsed = 0;
 
     for (const file of source) {
@@ -166,6 +174,84 @@ async function noteCargoDependencyRenames(
       graph.ambiguous.add('rust');
       log.warn({ err, file: file.relPath }, 'Cargo.toml read failed — not claiming not_reachable');
     }
+  }
+}
+
+/**
+ * The shared walk skips `bin`, `build`, `dist`, and dot-dirs, which hides
+ * `src/bin/*.rs`. For each crate root (a directory with `Cargo.toml`), list
+ * `src/**` here. Skip only `target/` and `vendor/`.
+ */
+async function listCrateSrcRustFiles(
+  workDir: string,
+  files: RepoFile[],
+  graph: ReachabilityGraph,
+  checkDeadline: () => boolean,
+): Promise<RepoFile[]> {
+  const seen = new Set(files.map((file) => file.relPath));
+  const out: RepoFile[] = [];
+  for (const file of files) {
+    if (file.fileName !== 'Cargo.toml') continue;
+    await walkCrateSrc(
+      workDir,
+      join(dirname(file.absPath), 'src'),
+      1,
+      seen,
+      out,
+      graph,
+      checkDeadline,
+    );
+  }
+  return out;
+}
+
+async function walkCrateSrc(
+  workDir: string,
+  absDir: string,
+  depth: number,
+  seen: Set<string>,
+  out: RepoFile[],
+  graph: ReachabilityGraph,
+  checkDeadline: () => boolean,
+): Promise<void> {
+  if (out.length >= MAX_CRATE_SRC_FILES || depth > MAX_WALK_DEPTH) {
+    graph.truncated = true;
+    return;
+  }
+  if (!checkDeadline()) {
+    throw new ReachabilityAnalysisError('Job deadline exceeded during reachability analysis');
+  }
+
+  let entries;
+  try {
+    entries = await readdir(absDir, { withFileTypes: true });
+  } catch (err) {
+    const code = err && typeof err === 'object' && 'code' in err ? String(err.code) : '';
+    if (code === 'ENOENT' || code === 'ENOTDIR') return;
+    graph.truncated = true;
+    log.warn({ err, dir: absDir }, 'crate src walk failed — not claiming not_reachable');
+    return;
+  }
+
+  for (const entry of entries) {
+    if (out.length >= MAX_CRATE_SRC_FILES) {
+      graph.truncated = true;
+      return;
+    }
+    if (!checkDeadline()) {
+      throw new ReachabilityAnalysisError('Job deadline exceeded during reachability analysis');
+    }
+    const absPath = join(absDir, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name === 'target' || entry.name === 'vendor') continue;
+      await walkCrateSrc(workDir, absPath, depth + 1, seen, out, graph, checkDeadline);
+      continue;
+    }
+    if (!entry.isFile() || !isRustSource(entry.name)) continue;
+    const relPath = relative(workDir, absPath).split(sep).join('/');
+    if (seen.has(relPath) || isRustBuildOrVendoredPath(relPath)) continue;
+    seen.add(relPath);
+    out.push({ absPath, relPath, fileName: entry.name });
   }
 }
 

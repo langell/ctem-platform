@@ -409,6 +409,154 @@ describe('Rust reachability', () => {
     }
   });
 
+  it('parses src/bin even though the shared walk skips bin directories', async () => {
+    const workDir = await repo({
+      'Cargo.toml': '[package]\nname = "app"\nversion = "0.1.0"\n',
+      'src/bin/cli.rs': 'use clap::Parser;\nfn main() {}\n',
+    });
+    const graph = await analyzer.analyze(workDir);
+    expect(verdictForComponent({ name: 'clap', ecosystem: 'crates.io' }, graph)).toBe('reachable');
+  });
+
+  it('skips src/**/target and vendor on the crate src walk', async () => {
+    const workDir = await repo({
+      'Cargo.toml': '[package]\nname = "app"\nversion = "0.1.0"\n',
+      'src/lib.rs': 'fn lib() {}\n',
+      'src/nested/target/hidden.rs': 'use serde::Deserialize;\n',
+      'src/vendor/leaf.rs': 'use tokio::io;\n',
+      'vendor/dep/src/lib.rs': 'use anyhow::Error;\n',
+    });
+    const graph = await analyzer.analyze(workDir);
+    expect(verdictForComponent({ name: 'serde', ecosystem: 'crates.io' }, graph)).toBe(
+      'not_reachable',
+    );
+    expect(verdictForComponent({ name: 'tokio', ecosystem: 'crates.io' }, graph)).toBe(
+      'not_reachable',
+    );
+    expect(verdictForComponent({ name: 'anyhow', ecosystem: 'crates.io' }, graph)).toBe(
+      'not_reachable',
+    );
+  });
+
+  it('marks anyhow reachable from a return type path after ->', async () => {
+    const workDir = await repo({
+      'src/lib.rs': 'fn main() -> ::anyhow::Result<()> { Ok(()) }\n',
+    });
+    const graph = await analyzer.analyze(workDir);
+    expect(verdictForComponent({ name: 'anyhow', ecosystem: 'crates.io' }, graph)).toBe(
+      'reachable',
+    );
+    expect([...(graph.imported.get('rust') ?? [])]).not.toContain('fn');
+  });
+
+  it('marks serde reachable from impl ::serde and does not record impl', async () => {
+    const workDir = await repo({
+      'src/lib.rs': 'impl ::serde::Serialize for F {}\n',
+    });
+    const graph = await analyzer.analyze(workDir);
+    expect(verdictForComponent({ name: 'serde', ecosystem: 'crates.io' }, graph)).toBe('reachable');
+    expect([...(graph.imported.get('rust') ?? [])]).not.toContain('impl');
+  });
+
+  it('marks crate roots after as, return, dyn, mut, and pub', async () => {
+    const workDir = await repo({
+      'src/lib.rs': `
+        fn demo(x: &dyn ::bytes::Buf) {
+            return ::tracing::info("x");
+            let _ = x as ::http::StatusCode;
+            let mut ::log::Level::Error;
+            pub ::regex::Regex::new("");
+        }
+      `,
+    });
+    const graph = await analyzer.analyze(workDir);
+    for (const name of ['bytes', 'tracing', 'http', 'log', 'regex']) {
+      expect(verdictForComponent({ name, ecosystem: 'crates.io' }, graph)).toBe('reachable');
+    }
+    const imported = [...(graph.imported.get('rust') ?? [])];
+    for (const keyword of ['dyn', 'return', 'as', 'mut', 'pub']) {
+      expect(imported).not.toContain(keyword);
+    }
+  });
+
+  it('marks tokio reachable from a path after a closing brace', async () => {
+    const workDir = await repo({
+      'src/lib.rs': 'fn branch() { if c { } ::tokio::spawn(x); }\n',
+    });
+    const graph = await analyzer.analyze(workDir);
+    expect(verdictForComponent({ name: 'tokio', ecosystem: 'crates.io' }, graph)).toBe('reachable');
+  });
+
+  it('marks Rust ambiguous for include! brace and bracket forms', async () => {
+    const braceDir = await repo({
+      'src/lib.rs': 'fn main() { include! { "generated.rs" } }\n',
+    });
+    const brace = await analyzer.analyze(braceDir);
+    expect(brace.ambiguous.has('rust')).toBe(true);
+    expect(verdictForComponent({ name: 'tokio', ecosystem: 'crates.io' }, brace)).toBe('unknown');
+
+    const bracketDir = await repo({
+      'src/lib.rs': 'fn main() { include!["generated.rs"]; }\n',
+    });
+    const bracket = await analyzer.analyze(bracketDir);
+    expect(bracket.ambiguous.has('rust')).toBe(true);
+    expect(verdictForComponent({ name: 'tokio', ecosystem: 'crates.io' }, bracket)).toBe('unknown');
+  });
+
+  it('maps use xml::reader to the xml-rs package', async () => {
+    const workDir = await repo({
+      'src/lib.rs': 'use xml::reader::EventReader;\n',
+    });
+    const graph = await analyzer.analyze(workDir);
+    expect(verdictForComponent({ name: 'xml-rs', ecosystem: 'crates.io' }, graph)).toBe(
+      'reachable',
+    );
+    expect(verdictForComponent({ name: 'serde', ecosystem: 'crates.io' }, graph)).toBe(
+      'not_reachable',
+    );
+  });
+
+  it('resolves the fixed lib-name aliases and leaves other mismatched names unknown', () => {
+    const graph = graphWith({
+      languages: new Set(['rust']),
+      imported: new Map([['rust', new Set(['xml', 'md5', 'sha1', 'crypto', 'ini', 's3'])]]),
+    });
+    expect(verdictForComponent({ name: 'xml-rs', ecosystem: 'crates.io' }, graph)).toBe('reachable');
+    expect(verdictForComponent({ name: 'md-5', ecosystem: 'crates.io' }, graph)).toBe('reachable');
+    expect(verdictForComponent({ name: 'sha-1', ecosystem: 'crates.io' }, graph)).toBe('reachable');
+    expect(verdictForComponent({ name: 'rust-crypto', ecosystem: 'crates.io' }, graph)).toBe(
+      'reachable',
+    );
+    expect(verdictForComponent({ name: 'rust-ini', ecosystem: 'crates.io' }, graph)).toBe(
+      'reachable',
+    );
+    expect(verdictForComponent({ name: 'rust-s3', ecosystem: 'crates.io' }, graph)).toBe(
+      'reachable',
+    );
+    expect(verdictForComponent({ name: 'foo-rs', ecosystem: 'crates.io' }, graph)).toBe('unknown');
+    expect(verdictForComponent({ name: 'rust-other', ecosystem: 'crates.io' }, graph)).toBe(
+      'unknown',
+    );
+    expect(verdictForComponent({ name: 'bar-2', ecosystem: 'crates.io' }, graph)).toBe('unknown');
+    expect(verdictForComponent({ name: 'serde', ecosystem: 'crates.io' }, graph)).toBe(
+      'not_reachable',
+    );
+  });
+
+  it('does not mark an unaliased foo-rs package not_reachable', async () => {
+    const workDir = await repo({
+      'src/lib.rs': 'fn main() {}\n',
+    });
+    const graph = await analyzer.analyze(workDir);
+    expect(verdictForComponent({ name: 'foo-rs', ecosystem: 'crates.io' }, graph)).toBe('unknown');
+    expect(verdictForComponent({ name: 'foo-rs', ecosystem: 'crates.io' }, graph)).not.toBe(
+      'not_reachable',
+    );
+    expect(verdictForComponent({ name: 'serde', ecosystem: 'crates.io' }, graph)).toBe(
+      'not_reachable',
+    );
+  });
+
   it('does not claim not_reachable when one Rust file fails and another parses', async () => {
     const workDir = await repo({
       'src/lib.rs': 'use serde::Deserialize;\n',
@@ -535,5 +683,47 @@ describe('Rust extractors', () => {
         serde = "1"
       `),
     ).toBe(false);
+    expect(
+      cargoTomlDeclaresDependencyRename(`
+        [dependencies]
+        renamed = { version = "1", "package" = "actual-crate" }
+      `),
+    ).toBe(true);
+    expect(
+      cargoTomlDeclaresDependencyRename(`
+        [dependencies.foo]
+        version = "1"
+        'package' = 'actual-crate'
+      `),
+    ).toBe(true);
+  });
+
+  it('treats a leading :: path after ->, }, and keywords as the crate root', () => {
+    const anyhow = extractRustImports('fn main() -> ::anyhow::Result<()> {}\n');
+    expect(anyhow.packages).toContain('anyhow');
+    expect(anyhow.packages).not.toContain('fn');
+
+    const serialize = extractRustImports('impl ::serde::Serialize for F {}\n');
+    expect(serialize.packages).toContain('serde');
+    expect(serialize.packages).not.toContain('impl');
+
+    const afterKeywords = extractRustImports(`
+      fn demo(x: &dyn ::bytes::Buf) {
+          return ::tracing::info("x");
+          let _ = x as ::http::StatusCode;
+          let mut ::log::Level::Error;
+          pub ::regex::Regex::new("");
+      }
+    `);
+    expect(afterKeywords.packages).toEqual(
+      expect.arrayContaining(['bytes', 'tracing', 'http', 'log', 'regex']),
+    );
+    for (const keyword of ['dyn', 'return', 'as', 'mut', 'pub', 'fn', 'let']) {
+      expect(afterKeywords.packages).not.toContain(keyword);
+    }
+
+    const afterBrace = extractRustImports('fn branch() { if c { } ::tokio::spawn(x); }\n');
+    expect(afterBrace.packages).toContain('tokio');
+    expect(afterBrace.packages).not.toContain('if');
   });
 });
