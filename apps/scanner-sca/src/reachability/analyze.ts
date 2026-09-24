@@ -1,10 +1,16 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { Injectable } from '@nestjs/common';
 import { rootLogger } from '@ctem/observability';
-import { listRepoFiles, MAX_WALK_FILES } from '../lockfiles/walk';
+import { listRepoFiles, MAX_WALK_FILES, type RepoFile } from '../lockfiles/walk';
 import { extractGoImports, isGoSource } from './golang';
 import { extractJsImports, isJavascriptSource } from './javascript';
 import { extractPyImports, isPythonSource } from './python';
+import {
+  cargoTomlDeclaresDependencyRename,
+  extractRustImports,
+  isRustBuildOrVendoredPath,
+  isRustSource,
+} from './rust';
 import {
   emptyReachabilityGraph,
   ReachabilityAnalysisError,
@@ -29,7 +35,10 @@ export interface ReachabilityAnalyzerPort {
  */
 @Injectable()
 export class ReachabilityAnalyzer implements ReachabilityAnalyzerPort {
-  async analyze(workDir: string, checkDeadline: () => boolean = () => true): Promise<ReachabilityGraph> {
+  async analyze(
+    workDir: string,
+    checkDeadline: () => boolean = () => true,
+  ): Promise<ReachabilityGraph> {
     await assertReadableWorkDir(workDir);
     if (!checkDeadline()) {
       throw new ReachabilityAnalysisError('Job deadline exceeded during reachability analysis');
@@ -39,7 +48,9 @@ export class ReachabilityAnalyzer implements ReachabilityAnalyzerPort {
     const graph = emptyReachabilityGraph();
     if (files.length >= MAX_WALK_FILES) graph.truncated = true;
 
-    const source = files.filter((file) => languageOf(file.fileName));
+    await noteCargoDependencyRenames(files, graph, checkDeadline);
+
+    const source = files.filter((file) => isFirstPartySource(file));
     let parsed = 0;
 
     for (const file of source) {
@@ -83,7 +94,16 @@ function languageOf(fileName: string): ReachabilityLanguage | undefined {
   if (isJavascriptSource(fileName)) return 'javascript';
   if (isPythonSource(fileName)) return 'python';
   if (isGoSource(fileName)) return 'go';
+  if (isRustSource(fileName)) return 'rust';
   return undefined;
+}
+
+/** `.rs` under `target/` or `vendor/` is build output or vendored, not first-party. */
+function isFirstPartySource(file: Pick<RepoFile, 'fileName' | 'relPath'>): boolean {
+  const language = languageOf(file.fileName);
+  if (!language) return false;
+  if (language === 'rust' && isRustBuildOrVendoredPath(file.relPath)) return false;
+  return true;
 }
 
 function extractImports(
@@ -97,13 +117,56 @@ function extractImports(
       return extractPyImports(content);
     case 'go':
       return extractGoImports(content);
+    case 'rust':
+      return extractRustImports(content);
   }
 }
 
-function addImported(graph: ReachabilityGraph, language: ReachabilityLanguage, packages: string[]): void {
+function addImported(
+  graph: ReachabilityGraph,
+  language: ReachabilityLanguage,
+  packages: string[],
+): void {
   const set = graph.imported.get(language) ?? new Set<string>();
   for (const name of packages) set.add(name);
   graph.imported.set(language, set);
+}
+
+/**
+ * A Cargo rename (`package = "…"`) means the ident in source may not be the
+ * crates.io name. Mark Rust ambiguous; do not try to map the alias here.
+ * Unreadable or oversized manifests fail closed the same way.
+ */
+async function noteCargoDependencyRenames(
+  files: RepoFile[],
+  graph: ReachabilityGraph,
+  checkDeadline: () => boolean,
+): Promise<void> {
+  for (const file of files) {
+    if (file.fileName !== 'Cargo.toml') continue;
+    if (!checkDeadline()) {
+      throw new ReachabilityAnalysisError('Job deadline exceeded during reachability analysis');
+    }
+    try {
+      const size = (await stat(file.absPath)).size;
+      if (size > MAX_SOURCE_BYTES) {
+        graph.truncated = true;
+        graph.ambiguous.add('rust');
+        log.warn(
+          { file: file.relPath, size },
+          'skipping oversized Cargo.toml — not claiming not_reachable',
+        );
+        continue;
+      }
+      const content = await readFile(file.absPath, 'utf8');
+      if (cargoTomlDeclaresDependencyRename(content)) graph.ambiguous.add('rust');
+    } catch (err) {
+      if (err instanceof ReachabilityAnalysisError) throw err;
+      graph.truncated = true;
+      graph.ambiguous.add('rust');
+      log.warn({ err, file: file.relPath }, 'Cargo.toml read failed — not claiming not_reachable');
+    }
+  }
 }
 
 async function assertReadableWorkDir(workDir: string): Promise<void> {

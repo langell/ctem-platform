@@ -3,7 +3,7 @@ import type { ResolvedComponent } from '../sbom.parser';
 export const REACHABILITY_VERDICTS = ['reachable', 'not_reachable', 'unknown'] as const;
 export type ReachabilityVerdict = (typeof REACHABILITY_VERDICTS)[number];
 
-export const REACHABILITY_LANGUAGES = ['javascript', 'python', 'go'] as const;
+export const REACHABILITY_LANGUAGES = ['javascript', 'python', 'go', 'rust'] as const;
 export type ReachabilityLanguage = (typeof REACHABILITY_LANGUAGES)[number];
 
 /**
@@ -15,7 +15,7 @@ export type ReachabilityLanguage = (typeof REACHABILITY_LANGUAGES)[number];
 export interface ReachabilityGraph {
   /** Languages for which at least one first-party source file was parsed. */
   languages: Set<ReachabilityLanguage>;
-  /** Package names (or Go import paths) referenced by first-party code. */
+  /** Package names (Go import paths, or Rust crate idents) referenced by first-party code. */
   imported: Map<ReachabilityLanguage, Set<string>>;
   /** Languages with unresolved dynamic imports — cannot prove not_reachable. */
   ambiguous: Set<ReachabilityLanguage>;
@@ -54,6 +54,7 @@ const ECOSYSTEM_LANGUAGE: Record<string, ReachabilityLanguage> = {
   npm: 'javascript',
   PyPI: 'python',
   Go: 'go',
+  'crates.io': 'rust',
 };
 
 export function languageForEcosystem(ecosystem: string): ReachabilityLanguage | undefined {
@@ -62,6 +63,11 @@ export function languageForEcosystem(ecosystem: string): ReachabilityLanguage | 
 
 export function normalizePyName(name: string): string {
   return name.toLowerCase().replace(/[-_.]+/g, '-');
+}
+
+/** crates.io package ids and Rust idents: case-insensitive, `-` matches `_`. */
+export function normalizeRustCrate(name: string): string {
+  return name.toLowerCase().replace(/-/g, '_');
 }
 
 /**
@@ -93,6 +99,13 @@ function isImported(name: string, ecosystem: string, imported: Set<string>): boo
   }
   if (ecosystem === 'PyPI') {
     return imported.has(normalizePyName(name));
+  }
+  if (ecosystem === 'crates.io') {
+    const needle = normalizeRustCrate(name);
+    for (const importedName of imported) {
+      if (normalizeRustCrate(importedName) === needle) return true;
+    }
+    return false;
   }
   return imported.has(name);
 }
