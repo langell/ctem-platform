@@ -60,6 +60,8 @@ The gateway forwards `Idempotency-Key` and does not emit. Job dispatch, JetStrea
 
 Source of truth for the SKU is the metering architecture note (2026-09-20, billable unit per scan kick). This slice does not add Stripe, a ledger, or x402.
 
+Accepted kicks are queryable via `GET /v1/meters/scan-kicks` (`scan:read`, org from the token only): a filtered list plus `total` over `scan_kicks`. That read does not add Stripe, a ledger, or x402.
+
 ## Tenancy
 
 Every tenant table has `orgId`, RLS enabled with `FORCE`, and a `tenant_isolation` policy on `"orgId" = current_org_id()`. `current_org_id()` reads the `app.current_org_id` GUC and returns NULL when unset, so **an unscoped query returns zero rows** — the failure mode is an empty page, never another tenant's data.
