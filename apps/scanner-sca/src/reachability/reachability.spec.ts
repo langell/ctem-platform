@@ -1,6 +1,6 @@
-import { chmod, mkdir, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join, relative } from 'node:path';
 import { mkdtemp } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 import { MAX_SOURCE_BYTES, ReachabilityAnalyzer } from './analyze';
@@ -575,6 +575,100 @@ describe('Rust reachability', () => {
       await chmod(join(workDir, 'src/secret.rs'), 0o644);
     }
   });
+
+  it('does not follow a symlinked crate src directory', async () => {
+    const workDir = await repo({
+      'Cargo.toml': '[package]\nname = "app"\nversion = "0.1.0"\n',
+      'app.rs': 'fn main() {}\n',
+    });
+    const outside = join(dirname(workDir), `${basename(workDir)}-outside`);
+    await mkdir(outside);
+    await writeFile(join(outside, 'lib.rs'), 'use leaked::X;\n');
+    await symlink(relative(workDir, outside), join(workDir, 'src'));
+    const graph = await analyzer.analyze(workDir);
+    expect(graph.truncated).toBe(true);
+    expect([...(graph.imported.get('rust') ?? [])]).not.toContain('leaked');
+    expect(verdictForComponent({ name: 'leaked', ecosystem: 'crates.io' }, graph)).not.toBe(
+      'reachable',
+    );
+  });
+
+  it('does not follow a symlinked src/lib.rs file', async () => {
+    const workDir = await repo({
+      'Cargo.toml': '[package]\nname = "app"\nversion = "0.1.0"\n',
+      'src/main.rs': 'fn main() {}\n',
+    });
+    const outside = join(dirname(workDir), `${basename(workDir)}-outside`);
+    await mkdir(outside);
+    await writeFile(join(outside, 'lib.rs'), 'use leaked::X;\n');
+    await symlink(
+      relative(join(workDir, 'src'), join(outside, 'lib.rs')),
+      join(workDir, 'src/lib.rs'),
+    );
+    const graph = await analyzer.analyze(workDir);
+    expect(graph.truncated).toBe(true);
+    expect([...(graph.imported.get('rust') ?? [])]).not.toContain('leaked');
+    expect(verdictForComponent({ name: 'leaked', ecosystem: 'crates.io' }, graph)).not.toBe(
+      'reachable',
+    );
+  });
+
+  it('does not follow a symlinked src subdirectory', async () => {
+    const workDir = await repo({
+      'Cargo.toml': '[package]\nname = "app"\nversion = "0.1.0"\n',
+      'src/lib.rs': 'fn lib() {}\n',
+    });
+    const outside = join(dirname(workDir), `${basename(workDir)}-outside`);
+    await mkdir(outside);
+    await writeFile(join(outside, 'mod.rs'), 'use leaked::X;\n');
+    await symlink(relative(join(workDir, 'src'), outside), join(workDir, 'src/util'));
+    const graph = await analyzer.analyze(workDir);
+    expect(graph.truncated).toBe(true);
+    expect([...(graph.imported.get('rust') ?? [])]).not.toContain('leaked');
+    expect(verdictForComponent({ name: 'leaked', ecosystem: 'crates.io' }, graph)).not.toBe(
+      'reachable',
+    );
+  });
+
+  it('does not mark a workspace member under bin/ not_reachable', async () => {
+    const workDir = await repo({
+      'Cargo.toml': '[workspace]\nmembers = ["bin/cli"]\n',
+      'Cargo.lock': '# clap\nname = "clap"\n',
+      'src/lib.rs': 'fn lib() {}\n',
+      'bin/cli/Cargo.toml': '[package]\nname = "cli"\nversion = "0.1.0"\n',
+      'bin/cli/src/main.rs': 'use clap::Parser;\nfn main() {}\n',
+    });
+    const graph = await analyzer.analyze(workDir);
+    expect(graph.ambiguous.has('rust')).toBe(true);
+    expect(verdictForComponent({ name: 'clap', ecosystem: 'crates.io' }, graph)).not.toBe(
+      'not_reachable',
+    );
+  });
+
+  it('does not follow a symlink inside an ignored directory', async () => {
+    const workDir = await repo({
+      'Cargo.toml': '[workspace]\nmembers = ["bin/cli"]\n',
+      'src/lib.rs': 'fn lib() {}\n',
+      'bin/cli/Cargo.toml': '[package]\nname = "cli"\nversion = "0.1.0"\n',
+      'bin/cli/src/main.rs': 'use clap::Parser;\nfn main() {}\n',
+    });
+    const outside = join(dirname(workDir), `${basename(workDir)}-outside`);
+    await mkdir(outside);
+    await writeFile(join(outside, 'sneak.rs'), 'use leaked::X;\n');
+    await symlink(
+      relative(join(workDir, 'bin/cli'), join(outside, 'sneak.rs')),
+      join(workDir, 'bin/cli/sneak.rs'),
+    );
+    const graph = await analyzer.analyze(workDir);
+    expect(graph.truncated).toBe(true);
+    expect([...(graph.imported.get('rust') ?? [])]).not.toContain('leaked');
+    expect(verdictForComponent({ name: 'leaked', ecosystem: 'crates.io' }, graph)).not.toBe(
+      'reachable',
+    );
+    expect(verdictForComponent({ name: 'clap', ecosystem: 'crates.io' }, graph)).not.toBe(
+      'not_reachable',
+    );
+  });
 });
 
 describe('Rust extractors', () => {
@@ -725,5 +819,48 @@ describe('Rust extractors', () => {
     const afterBrace = extractRustImports('fn branch() { if c { } ::tokio::spawn(x); }\n');
     expect(afterBrace.packages).toContain('tokio');
     expect(afterBrace.packages).not.toContain('if');
+  });
+
+  it("marks serde reachable after a lifetime in impl<'de>", () => {
+    const found = extractRustImports("impl<'de> ::serde::Deserialize<'de> for Foo {}\n");
+    expect(found.packages).toContain('serde');
+    expect(found.packages).not.toContain('de');
+  });
+
+  it('marks bincode reachable after a generic closer', () => {
+    const found = extractRustImports('impl<T> ::bincode::Encode for W<T> {}\n');
+    expect(found.packages).toContain('bincode');
+    expect(found.packages).not.toContain('impl');
+  });
+
+  it('marks tracing reachable after a match arm =>', () => {
+    const found = extractRustImports('match x { 1 => ::tracing::info!("ok") }\n');
+    expect(found.packages).toContain('tracing');
+  });
+
+  it('marks serde_json reachable after a lifetime and does not record the lifetime', () => {
+    const found = extractRustImports("let v: &'a ::serde_json::Value = x;\n");
+    expect(found.packages).toContain('serde_json');
+    expect(found.packages).not.toContain('a');
+  });
+
+  it("marks tower reachable after for<'a>", () => {
+    const found = extractRustImports("fn bound<S: for<'a> ::tower::Service>() {}\n");
+    expect(found.packages).toContain('tower');
+    expect(found.packages).not.toContain('a');
+    expect(found.packages).not.toContain('for');
+  });
+
+  it('keeps as-trait bounds, turbofish, and Vec<::crate> paths', () => {
+    const found = extractRustImports(`
+      fn keep() {
+          let _ = <T as serde::Deserialize>::deserialize(x);
+          let _ = Vec::<u8>::new();
+          let _ = Vec<::serde_json::Value>::new();
+      }
+    `);
+    expect(found.packages).toContain('serde');
+    expect(found.packages).toContain('serde_json');
+    expect(found.packages).not.toContain('as');
   });
 });

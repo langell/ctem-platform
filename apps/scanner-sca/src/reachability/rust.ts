@@ -143,6 +143,10 @@ function collectPathRoots(source: string, packages: Set<string>): void {
       i += 1;
       continue;
     }
+    if (isLifetimeOrLabel(source, i)) {
+      i += ident.length;
+      continue;
+    }
     const after = skipWs(source, i + ident.length);
     if (source.startsWith('::', after) && !isPathContinuation(source, i)) {
       addCrate(packages, ident);
@@ -152,8 +156,9 @@ function collectPathRoots(source: string, packages: Set<string>): void {
 }
 
 /**
- * `foo::bar` — `bar` continues `foo`. A leading `::crate` after `->`, `}`, or a
- * non-path keyword is a new crate root. `->` is not a generic closer.
+ * `foo::bar` — `bar` continues `foo`. A leading `::crate` after `->`, `=>`, `>`,
+ * `}`, a lifetime, or a non-path keyword is a new crate root. `>` never continues
+ * a path (`Vec::<u8>::new` may over-report `new`).
  */
 function isPathContinuation(source: string, identStart: number): boolean {
   let j = identStart - 1;
@@ -163,14 +168,20 @@ function isPathContinuation(source: string, identStart: number): boolean {
   while (k >= 0 && isWs(source[k]!)) k -= 1;
   if (k < 0) return false;
   const prev = source[k]!;
-  if (prev === '>') return source[k - 1] !== '-';
+  if (prev === '>') return false;
   if (!isIdentCont(prev)) return false;
   const ident = identEndingAt(source, k);
   if (!ident) return false;
+  if (isLifetimeOrLabel(source, k - ident.length + 1)) return false;
   const bare = ident.startsWith('r#') ? ident.slice(2) : ident;
   if (RUST_PATH_KEYWORDS.has(bare)) return true;
   if (RUST_KEYWORDS.has(bare)) return false;
   return true;
+}
+
+/** `'a` and `'label` are lifetimes or loop labels, never crate roots. */
+function isLifetimeOrLabel(source: string, identStart: number): boolean {
+  return source[identStart - 1] === "'";
 }
 
 function identEndingAt(source: string, end: number): string | undefined {
