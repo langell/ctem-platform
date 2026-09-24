@@ -5,6 +5,7 @@ import { rootLogger } from '@ctem/observability';
 import { resolveChecksGithubToken, type ChecksTokenPick } from './github-checks.credential';
 import { parseGithubChecksContext, type GithubChecksContext } from './github-checks.context';
 import { allowlistedGithubApiUrl, checkRunUrl, checkRunsUrl, listCheckRunsUrl } from './github-checks.egress';
+import { EGRESS_GITHUB_API, publisherEgressJson } from './publisher-egress';
 import { checkConclusionFromScan, conclusionForScan } from './scan-conclusion.query';
 
 type PreparedPublish =
@@ -66,7 +67,7 @@ async function githubJson(
   init: { method: string; body?: string },
 ): Promise<{ ok: boolean; status: number; json: unknown }> {
   const dest = allowlistedGithubApiUrl(url);
-  const res = await fetch(dest, {
+  return publisherEgressJson(EGRESS_GITHUB_API, dest, {
     method: init.method,
     body: init.body,
     headers: {
@@ -76,15 +77,7 @@ async function githubJson(
       authorization: `Bearer ${token}`,
       ...(init.body ? { 'content-type': 'application/json' } : {}),
     },
-    signal: AbortSignal.timeout(20_000),
   });
-  let json: unknown = null;
-  try {
-    json = await res.json();
-  } catch {
-    json = null;
-  }
-  return { ok: res.ok, status: res.status, json };
 }
 
 function existingCheckRunId(json: unknown, scanId: string): number | null {
@@ -147,8 +140,9 @@ export class GithubChecksPublisher {
   /**
    * Soft-fail publish after a scan is terminal. Missing context or unusable
    * credentials skip the Check call (log) and never roll back scan status or
-   * change GET conclusion. Org is the scan row / signed event org — never a
-   * client header.
+   * change GET conclusion. HTTP uses `@ctem/resilience` (`egress:github-api`):
+   * an open circuit or exhausted retry budget is the same soft-fail. Org is
+   * the scan row / signed event org — never a client header.
    */
   async publishForCompletedScan(orgId: string, scanId: string): Promise<void> {
     try {

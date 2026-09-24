@@ -11,6 +11,7 @@ import {
   listCommitStatusesUrl,
   type GitLabOrigin,
 } from './gitlab-statuses.egress';
+import { EGRESS_GITLAB_API, publisherEgressJson } from './publisher-egress';
 import { conclusionForScan, gitlabCommitStatusFromScan } from './scan-conclusion.query';
 
 type PreparedPublish =
@@ -70,7 +71,7 @@ async function gitlabJson(
   init: { method: string; body?: string },
 ): Promise<{ ok: boolean; status: number; json: unknown }> {
   const dest = allowlistedGitLabApiUrl(url, origin);
-  const res = await fetch(dest, {
+  return publisherEgressJson(EGRESS_GITLAB_API, dest, {
     method: init.method,
     body: init.body,
     headers: {
@@ -79,15 +80,7 @@ async function gitlabJson(
       authorization: `Bearer ${token}`,
       ...(init.body ? { 'content-type': 'application/json' } : {}),
     },
-    signal: AbortSignal.timeout(20_000),
   });
-  let json: unknown = null;
-  try {
-    json = await res.json();
-  } catch {
-    json = null;
-  }
-  return { ok: res.ok, status: res.status, json };
 }
 
 function existingStatusForScan(json: unknown, scanId: string, name: string, targetUrl?: string): boolean {
@@ -139,8 +132,10 @@ export class GitlabCommitStatusPublisher {
   /**
    * Soft-fail publish after a scan is terminal. Missing context or unusable
    * credentials skip the GitLab call (log) and never roll back scan status or
-   * change GET conclusion. Org is the scan row / signed event org — never a
-   * client header. Not mapped from `block_deploy` / concludeDeploy.
+   * change GET conclusion. HTTP uses `@ctem/resilience` (`egress:gitlab-api`):
+   * an open circuit or exhausted retry budget is the same soft-fail. Org is
+   * the scan row / signed event org — never a client header. Not mapped from
+   * `block_deploy` / concludeDeploy.
    */
   async publishForCompletedScan(orgId: string, scanId: string): Promise<void> {
     try {
