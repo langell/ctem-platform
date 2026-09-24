@@ -14,7 +14,9 @@ export interface InternalHttpPolicyDeps {
 }
 
 /**
- * Shared helper for **internal** service-to-service HTTP only.
+ * Shared HTTP circuit + retry budget. One policy type for api-gateway
+ * `ServiceProxy` (internal service-to-service) and orchestrator publisher
+ * egress (GitHub / GitLab, separate circuit names). Not a second breaker.
  *
  * Retry budget: at most `maxAttempts` tries (default 3) with exponential
  * backoff + full jitter. Retries **timeouts** and **502 / 503 / 504** only.

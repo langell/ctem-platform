@@ -362,6 +362,9 @@ importers:
       '@ctem/observability':
         specifier: workspace:*
         version: link:../../libs/observability
+      '@ctem/resilience':
+        specifier: workspace:*
+        version: link:../../libs/resilience
       '@ctem/service-kit':
         specifier: workspace:*
         version: link:../../libs/service-kit

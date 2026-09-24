@@ -8,6 +8,7 @@ import {
   type GithubDeploymentsContext,
 } from './github-deployments.context';
 import { allowlistedGithubApiUrl, deploymentStatusesUrl } from './github-deployments.egress';
+import { EGRESS_GITHUB_API, publisherEgressJson } from './publisher-egress';
 import { deployConclusionForScan, deploymentStatusFromDeploy } from './scan-conclusion.query';
 
 type PreparedPublish =
@@ -62,7 +63,7 @@ async function githubJson(
   init: { method: string; body?: string },
 ): Promise<{ ok: boolean; status: number; json: unknown }> {
   const dest = allowlistedGithubApiUrl(url);
-  const res = await fetch(dest, {
+  return publisherEgressJson(EGRESS_GITHUB_API, dest, {
     method: init.method,
     body: init.body,
     headers: {
@@ -72,15 +73,7 @@ async function githubJson(
       authorization: `Bearer ${token}`,
       ...(init.body ? { 'content-type': 'application/json' } : {}),
     },
-    signal: AbortSignal.timeout(20_000),
   });
-  let json: unknown = null;
-  try {
-    json = await res.json();
-  } catch {
-    json = null;
-  }
-  return { ok: res.ok, status: res.status, json };
 }
 
 function existingStatusForScan(json: unknown, scanId: string, logUrl?: string): boolean {
@@ -129,8 +122,10 @@ export class GithubDeploymentsPublisher {
   /**
    * Soft-fail publish after a scan is terminal. Missing context or unusable
    * credentials skip the Deployment call (log) and never roll back scan status
-   * or change GET `deployConclusion`. Org is the scan row / signed event org —
-   * never a client header.
+   * or change GET `deployConclusion`. HTTP uses `@ctem/resilience`
+   * (`egress:github-api`): an open circuit or exhausted retry budget is the
+   * same soft-fail. Org is the scan row / signed event org — never a client
+   * header.
    */
   async publishForCompletedScan(orgId: string, scanId: string): Promise<void> {
     try {
