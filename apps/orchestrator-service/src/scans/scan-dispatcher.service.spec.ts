@@ -134,6 +134,10 @@ describe('ScanDispatcherService credentialRef wiring', () => {
       integration: {
         findMany: vi.fn(async () => [{ id: integrationId, credentialRef: 'env:GITLAB_TOKEN' }]),
       },
+      scanKick: {
+        create: vi.fn(async ({ data }: { data: object }) => data),
+        findFirst: vi.fn(async () => null),
+      },
     };
 
     const prisma = {
@@ -228,6 +232,10 @@ describe('ScanDispatcherService container kick', () => {
         count: vi.fn(async () => 1),
       },
       integration: { findMany: vi.fn(async () => []) },
+      scanKick: {
+        create: vi.fn(async ({ data }: { data: object }) => data),
+        findFirst: vi.fn(async () => null),
+      },
     };
     const prisma = {
       withOrg: vi.fn(async (_org: string, fn: (client: typeof tx) => Promise<unknown>) => fn(tx)),
@@ -339,6 +347,10 @@ describe('ScanDispatcherService requestedBy mapping', () => {
         count: vi.fn(async () => 1),
       },
       integration: { findMany: vi.fn(async () => []) },
+      scanKick: {
+        create: vi.fn(async ({ data }: { data: object }) => data),
+        findFirst: vi.fn(async () => null),
+      },
     };
     const userFind = vi.fn(async ({ where }: { where: { idpSubject: string } }) => {
       if (opts.userRow === undefined) {

@@ -79,6 +79,8 @@ export class ScanScheduleService implements OnApplicationBootstrap, OnModuleDest
         if (last && Date.now() - last.createdAt.getTime() < cadence) continue;
 
         try {
+          // createScan emits scan.kick in the scan-insert transaction. A second
+          // tick inside this cadence sees the row above and does not emit again.
           await this.dispatcher.createScan(
             org.id,
             null,

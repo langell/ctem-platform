@@ -1,7 +1,15 @@
 import { BadRequestException, Injectable, Optional } from '@nestjs/common';
-import { PrismaService } from '@ctem/db';
+import { PrismaService, type PrismaTransaction } from '@ctem/db';
 import { EventBus } from '@ctem/events';
-import { SUBJECTS, ScanJob, UserId, type CreateScanRequest, type ScannerType } from '@ctem/contracts';
+import {
+  SCAN_KICK_EVENT,
+  SUBJECTS,
+  ScanJob,
+  ScanKickMeterRecord,
+  UserId,
+  type CreateScanRequest,
+  type ScannerType,
+} from '@ctem/contracts';
 import { loadEnv } from '@ctem/config';
 import { currentTraceId, rootLogger } from '@ctem/observability';
 import { ScanPlannerService } from './scan-planner.service';
@@ -9,6 +17,12 @@ import { GithubChecksPublisher } from './github-checks.publisher';
 import { GithubDeploymentsPublisher } from './github-deployments.publisher';
 import { GitlabCommitStatusPublisher } from './gitlab-statuses.publisher';
 import { GitlabDeploymentsPublisher } from './gitlab-deployments.publisher';
+import {
+  isPrismaUniqueConflict,
+  resolveScanKickIdempotencyKey,
+  scanKickSource,
+  type ScanKickTrigger,
+} from './scan-kick';
 
 export interface DispatchAsset {
   id: string;
@@ -71,13 +85,22 @@ export class ScanDispatcherService {
    * Creates the scan record, then fans out one job per asset. Jobs are persisted
    * before publishing so a crash mid-dispatch leaves a scan we can resume rather
    * than a half-dispatched mystery.
+   *
+   * A `scan.kick` meter row is inserted in that same transaction — one per
+   * accepted scan, not per job. A client `Idempotency-Key` or CI `externalId`
+   * (org-scoped) returns the existing scan and does not emit again.
    */
   async createScan(
     orgId: string,
     userId: string | null,
     request: CreateScanRequest,
-    trigger: 'manual' | 'scheduled' | 'webhook' | 'ci' = 'manual',
+    trigger: ScanKickTrigger = 'manual',
+    idempotencyHeader?: string | string[] | null,
   ) {
+    const idempotencyKey = resolveScanKickIdempotencyKey({
+      header: idempotencyHeader,
+      externalId: request.externalId,
+    });
     const env = loadEnv();
     const assets = await this.planner.plan(
       orgId,
@@ -85,36 +108,27 @@ export class ScanDispatcherService {
       request.assetSelector,
     );
     const requestedBy = await this.resolveRequestedBy(userId);
+    const occurredAt = new Date();
 
-    const scan = await this.prisma.withOrg(orgId, async (tx) => {
-      const created = await tx.scan.create({
-        data: {
-          orgId,
-          scannerType: request.scannerType,
-          trigger,
-          status: assets.length ? 'running' : 'succeeded',
-          requestedBy,
-          assetSelector: request.assetSelector as object,
-          options: request.options as object,
-          jobsTotal: assets.length,
-          startedAt: new Date(),
-          finishedAt: assets.length ? null : new Date(),
-        },
-      });
-
-      if (assets.length) {
-        await tx.scanJob.createMany({
-          data: assets.map((asset) => ({
-            orgId,
-            scanId: created.id,
-            assetId: asset.id,
-            scannerType: request.scannerType,
-            status: 'queued',
-          })),
-        });
-      }
-      return created;
+    const accepted = await this.persistKick({
+      orgId,
+      request,
+      trigger,
+      assets,
+      requestedBy,
+      idempotencyKey,
+      occurredAt,
     });
+
+    if (accepted.replay) {
+      const jobs = await this.prisma.withOrg(orgId, (tx) =>
+        tx.scanJob.findMany({ where: { scanId: accepted.scan.id } }),
+      );
+      this.log.info({ scanId: accepted.scan.id, event: SCAN_KICK_EVENT }, 'scan kick replayed; no second emit');
+      return { ...accepted.scan, jobsDispatched: jobs.length };
+    }
+
+    const scan = accepted.scan;
 
     // Jobs are already queued. Anything after this (schema, NATS, missing
     // asset) must fail the job — never turn a kick into HTTP 500.
@@ -171,6 +185,101 @@ export class ScanDispatcherService {
   }
 
   /**
+   * Scan insert + `scan.kick` in one `withOrg` transaction. A unique conflict
+   * on the org-scoped idempotency key means a concurrent accept won; this
+   * attempt's scan row rolls back with the meter insert, and we return the winner.
+   */
+  private async persistKick(args: {
+    orgId: string;
+    request: CreateScanRequest;
+    trigger: ScanKickTrigger;
+    assets: DispatchAsset[];
+    requestedBy: string | null;
+    idempotencyKey: string | null;
+    occurredAt: Date;
+  }) {
+    try {
+      return await this.prisma.withOrg(args.orgId, async (tx) => {
+        const existing = await this.findIdempotentScan(tx, args.orgId, args.idempotencyKey);
+        if (existing) return { scan: existing, replay: true };
+
+        const created = await tx.scan.create({
+          data: {
+            orgId: args.orgId,
+            scannerType: args.request.scannerType,
+            trigger: args.trigger,
+            status: args.assets.length ? 'running' : 'succeeded',
+            requestedBy: args.requestedBy,
+            assetSelector: args.request.assetSelector as object,
+            options: args.request.options as object,
+            jobsTotal: args.assets.length,
+            startedAt: args.occurredAt,
+            finishedAt: args.assets.length ? null : args.occurredAt,
+          },
+        });
+
+        if (args.assets.length) {
+          await tx.scanJob.createMany({
+            data: args.assets.map((asset) => ({
+              orgId: args.orgId,
+              scanId: created.id,
+              assetId: asset.id,
+              scannerType: args.request.scannerType,
+              status: 'queued',
+            })),
+          });
+        }
+
+        const record = ScanKickMeterRecord.parse({
+          eventId: created.id,
+          orgId: args.orgId,
+          scanId: created.id,
+          source: scanKickSource(args.trigger),
+          scannerTypes: [args.request.scannerType],
+          occurredAt: args.occurredAt,
+        });
+        await tx.scanKick.create({
+          data: {
+            eventId: record.eventId,
+            orgId: record.orgId,
+            scanId: record.scanId,
+            source: record.source,
+            scannerTypes: record.scannerTypes ?? [],
+            occurredAt: record.occurredAt,
+            idempotencyKey: args.idempotencyKey,
+          },
+        });
+        return { scan: created, replay: false };
+      });
+    } catch (err) {
+      if (!args.idempotencyKey || !isPrismaUniqueConflict(err)) throw err;
+      const existing = await this.prisma.withOrg(args.orgId, (tx) =>
+        this.findIdempotentScan(tx, args.orgId, args.idempotencyKey),
+      );
+      if (!existing) throw err;
+      return { scan: existing, replay: true };
+    }
+  }
+
+  /** Prior accept for this org + client key. No key → not a replay. */
+  private async findIdempotentScan(
+    tx: PrismaTransaction,
+    orgId: string,
+    idempotencyKey: string | null,
+  ) {
+    if (!idempotencyKey) return null;
+    const kick = await tx.scanKick.findFirst({
+      where: { orgId, idempotencyKey },
+    });
+    if (!kick) return null;
+    const scan = await tx.scan.findUnique({ where: { id: kick.scanId } });
+    if (!scan) {
+      throw new Error(`scan.kick ${kick.eventId} is missing scan ${kick.scanId}`);
+    }
+    return scan;
+  }
+
+  /**
    * `users` is not RLS-scoped (global IdP directory). Lookup by `idpSubject`
    * so a Keycloak `sub` becomes `users.id`. Unmapped subjects fail-close as
    * 4xx — never 500, never an unattributed persist. Null (scheduled) and UUID
@@ -192,7 +301,10 @@ export class ScanDispatcherService {
     return user.id;
   }
 
-  /** Re-dispatch a single failed job — used by retries and by manual re-runs. */
+  /**
+   * Re-dispatch a single failed job — used by retries and by manual re-runs.
+   * Not a new kick: JetStream replay and this path must not emit `scan.kick`.
+   */
   async retryJob(orgId: string, jobId: string) {
     const job = await this.prisma.withOrg(orgId, (tx) =>
       tx.scanJob.update({

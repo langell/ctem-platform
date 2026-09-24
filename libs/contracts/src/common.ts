@@ -9,6 +9,9 @@ import { z } from 'zod';
 export const OrgId = z.string().uuid();
 export type OrgId = z.infer<typeof OrgId>;
 
+/** Client `Idempotency-Key` / CI `external_id` cap for `scan.kick` dedupe. */
+export const SCAN_KICK_IDEMPOTENCY_KEY_MAX = 255;
+
 export const UserId = z.string().uuid();
 export type UserId = z.infer<typeof UserId>;
 

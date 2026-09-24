@@ -1,4 +1,4 @@
-import { Body, Controller, Get, NotFoundException, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Headers, NotFoundException, Param, Post, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { CurrentOrg, CurrentUser, RequirePermissions } from '@ctem/auth';
 import { CreateScanRequest, IngestSbomRequest, type Principal } from '@ctem/contracts';
@@ -53,9 +53,10 @@ export class ScansController {
   create(
     @CurrentOrg() orgId: string,
     @CurrentUser() user: Principal,
+    @Headers('idempotency-key') idempotencyKey: string | string[] | undefined,
     @Body(new ZodBody(CreateScanRequest)) body: CreateScanRequest,
   ) {
-    return this.dispatcher.createScan(orgId, user.userId, body, 'manual');
+    return this.dispatcher.createScan(orgId, user.userId, body, 'manual', idempotencyKey);
   }
 
   /**
@@ -67,6 +68,7 @@ export class ScansController {
   async ingestSbom(
     @CurrentOrg() orgId: string,
     @CurrentUser() user: Principal,
+    @Headers('idempotency-key') idempotencyKey: string | string[] | undefined,
     @Body(new ZodBody(IngestSbomRequest)) body: IngestSbomRequest,
   ) {
     const asset = await this.prisma.withOrg(orgId, (tx) =>
@@ -90,8 +92,10 @@ export class ScansController {
         scannerType: 'sca',
         assetSelector: { assetIds: [asset.id] },
         options: { sbomArtifactKey: artifactKey, format: body.format, ref: body.ref },
+        externalId: body.externalId,
       },
       'ci',
+      idempotencyKey,
     );
   }
 

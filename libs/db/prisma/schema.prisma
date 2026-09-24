@@ -37,6 +37,7 @@ model Organization {
   integrations      Integration[]
   apiTokens         ApiToken[]
   auditLogs         AuditLog[]
+  scanKicks         ScanKick[]
 
   @@map("organizations")
 }
@@ -207,6 +208,8 @@ model Scan {
 
   org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   jobs ScanJob[]
+  /// Present once the accept transaction committed a `scan.kick`.
+  kick ScanKick?
 
   @@index([orgId, scannerType, createdAt])
   @@map("scans")
@@ -235,6 +238,28 @@ model ScanJob {
   @@index([orgId, status])
   @@index([scanId])
   @@map("scan_jobs")
+}
+
+/// One `scan.kick` per accepted scan. Written in the same transaction as the
+/// Scan insert. `idempotencyKey` is the client Idempotency-Key or CI external_id
+/// scoped by orgId; NULL does not collide (Postgres unique + NULL).
+model ScanKick {
+  /// Stable idempotency id. Equals the allocated Scan.id.
+  eventId        String   @id @db.Uuid
+  orgId          String   @db.Uuid
+  scanId         String   @unique @db.Uuid
+  /// manual | api | webhook | ci | schedule
+  source         String
+  scannerTypes   String[] @default([])
+  occurredAt     DateTime @default(now())
+  idempotencyKey String?
+
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  scan Scan         @relation(fields: [scanId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, idempotencyKey])
+  @@index([orgId, occurredAt])
+  @@map("scan_kicks")
 }
 
 // ---------------------------------------------------------------- findings
