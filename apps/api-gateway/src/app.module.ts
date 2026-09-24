@@ -10,6 +10,7 @@ import { GatewayAuthGuard } from './auth/gateway-auth.guard';
 import { ServiceProxy } from './proxy/service-proxy';
 import { AssetsProxyController } from './routes/assets.controller';
 import { ScansProxyController } from './routes/scans.controller';
+import { MetersProxyController } from './routes/meters.controller';
 import { FindingsProxyController } from './routes/findings.controller';
 import { OrgMembersProxyController } from './routes/org-members.controller';
 import { PoliciesProxyController } from './routes/policies.controller';
@@ -28,6 +29,7 @@ import { RateLimitMiddleware } from './rate-limit.middleware';
     SessionController,
     AssetsProxyController,
     ScansProxyController,
+    MetersProxyController,
     FindingsProxyController,
     PoliciesProxyController,
     OrgMembersProxyController,

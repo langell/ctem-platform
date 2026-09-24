@@ -3,9 +3,12 @@ import {
   CreatePolicyRequest,
   CreateScanRequest,
   IngestSbomRequest,
+  ListScanKicksQuery,
   SCAN_KICK_EVENT,
+  SCAN_KICK_LIST_MAX_LIMIT,
   Scan,
   ScanKickMeterRecord,
+  ScanKickMeterUsage,
   UpdatePolicyRequest,
   EVENT_SCHEMAS,
   InviteMemberRequest,
@@ -527,6 +530,16 @@ describe('scan.kick meter record', () => {
     });
     expect(record.source).toBe('schedule');
     expect(SCAN_KICK_EVENT).toBe('scan.kick');
+    const usage = ScanKickMeterUsage.parse({
+      event: 'scan.kick',
+      total: 1,
+      items: [record],
+      nextCursor: null,
+    });
+    expect(usage.total).toBe(1);
+    expect(
+      ScanKickMeterUsage.safeParse({ ...usage, price: 1, currency: 'usd', remainingCredits: 3 }).success,
+    ).toBe(false);
     expect(CreateScanRequest.parse({ scannerType: 'sca', external_id: 'build-7' }).externalId).toBe('build-7');
     expect(
       IngestSbomRequest.parse({
@@ -536,5 +549,22 @@ describe('scan.kick meter record', () => {
         external_id: 'build-7',
       }).externalId,
     ).toBe('build-7');
+  });
+
+  it('strips orgId, caps limit, and rejects a non-ISO bound', () => {
+    const parsed = ListScanKicksQuery.parse({
+      orgId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      source: 'ci',
+      limit: '999',
+      from: '2026-09-01T00:00:00.000Z',
+      to: '2026-09-10',
+    });
+    expect(parsed).not.toHaveProperty('orgId');
+    expect(parsed.limit).toBe(SCAN_KICK_LIST_MAX_LIMIT);
+    expect(parsed.source).toBe('ci');
+    expect(parsed.from?.toISOString()).toBe('2026-09-01T00:00:00.000Z');
+    expect(parsed.to?.toISOString()).toBe('2026-09-10T00:00:00.000Z');
+    expect(() => ListScanKicksQuery.parse({ source: 'stripe' })).toThrow();
+    expect(() => ListScanKicksQuery.parse({ from: 'yesterday' })).toThrow();
   });
 });

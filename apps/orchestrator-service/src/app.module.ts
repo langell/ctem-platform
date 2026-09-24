@@ -9,6 +9,8 @@ import { StorageModule } from '@ctem/storage';
 import { DbModule } from '@ctem/db';
 import { HealthController } from '@ctem/service-kit';
 import { ScansController } from './scans/scans.controller';
+import { ScanKicksController } from './meters/scan-kicks.controller';
+import { ScanKickMeterService } from './meters/scan-kick-meter.service';
 import { ScanPlannerService } from './scans/scan-planner.service';
 import { ScanDispatcherService } from './scans/scan-dispatcher.service';
 import { ScanLifecycleConsumer } from './scans/scan-lifecycle.consumer';
@@ -28,8 +30,9 @@ import { GitlabDeploymentsPublisher } from './scans/gitlab-deployments.publisher
     StorageModule,
     DbModule,
   ],
-  controllers: [HealthController, ScansController],
+  controllers: [HealthController, ScansController, ScanKicksController],
   providers: [
+    ScanKickMeterService,
     ScanPlannerService,
     ScanDispatcherService,
     ScanLifecycleConsumer,
