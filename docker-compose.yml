@@ -31,7 +31,12 @@ services:
       - natsdata:/data
 
   minio:
-    image: quay.io/minio/minio:latest
+    # Frozen on purpose: MinIO stopped publishing community images in late 2025.
+    # RELEASE.2025-09-07T16-13-09Z is the last published server image. Docker Hub
+    # removed minio/minio, and quay.io/minio rejects anonymous pulls, so CI pulls
+    # this digest (that release's multi-arch manifest list) from the public mirror.
+    # The pin keeps the image reproducible.
+    image: quay.io/thanos/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     command: ['server', '/data', '--console-address', ':9001']
     environment:
       MINIO_ROOT_USER: ctem
@@ -41,8 +46,11 @@ services:
       - miniodata:/data
 
   # Creates the artifact bucket on first boot so services do not have to.
+  # Same frozen server image as minio: it ships mc RELEASE.2025-08-13T08-35-41Z,
+  # the last published client. minio/mc is gone from Docker Hub and quay.io/minio/mc
+  # rejects anonymous pulls. Frozen on purpose so the init image stays reproducible.
   minio-init:
-    image: quay.io/minio/mc:latest
+    image: quay.io/thanos/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     depends_on: [minio]
     entrypoint: >
       /bin/sh -c "
