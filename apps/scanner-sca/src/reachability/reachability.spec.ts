@@ -185,6 +185,38 @@ describe('ReachabilityAnalyzer', () => {
       await chmod(join(workDir, 'app.js'), 0o644);
     }
   });
+
+  it('keeps not_reachable when a JavaScript repo contains a symlink', async () => {
+    const workDir = await repo({
+      'src/app.js': 'export const n = 1;\n',
+      'docs/a.md': '# docs\n',
+    });
+    await symlink(join('docs', 'a.md'), join(workDir, 'README.md'));
+    const graph = await analyzer.analyze(workDir);
+    expect(graph.truncated).toBe(false);
+    expect(graph.ambiguous.has('rust')).toBe(false);
+    expect(verdictForComponent({ name: 'lodash', ecosystem: 'npm' }, graph)).toBe('not_reachable');
+  });
+
+  it('keeps not_reachable when a JavaScript repo has more skipped entries than the probe budget', async () => {
+    const workDir = await repo({
+      'src/app.js': 'export const n = 1;\n',
+    });
+    const dist = join(workDir, 'dist');
+    await mkdir(dist);
+    // Above the 10_000 probe budget. dist/ is ignored by the shared walk, so
+    // the file cap is not hit and the probe must not run on this non-Rust repo.
+    const count = 10_001;
+    const batch = 500;
+    for (let i = 0; i < count; i += batch) {
+      const n = Math.min(batch, count - i);
+      await Promise.all(Array.from({ length: n }, (_, k) => mkdir(join(dist, `d${i + k}`))));
+    }
+    const graph = await analyzer.analyze(workDir);
+    expect(graph.truncated).toBe(false);
+    expect(graph.ambiguous.has('rust')).toBe(false);
+    expect(verdictForComponent({ name: 'lodash', ecosystem: 'npm' }, graph)).toBe('not_reachable');
+  });
 });
 
 describe('language extractors', () => {
@@ -416,6 +448,21 @@ describe('Rust reachability', () => {
     });
     const graph = await analyzer.analyze(workDir);
     expect(verdictForComponent({ name: 'clap', ecosystem: 'crates.io' }, graph)).toBe('reachable');
+  });
+
+  it('keeps not_reachable for an unused crate in a multi-binary src/bin crate', async () => {
+    const workDir = await repo({
+      'Cargo.toml': '[package]\nname = "app"\nversion = "0.1.0"\n',
+      'src/lib.rs': 'fn lib() {}\n',
+      'src/bin/cli.rs': 'use clap::Parser;\nfn main() {}\n',
+    });
+    const graph = await analyzer.analyze(workDir);
+    expect(graph.truncated).toBe(false);
+    expect(graph.ambiguous.has('rust')).toBe(false);
+    expect(verdictForComponent({ name: 'clap', ecosystem: 'crates.io' }, graph)).toBe('reachable');
+    expect(verdictForComponent({ name: 'tokio', ecosystem: 'crates.io' }, graph)).toBe(
+      'not_reachable',
+    );
   });
 
   it('skips src/**/target and vendor on the crate src walk', async () => {
@@ -660,7 +707,8 @@ describe('Rust reachability', () => {
       join(workDir, 'bin/cli/sneak.rs'),
     );
     const graph = await analyzer.analyze(workDir);
-    expect(graph.truncated).toBe(true);
+    expect(graph.truncated).toBe(false);
+    expect(graph.ambiguous.has('rust')).toBe(true);
     expect([...(graph.imported.get('rust') ?? [])]).not.toContain('leaked');
     expect(verdictForComponent({ name: 'leaked', ecosystem: 'crates.io' }, graph)).not.toBe(
       'reachable',

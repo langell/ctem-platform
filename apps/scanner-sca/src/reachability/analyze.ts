@@ -86,7 +86,12 @@ export class ReachabilityAnalyzer implements ReachabilityAnalyzerPort {
     await noteCargoDependencyRenames(files, graph, checkDeadline);
 
     const crateSrc = await listCrateSrcRustFiles(workDir, files, graph, checkDeadline);
-    await noteIgnoredRustDirs(workDir, graph, checkDeadline);
+    // The ignored-dir probe is a Rust fail-closed check. It must not run on a
+    // JS/Python/Go repo, where a symlink or a large skipped tree would otherwise
+    // flip every language's not_reachable.
+    if (sharedWalkFoundRust(files)) {
+      await noteIgnoredRustDirs(workDir, crateSrcDirectories(files), graph, checkDeadline);
+    }
     const source = [...files.filter((file) => isFirstPartySource(file)), ...crateSrc];
     let parsed = 0;
 
@@ -304,21 +309,52 @@ async function walkCrateSrc(
 /**
  * The shared walk never lists crates under `bin/`, `build/`, and the other
  * non-exempt skip dirs. If one of those holds `.rs` or `Cargo.toml`, Rust is
- * ambiguous. Symlinks are not followed; skipping one sets truncated.
+ * ambiguous. Paths under a crate `src/` are exempt: the crate src walk already
+ * parsed them, so `src/bin` must not flip Rust. Symlinks are not followed.
+ * A skipped symlink or an exhausted budget marks Rust ambiguous only — never
+ * global `truncated`, which would change every language's verdict.
  */
 async function noteIgnoredRustDirs(
   workDir: string,
+  crateSrcDirs: readonly string[],
   graph: ReachabilityGraph,
   checkDeadline: () => boolean,
 ): Promise<void> {
   const budget = { seen: 0 };
-  await probeVisibleTree(workDir, 0, budget, graph, checkDeadline);
+  await probeVisibleTree(workDir, 0, budget, crateSrcDirs, graph, checkDeadline);
+}
+
+function sharedWalkFoundRust(files: RepoFile[]): boolean {
+  return files.some((file) => file.fileName === 'Cargo.toml' || isRustSource(file.fileName));
+}
+
+function crateSrcDirectories(files: RepoFile[]): string[] {
+  const dirs: string[] = [];
+  for (const file of files) {
+    if (file.fileName === 'Cargo.toml') dirs.push(join(dirname(file.absPath), 'src'));
+  }
+  return dirs;
+}
+
+/** True for the crate `src` directory itself and everything under it. */
+function isUnderCrateSrc(absPath: string, crateSrcDirs: readonly string[]): boolean {
+  for (const srcDir of crateSrcDirs) {
+    if (absPath === srcDir) return true;
+    const prefix = srcDir.endsWith(sep) ? srcDir : `${srcDir}${sep}`;
+    if (absPath.startsWith(prefix)) return true;
+  }
+  return false;
+}
+
+function markProbeAmbiguous(graph: ReachabilityGraph): void {
+  graph.ambiguous.add('rust');
 }
 
 async function probeVisibleTree(
   absDir: string,
   depth: number,
   budget: { seen: number },
+  crateSrcDirs: readonly string[],
   graph: ReachabilityGraph,
   checkDeadline: () => boolean,
 ): Promise<void> {
@@ -326,8 +362,7 @@ async function probeVisibleTree(
     throw new ReachabilityAnalysisError('Job deadline exceeded during reachability analysis');
   }
   if (depth > MAX_WALK_DEPTH || !takeProbeBudget(budget, graph)) {
-    graph.truncated = true;
-    graph.ambiguous.add('rust');
+    markProbeAmbiguous(graph);
     return;
   }
 
@@ -337,8 +372,7 @@ async function probeVisibleTree(
   } catch (err) {
     const code = fsErrorCode(err);
     if (code === 'ENOENT' || code === 'ENOTDIR') return;
-    graph.truncated = true;
-    graph.ambiguous.add('rust');
+    markProbeAmbiguous(graph);
     return;
   }
 
@@ -350,23 +384,25 @@ async function probeVisibleTree(
     const absPath = join(absDir, entry.name);
     const kind = await pathKind(absPath);
     if (kind === 'symlink') {
-      graph.truncated = true;
+      markProbeAmbiguous(graph);
       continue;
     }
     if (kind === 'error') {
-      graph.truncated = true;
-      graph.ambiguous.add('rust');
+      markProbeAmbiguous(graph);
       continue;
     }
     if (kind !== 'dir') continue;
+    if (isUnderCrateSrc(absPath, crateSrcDirs)) continue;
     if (IGNORED_DIR_PROBE_EXEMPT.has(entry.name)) continue;
     if (sharedWalkSkipsDir(entry.name)) {
-      if (await skippedSubtreeHasRust(absPath, depth + 1, budget, graph, checkDeadline)) {
-        graph.ambiguous.add('rust');
+      if (
+        await skippedSubtreeHasRust(absPath, depth + 1, budget, crateSrcDirs, graph, checkDeadline)
+      ) {
+        markProbeAmbiguous(graph);
       }
       continue;
     }
-    await probeVisibleTree(absPath, depth + 1, budget, graph, checkDeadline);
+    await probeVisibleTree(absPath, depth + 1, budget, crateSrcDirs, graph, checkDeadline);
   }
 }
 
@@ -374,6 +410,7 @@ async function skippedSubtreeHasRust(
   absDir: string,
   depth: number,
   budget: { seen: number },
+  crateSrcDirs: readonly string[],
   graph: ReachabilityGraph,
   checkDeadline: () => boolean,
 ): Promise<boolean> {
@@ -382,13 +419,13 @@ async function skippedSubtreeHasRust(
   }
   const kind = await pathKind(absDir);
   if (kind === 'symlink') {
-    graph.truncated = true;
+    markProbeAmbiguous(graph);
     return false;
   }
   if (kind !== 'dir') return false;
+  if (isUnderCrateSrc(absDir, crateSrcDirs)) return false;
   if (depth > MAX_WALK_DEPTH || !takeProbeBudget(budget, graph)) {
-    graph.truncated = true;
-    graph.ambiguous.add('rust');
+    markProbeAmbiguous(graph);
     return true;
   }
 
@@ -398,8 +435,7 @@ async function skippedSubtreeHasRust(
   } catch (err) {
     const code = fsErrorCode(err);
     if (code === 'ENOENT' || code === 'ENOTDIR') return false;
-    graph.truncated = true;
-    graph.ambiguous.add('rust');
+    markProbeAmbiguous(graph);
     return true;
   }
 
@@ -410,19 +446,21 @@ async function skippedSubtreeHasRust(
     }
     if (!takeProbeBudget(budget, graph)) return true;
     const absPath = join(absDir, entry.name);
+    if (isUnderCrateSrc(absPath, crateSrcDirs)) continue;
     const entryKind = await pathKind(absPath);
     if (entryKind === 'symlink') {
-      graph.truncated = true;
+      markProbeAmbiguous(graph);
       continue;
     }
     if (entryKind === 'error') {
-      graph.truncated = true;
-      graph.ambiguous.add('rust');
+      markProbeAmbiguous(graph);
       continue;
     }
     if (entryKind === 'dir') {
       if (IGNORED_DIR_PROBE_EXEMPT.has(entry.name)) continue;
-      if (await skippedSubtreeHasRust(absPath, depth + 1, budget, graph, checkDeadline)) {
+      if (
+        await skippedSubtreeHasRust(absPath, depth + 1, budget, crateSrcDirs, graph, checkDeadline)
+      ) {
         found = true;
       }
       continue;
@@ -441,8 +479,7 @@ function sharedWalkSkipsDir(name: string): boolean {
 function takeProbeBudget(budget: { seen: number }, graph: ReachabilityGraph): boolean {
   budget.seen += 1;
   if (budget.seen > MAX_WALK_FILES) {
-    graph.truncated = true;
-    graph.ambiguous.add('rust');
+    markProbeAmbiguous(graph);
     return false;
   }
   return true;
