@@ -8,6 +8,7 @@ import {
   type CircuitBreakerConfig,
 } from '@ctem/resilience';
 import { AzureConnector } from './azure.connector';
+import { BitbucketConnector } from './bitbucket.connector';
 import { exchangeAzureAccessToken } from './azure.token';
 import type { DiscoveryContext } from './connector.registry';
 import { DnsEnumConnector } from './dns.connector';
@@ -18,6 +19,7 @@ import { GitHubConnector } from './github.connector';
 import { GitLabConnector } from './gitlab.connector';
 import {
   EGRESS_AZURE_API,
+  EGRESS_BITBUCKET_API,
   EGRESS_DNS_CT,
   EGRESS_GCP_API,
   EGRESS_GITHUB_API,
@@ -101,6 +103,7 @@ function clearCloudEnv(): void {
     'GCP_PRIVATE_KEY',
     'AWS_ACCESS_KEY_ID',
     'AWS_SECRET_ACCESS_KEY',
+    'BITBUCKET_TOKEN',
   ]) {
     delete process.env[key];
   }
@@ -146,6 +149,44 @@ describe('inventory egress circuit breaker', () => {
     expect(fetchFn).toHaveBeenCalledTimes(1);
     expect(new URL(String(fetchFn.mock.calls[0]![0])).hostname).toBe('gitlab.com');
     expect(EGRESS_GITLAB_API).not.toBe(EGRESS_GITHUB_API);
+  });
+
+  it('opens egress:bitbucket-api without fetch once open, and leaves GitHub up', async () => {
+    useInventoryEgressPolicy(fastPolicy({ failureThreshold: 1, maxAttempts: 1 }));
+    process.env.BITBUCKET_TOKEN = 'bb-token';
+    const fetchFn = vi.fn(async (url: string) => {
+      const host = new URL(String(url)).hostname;
+      if (host === 'api.github.com') return json([]);
+      return new Response('down', { status: 503 });
+    });
+    vi.stubGlobal('fetch', fetchFn);
+
+    await expect(
+      collect(
+        new BitbucketConnector().discover(
+          ctx({ workspace: 'langell' }, 'env:BITBUCKET_TOKEN'),
+        ),
+      ),
+    ).rejects.toThrow(/503/);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(new URL(String(fetchFn.mock.calls[0]![0])).hostname).toBe('api.bitbucket.org');
+    fetchFn.mockClear();
+
+    await expect(
+      collect(
+        new BitbucketConnector().discover(
+          ctx({ workspace: 'langell' }, 'env:BITBUCKET_TOKEN'),
+        ),
+      ),
+    ).rejects.toMatchObject({ name: 'CircuitOpenError', circuit: EGRESS_BITBUCKET_API });
+    expect(fetchFn).not.toHaveBeenCalled();
+
+    await expect(
+      collect(new GitHubConnector().discover(ctx({ owner: 'langell', ownerType: 'user' }))),
+    ).resolves.toEqual([]);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(new URL(String(fetchFn.mock.calls[0]![0])).hostname).toBe('api.github.com');
+    expect(EGRESS_BITBUCKET_API).not.toBe(EGRESS_GITHUB_API);
   });
 
   it('completes a retryable 503 then success within the attempt budget', async () => {
