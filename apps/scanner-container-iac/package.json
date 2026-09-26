@@ -26,6 +26,7 @@
     "@ctem/contracts": "workspace:*",
     "@ctem/config": "workspace:*",
     "@ctem/observability": "workspace:*",
+    "@ctem/resilience": "workspace:*",
     "@ctem/events": "workspace:*",
     "@ctem/storage": "workspace:*",
     "@ctem/scanner-sdk": "workspace:*",

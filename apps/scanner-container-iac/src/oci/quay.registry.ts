@@ -10,6 +10,7 @@ import {
   ContainerEgressError,
 } from '../container.egress';
 import { QuayEgressError, isQuayRegistryHost } from '../quay.egress';
+import { EGRESS_QUAY_REGISTRY, registryPullFetch } from './pull-egress';
 import {
   ContainerPullError,
   MAX_IMAGE_LAYERS,
@@ -26,17 +27,14 @@ import {
 export const QUAY_FETCH = Symbol('QUAY_FETCH');
 
 export interface QuayImagePuller {
-  pull(
-    ref: QuayImageRef,
-    token: string,
-    checkDeadline: () => boolean,
-  ): Promise<ImagePull>;
+  pull(ref: QuayImageRef, token: string, checkDeadline: () => boolean): Promise<ImagePull>;
 }
 
 /**
  * In-process OCI pull from allowlisted `quay.io`. Auth is Bearer
  * (`env:QUAY_*`) on exact `quay.io` `/v2/auth`, then a registry bearer
- * on `quay.io` `/v2/` manifests + blobs. No docker / podman / skopeo /
+ * on `quay.io` `/v2/` manifests + blobs. Token, manifest, and blob HTTP
+ * use `@ctem/resilience` (`egress:quay-registry`). No docker / podman / skopeo /
  * crane. No inventory REST (`/api/v1/`). No CDN follow. No self-hosted
  * Quay host. Layer blobs are cached by digest for the life of the
  * worker. Pull is by digest only.
@@ -50,18 +48,19 @@ export class QuayRegistry implements QuayImagePuller {
     this.fetchImpl = fetchImpl ?? fetch;
   }
 
-  async pull(
-    ref: QuayImageRef,
-    token: string,
-    checkDeadline: () => boolean,
-  ): Promise<ImagePull> {
+  async pull(ref: QuayImageRef, token: string, checkDeadline: () => boolean): Promise<ImagePull> {
     if (!checkDeadline()) {
       throw new ContainerPullError('Job deadline exceeded before Quay pull');
     }
 
     const registryToken = await this.registryToken(ref, token, checkDeadline);
     const manifestJson = await this.getManifest(ref, ref.digest, registryToken, checkDeadline);
-    const platform = await this.resolvePlatformManifest(ref, manifestJson, registryToken, checkDeadline);
+    const platform = await this.resolvePlatformManifest(
+      ref,
+      manifestJson,
+      registryToken,
+      checkDeadline,
+    );
     const layers = platform.layers ?? [];
     if (layers.length > MAX_IMAGE_LAYERS) {
       throw new ContainerPullError(
@@ -72,12 +71,16 @@ export class QuayRegistry implements QuayImagePuller {
     const snapshots: LayerSnapshot[] = [];
     for (const layer of layers) {
       if (!checkDeadline()) {
-        throw new ContainerPullError('Job deadline exceeded mid-pull — refusing incomplete inventory');
+        throw new ContainerPullError(
+          'Job deadline exceeded mid-pull — refusing incomplete inventory',
+        );
       }
       const digest = layer.digest;
       const mediaType = layer.mediaType ?? '';
       if (!digest || !/^sha256:[a-f0-9]{64}$/i.test(digest)) {
-        throw new ContainerPullError('Layer descriptor missing sha256 digest — refusing incomplete inventory');
+        throw new ContainerPullError(
+          'Layer descriptor missing sha256 digest — refusing incomplete inventory',
+        );
       }
       const cached = this.layerCache.get(digest.toLowerCase());
       if (cached) {
@@ -111,15 +114,19 @@ export class QuayRegistry implements QuayImagePuller {
     allowlistedQuayAuthUrl(url);
     let res: Response;
     try {
-      res = await this.fetchImpl(url, {
-        method: 'GET',
-        headers: {
-          'user-agent': 'ctem-platform',
-          authorization: `Bearer ${quayToken}`,
+      res = await registryPullFetch(
+        EGRESS_QUAY_REGISTRY,
+        url,
+        {
+          method: 'GET',
+          headers: {
+            'user-agent': 'ctem-platform',
+            authorization: `Bearer ${quayToken}`,
+          },
+          redirect: 'error',
         },
-        redirect: 'error',
-        signal: AbortSignal.timeout(20_000),
-      });
+        this.fetchImpl,
+      );
     } catch (err) {
       if (err instanceof QuayEgressError || err instanceof ContainerEgressError) throw err;
       throw new ContainerPullError(
@@ -138,7 +145,8 @@ export class QuayRegistry implements QuayImagePuller {
     } catch {
       throw new ContainerPullError('Quay token exchange was not JSON — refusing pull');
     }
-    const rec = json && typeof json === 'object' ? (json as { token?: unknown; access_token?: unknown }) : {};
+    const rec =
+      json && typeof json === 'object' ? (json as { token?: unknown; access_token?: unknown }) : {};
     const token =
       typeof rec.token === 'string'
         ? rec.token
@@ -157,7 +165,8 @@ export class QuayRegistry implements QuayImagePuller {
     registryToken: string,
     checkDeadline: () => boolean,
   ): Promise<unknown> {
-    if (!checkDeadline()) throw new ContainerPullError('Job deadline exceeded during manifest pull');
+    if (!checkDeadline())
+      throw new ContainerPullError('Job deadline exceeded during manifest pull');
     const url = quayManifestUrl(ref.namespace, ref.repository, digest);
     const res = await this.quayGet(url, registryToken, MANIFEST_ACCEPT);
     if (res.status === 401 || res.status === 403) {
@@ -201,7 +210,9 @@ export class QuayRegistry implements QuayImagePuller {
     }
     const rec = json as OciManifest;
     if (!Array.isArray(rec.layers)) {
-      throw new ContainerPullError('Quay image manifest missing layers — refusing incomplete inventory');
+      throw new ContainerPullError(
+        'Quay image manifest missing layers — refusing incomplete inventory',
+      );
     }
     return rec;
   }
@@ -240,12 +251,16 @@ export class QuayRegistry implements QuayImagePuller {
       'user-agent': 'ctem-platform',
       authorization: `Bearer ${registryToken}`,
     };
-    const res = await this.fetchImpl(dest, {
-      method: 'GET',
-      headers,
-      redirect: followBlobRedirect ? 'manual' : 'error',
-      signal: AbortSignal.timeout(60_000),
-    });
+    const res = await registryPullFetch(
+      EGRESS_QUAY_REGISTRY,
+      dest,
+      {
+        method: 'GET',
+        headers,
+        redirect: followBlobRedirect ? 'manual' : 'error',
+      },
+      this.fetchImpl,
+    );
 
     if (!followBlobRedirect) return res;
     if (res.status < 300 || res.status >= 400) return res;
@@ -260,12 +275,16 @@ export class QuayRegistry implements QuayImagePuller {
     if (isQuayRegistryHost(nextHost)) {
       nextHeaders.authorization = `Bearer ${registryToken}`;
     }
-    return this.fetchImpl(next, {
-      method: 'GET',
-      headers: nextHeaders,
-      redirect: 'error',
-      signal: AbortSignal.timeout(60_000),
-    });
+    return registryPullFetch(
+      EGRESS_QUAY_REGISTRY,
+      next,
+      {
+        method: 'GET',
+        headers: nextHeaders,
+        redirect: 'error',
+      },
+      this.fetchImpl,
+    );
   }
 }
 

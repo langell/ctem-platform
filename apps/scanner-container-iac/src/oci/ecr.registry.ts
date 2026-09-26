@@ -13,6 +13,7 @@ import {
   ContainerEgressError,
 } from '../container.egress';
 import { signAwsRequest } from '../aws.sigv4';
+import { EGRESS_ECR_REGISTRY, registryPullFetch } from './pull-egress';
 import {
   ContainerPullError,
   MAX_IMAGE_LAYERS,
@@ -41,6 +42,7 @@ export interface EcrImagePuller {
 /**
  * In-process OCI pull from allowlisted `{account}.dkr.ecr.{region}.amazonaws.com`.
  * Auth is GetAuthorizationToken on `api.ecr.{region}.amazonaws.com` via SigV4.
+ * Token, manifest, and blob HTTP use `@ctem/resilience` (`egress:ecr-registry`).
  * No docker/podman/skopeo/crane. Layer blobs are cached by digest for the
  * life of the worker. Pull is by digest only.
  */
@@ -64,7 +66,12 @@ export class EcrRegistry implements EcrImagePuller {
 
     const registryToken = await this.authorizationToken(ref, credentials, checkDeadline);
     const manifestJson = await this.getManifest(ref, ref.digest, registryToken, checkDeadline);
-    const platform = await this.resolvePlatformManifest(ref, manifestJson, registryToken, checkDeadline);
+    const platform = await this.resolvePlatformManifest(
+      ref,
+      manifestJson,
+      registryToken,
+      checkDeadline,
+    );
     const layers = platform.layers ?? [];
     if (layers.length > MAX_IMAGE_LAYERS) {
       throw new ContainerPullError(
@@ -75,12 +82,16 @@ export class EcrRegistry implements EcrImagePuller {
     const snapshots: LayerSnapshot[] = [];
     for (const layer of layers) {
       if (!checkDeadline()) {
-        throw new ContainerPullError('Job deadline exceeded mid-pull — refusing incomplete inventory');
+        throw new ContainerPullError(
+          'Job deadline exceeded mid-pull — refusing incomplete inventory',
+        );
       }
       const digest = layer.digest;
       const mediaType = layer.mediaType ?? '';
       if (!digest || !/^sha256:[a-f0-9]{64}$/i.test(digest)) {
-        throw new ContainerPullError('Layer descriptor missing sha256 digest — refusing incomplete inventory');
+        throw new ContainerPullError(
+          'Layer descriptor missing sha256 digest — refusing incomplete inventory',
+        );
       }
       const cached = this.layerCache.get(digest.toLowerCase());
       if (cached) {
@@ -124,17 +135,25 @@ export class EcrRegistry implements EcrImagePuller {
     });
     // Belt: never send AWS_* keys off the ECR JSON API allowlist.
     allowlistedEcrApiUrl(signed.url);
-    const res = await this.fetchImpl(signed.url, {
-      method: 'POST',
-      headers: signed.headers,
-      body: signed.body,
-      signal: AbortSignal.timeout(20_000),
-    });
+    const res = await registryPullFetch(
+      EGRESS_ECR_REGISTRY,
+      signed.url,
+      {
+        method: 'POST',
+        headers: signed.headers,
+        body: signed.body,
+      },
+      this.fetchImpl,
+    );
     if (res.status === 401 || res.status === 403) {
-      throw new ContainerPullError(`ECR GetAuthorizationToken returned ${res.status} — refusing pull`);
+      throw new ContainerPullError(
+        `ECR GetAuthorizationToken returned ${res.status} — refusing pull`,
+      );
     }
     if (!res.ok) {
-      throw new ContainerPullError(`ECR GetAuthorizationToken returned ${res.status} — refusing pull`);
+      throw new ContainerPullError(
+        `ECR GetAuthorizationToken returned ${res.status} — refusing pull`,
+      );
     }
     let json: unknown;
     try {
@@ -155,7 +174,8 @@ export class EcrRegistry implements EcrImagePuller {
     registryToken: string,
     checkDeadline: () => boolean,
   ): Promise<unknown> {
-    if (!checkDeadline()) throw new ContainerPullError('Job deadline exceeded during manifest pull');
+    if (!checkDeadline())
+      throw new ContainerPullError('Job deadline exceeded during manifest pull');
     const url = ecrManifestUrl(ref.accountId, ref.region, ref.repositoryName, digest);
     const res = await this.ecrGet(url, ref, registryToken, MANIFEST_ACCEPT);
     if (res.status === 401 || res.status === 403) {
@@ -183,7 +203,9 @@ export class EcrRegistry implements EcrImagePuller {
     if (isIndex && rec.manifests?.length) {
       const chosen = pickPlatform(rec.manifests);
       if (!chosen?.digest) {
-        throw new ContainerPullError('ECR index has no linux platform manifest — refusing incomplete inventory');
+        throw new ContainerPullError(
+          'ECR index has no linux platform manifest — refusing incomplete inventory',
+        );
       }
       const nested = await this.getManifest(ref, chosen.digest, registryToken, checkDeadline);
       return this.requireImageManifest(nested);
@@ -197,7 +219,9 @@ export class EcrRegistry implements EcrImagePuller {
     }
     const rec = json as OciManifest;
     if (!Array.isArray(rec.layers)) {
-      throw new ContainerPullError('ECR image manifest missing layers — refusing incomplete inventory');
+      throw new ContainerPullError(
+        'ECR image manifest missing layers — refusing incomplete inventory',
+      );
     }
     return rec;
   }
@@ -238,12 +262,16 @@ export class EcrRegistry implements EcrImagePuller {
       'user-agent': 'ctem-platform',
       authorization: `Basic ${registryToken}`,
     };
-    const res = await this.fetchImpl(dest, {
-      method: 'GET',
-      headers,
-      redirect: followBlobRedirect ? 'manual' : 'error',
-      signal: AbortSignal.timeout(60_000),
-    });
+    const res = await registryPullFetch(
+      EGRESS_ECR_REGISTRY,
+      dest,
+      {
+        method: 'GET',
+        headers,
+        redirect: followBlobRedirect ? 'manual' : 'error',
+      },
+      this.fetchImpl,
+    );
 
     if (!followBlobRedirect) return res;
     if (res.status < 300 || res.status >= 400) return res;
@@ -252,18 +280,26 @@ export class EcrRegistry implements EcrImagePuller {
     if (!location) {
       throw new ContainerPullError('ECR blob redirect missing Location — refusing pull');
     }
-    const next = allowlistedEcrBlobRedirect(new URL(location, dest).toString(), ref.accountId, ref.region);
+    const next = allowlistedEcrBlobRedirect(
+      new URL(location, dest).toString(),
+      ref.accountId,
+      ref.region,
+    );
     const nextHeaders: Record<string, string> = { accept, 'user-agent': 'ctem-platform' };
     const nextHost = new URL(next).hostname;
     if (isEcrRegistryHost(nextHost, ref.accountId, ref.region)) {
       nextHeaders.authorization = `Basic ${registryToken}`;
     }
-    return this.fetchImpl(next, {
-      method: 'GET',
-      headers: nextHeaders,
-      redirect: 'error',
-      signal: AbortSignal.timeout(60_000),
-    });
+    return registryPullFetch(
+      EGRESS_ECR_REGISTRY,
+      next,
+      {
+        method: 'GET',
+        headers: nextHeaders,
+        redirect: 'error',
+      },
+      this.fetchImpl,
+    );
   }
 }
 
