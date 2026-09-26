@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { JiraChannel, jiraBasicAuth, jiraIssuePayload } from './jira.channel';
+import {
+  CircuitOpenError,
+  DEFAULT_CIRCUIT_BREAKER_CONFIG,
+  InternalHttpPolicy,
+  type CircuitBreakerConfig,
+} from '@ctem/resilience';
+import { JiraChannel, EGRESS_JIRA_API, jiraBasicAuth, jiraIssuePayload } from './jira.channel';
+import { SlackChannel, createNotificationEgressPolicy } from './slack.channel';
 import type { NotificationMessage } from './channel.registry';
 
 const SITE = 'https://acme.atlassian.net';
@@ -34,7 +41,24 @@ afterEach(() => {
   delete process.env.JIRA_BASE_URL;
   delete process.env.JIRA_PROJECT_KEY;
   delete process.env.JIRA_ISSUE_TYPE;
+  delete process.env.SLACK_WEBHOOK_URL;
 });
+
+function fastPolicy(overrides: Partial<CircuitBreakerConfig> = {}): InternalHttpPolicy {
+  return new InternalHttpPolicy(
+    {
+      ...DEFAULT_CIRCUIT_BREAKER_CONFIG,
+      failureThreshold: 1,
+      windowMs: 60_000,
+      cooldownMs: 60_000,
+      maxAttempts: 1,
+      baseDelayMs: 1,
+      timeoutMs: 10_000,
+      ...overrides,
+    },
+    { sleep: async () => undefined, random: () => 0 },
+  );
+}
 
 function stubFetch(status = 201): ReturnType<typeof vi.fn> {
   const fn = vi.fn(async () => new Response(JSON.stringify({ key: 'SEC-1' }), { status }));
@@ -106,5 +130,87 @@ describe('JiraChannel.send', () => {
     setJiraEnv();
     stubFetch(500);
     await expect(new JiraChannel().send(message())).rejects.toThrow(/responded 500/);
+  });
+
+  it('calls fetch once on a 503 and then throws (no second issue create)', async () => {
+    setJiraEnv();
+    const fetchFn = stubFetch(503);
+    await expect(new JiraChannel().send(message())).rejects.toThrow(/responded 503/);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a single attempt when CTEM_CB_MAX_ATTEMPTS is higher', async () => {
+    setJiraEnv();
+    const fetchFn = stubFetch(503);
+    const channel = new JiraChannel(
+      createNotificationEgressPolicy({ CTEM_CB_MAX_ATTEMPTS: '8', CTEM_CB_BASE_DELAY_MS: '1' }),
+    );
+    await expect(channel.send(message())).rejects.toThrow(/responded 503/);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('throws on an open circuit without calling fetch', async () => {
+    setJiraEnv();
+    const channel = new JiraChannel(fastPolicy());
+    const fetchFn = stubFetch(503);
+    await expect(channel.send(message())).rejects.toThrow(/responded 503/);
+    fetchFn.mockClear();
+    await expect(channel.send(message())).rejects.toMatchObject({
+      name: 'CircuitOpenError',
+      circuit: EGRESS_JIRA_API,
+    });
+    await expect(channel.send(message())).rejects.toBeInstanceOf(CircuitOpenError);
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it('still throws on 4xx and does not open the circuit', async () => {
+    setJiraEnv();
+    const channel = new JiraChannel(fastPolicy());
+    const fetchFn = stubFetch(400);
+    await expect(channel.send(message())).rejects.toThrow(/responded 400/);
+    fetchFn.mockResolvedValue(new Response(JSON.stringify({ key: 'SEC-1' }), { status: 201 }));
+    await channel.send(message());
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not count an allowlist refusal toward the circuit', async () => {
+    setJiraEnv();
+    const channel = new JiraChannel(fastPolicy());
+    const fetchFn = stubFetch();
+    process.env.JIRA_BASE_URL = 'https://user:pass@acme.atlassian.net';
+    await expect(channel.send(message())).rejects.toThrow(/userinfo/);
+    process.env.JIRA_BASE_URL = 'https://acme.atlassian.net:8443';
+    await expect(channel.send(message())).rejects.toThrow(/port/);
+    process.env.JIRA_BASE_URL = 'https://evil.example/jira';
+    await expect(channel.send(message())).rejects.toThrow(/only atlassian\.net/);
+    expect(fetchFn).not.toHaveBeenCalled();
+    process.env.JIRA_BASE_URL = SITE;
+    await channel.send(message());
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(fetchFn.mock.calls[0][0]).toBe(ISSUE_URL);
+  });
+
+  it('opens egress:jira-api without opening egress:slack-webhook', async () => {
+    setJiraEnv();
+    process.env.SLACK_WEBHOOK_URL = 'https://hooks.slack.com/services/TEST/HOOK/dummy';
+    const policy = fastPolicy();
+    const jira = new JiraChannel(policy);
+    const slack = new SlackChannel(policy);
+    const fetchFn = stubFetch(503);
+    await expect(jira.send(message())).rejects.toThrow(/responded 503/);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    fetchFn.mockClear();
+    await expect(jira.send(message())).rejects.toBeInstanceOf(CircuitOpenError);
+    expect(fetchFn).not.toHaveBeenCalled();
+
+    fetchFn.mockResolvedValue(new Response('ok', { status: 200 }));
+    await slack.send({
+      orgId,
+      template: 'policy.violated',
+      target: 'slack',
+      data: { findingId, policyId, actions: ['notify'] },
+    });
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(fetchFn.mock.calls[0][0]).toBe('https://hooks.slack.com/services/TEST/HOOK/dummy');
   });
 });

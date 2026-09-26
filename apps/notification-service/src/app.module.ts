@@ -5,11 +5,12 @@ import { ObservabilityModule, RequestContextMiddleware } from '@ctem/observabili
 import { AuthModule, InternalAuthGuard } from '@ctem/auth';
 import { EventsModule } from '@ctem/events';
 import { DbModule } from '@ctem/db';
+import { InternalHttpPolicy } from '@ctem/resilience';
 import { HealthController } from '@ctem/service-kit';
 import { NotificationConsumer } from './notification.consumer';
 import { ChannelRegistry } from './channels/channel.registry';
 import { JiraChannel } from './channels/jira.channel';
-import { SlackChannel } from './channels/slack.channel';
+import { SlackChannel, createNotificationEgressPolicy } from './channels/slack.channel';
 import { WebhookChannel } from './channels/webhook.channel';
 
 @Module({
@@ -21,6 +22,7 @@ import { WebhookChannel } from './channels/webhook.channel';
     SlackChannel,
     JiraChannel,
     NotificationConsumer,
+    { provide: InternalHttpPolicy, useFactory: () => createNotificationEgressPolicy() },
     { provide: APP_GUARD, useClass: InternalAuthGuard },
   ],
 })

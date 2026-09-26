@@ -1,20 +1,50 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { rootLogger } from '@ctem/observability';
+import { InternalHttpPolicy, loadCircuitBreakerConfig } from '@ctem/resilience';
 import type { NotificationChannel, NotificationMessage } from './channel.registry';
-import {
-  PLATFORM_SLACK_CREDENTIAL_REF,
-  requireSlackWebhookCredential,
-} from './credentials';
+import { PLATFORM_SLACK_CREDENTIAL_REF, requireSlackWebhookCredential } from './credentials';
 import { allowlistedSlackWebhookUrl, tenantSuppliedWebhookUrls } from './slack.egress';
+
+/**
+ * One breaker for every Slack incoming webhook. Not per org and not per message.
+ * Jira Cloud issue create uses the same policy under `egress:jira-api`.
+ */
+export const EGRESS_SLACK_WEBHOOK = 'egress:slack-webhook';
+
+/**
+ * Shared Slack + Jira egress policy (`@ctem/resilience` `InternalHttpPolicy`,
+ * the same type as the gateway and publishers).
+ *
+ * Attempts are always 1. These POSTs are not idempotent (Jira creates an issue
+ * per call), so JetStream redelivery is the only retry. Other platform
+ * `CTEM_CB_*` knobs (threshold, window, cooldown) still apply. No new env var.
+ */
+export function createNotificationEgressPolicy(
+  source: NodeJS.ProcessEnv = process.env,
+): InternalHttpPolicy {
+  return new InternalHttpPolicy(
+    { ...loadCircuitBreakerConfig(source), maxAttempts: 1 },
+    { log: rootLogger.child({ component: 'notification-egress' }) },
+  );
+}
 
 /**
  * Slack incoming webhook. The hook URL is platform-operated `env:SLACK_*`
  * only — never `message.target`, tenant config, body, or query.
+ *
+ * Allowlist checks run before the policy and do not count toward the circuit.
+ * The POST keeps its 10s timeout. An open circuit or a failed send throws so
+ * JetStream `notification-dispatch` naks and redelivers.
  */
 @Injectable()
 export class SlackChannel implements NotificationChannel {
   readonly name = 'slack';
   private readonly log = rootLogger.child({ component: 'slack-channel' });
+  private readonly policy: InternalHttpPolicy;
+
+  constructor(@Optional() policy?: InternalHttpPolicy) {
+    this.policy = policy ?? createNotificationEgressPolicy();
+  }
 
   async send(message: NotificationMessage): Promise<void> {
     const ignored = tenantSuppliedWebhookUrls(message);
@@ -25,15 +55,19 @@ export class SlackChannel implements NotificationChannel {
       );
     }
 
-    const url = allowlistedSlackWebhookUrl(requireSlackWebhookCredential(PLATFORM_SLACK_CREDENTIAL_REF));
+    const url = allowlistedSlackWebhookUrl(
+      requireSlackWebhookCredential(PLATFORM_SLACK_CREDENTIAL_REF),
+    );
     const body = JSON.stringify(slackPayload(message));
 
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body,
-      signal: AbortSignal.timeout(10_000),
-    });
+    const res = await this.policy.execute(EGRESS_SLACK_WEBHOOK, (_signal) =>
+      fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body,
+        signal: AbortSignal.timeout(10_000),
+      }),
+    );
 
     if (!res.ok) {
       throw new Error(`Slack webhook responded ${res.status}`);

@@ -1,17 +1,34 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { rootLogger } from '@ctem/observability';
+import { InternalHttpPolicy } from '@ctem/resilience';
 import type { NotificationChannel, NotificationMessage } from './channel.registry';
 import { PLATFORM_JIRA_CREDENTIAL_REF, requireJiraCredentials } from './credentials';
 import { jiraCreateIssueUrl, tenantSuppliedJiraUrls } from './jira.egress';
+import { createNotificationEgressPolicy } from './slack.channel';
+
+/**
+ * One breaker for every Jira Cloud issue create. Not per org and not per message.
+ */
+export const EGRESS_JIRA_API = 'egress:jira-api';
 
 /**
  * Jira Cloud issue create. The site URL is platform-operated `env:JIRA_*`
  * only — never `message.target`, tenant config, body, or query.
+ *
+ * Allowlist checks run before the policy and do not count toward the circuit.
+ * The POST keeps its 10s timeout and is not retried inside the policy (one
+ * attempt — a retry would create a second issue). An open circuit or a failed
+ * send throws so JetStream `notification-dispatch` naks and redelivers.
  */
 @Injectable()
 export class JiraChannel implements NotificationChannel {
   readonly name = 'jira';
   private readonly log = rootLogger.child({ component: 'jira-channel' });
+  private readonly policy: InternalHttpPolicy;
+
+  constructor(@Optional() policy?: InternalHttpPolicy) {
+    this.policy = policy ?? createNotificationEgressPolicy();
+  }
 
   async send(message: NotificationMessage): Promise<void> {
     const ignored = tenantSuppliedJiraUrls(message);
@@ -26,16 +43,18 @@ export class JiraChannel implements NotificationChannel {
     const url = jiraCreateIssueUrl(creds.baseUrl);
     const body = JSON.stringify(jiraIssuePayload(message, creds.projectKey, creds.issueType));
 
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        accept: 'application/json',
-        'content-type': 'application/json',
-        authorization: jiraBasicAuth(creds.email, creds.apiToken),
-      },
-      body,
-      signal: AbortSignal.timeout(10_000),
-    });
+    const res = await this.policy.execute(EGRESS_JIRA_API, (_signal) =>
+      fetch(url, {
+        method: 'POST',
+        headers: {
+          accept: 'application/json',
+          'content-type': 'application/json',
+          authorization: jiraBasicAuth(creds.email, creds.apiToken),
+        },
+        body,
+        signal: AbortSignal.timeout(10_000),
+      }),
+    );
 
     if (!res.ok) {
       throw new Error(`Jira issue create responded ${res.status}`);
