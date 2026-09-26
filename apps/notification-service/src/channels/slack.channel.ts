@@ -1,8 +1,9 @@
 import { Injectable, Optional } from '@nestjs/common';
 import { rootLogger } from '@ctem/observability';
-import { InternalHttpPolicy, loadCircuitBreakerConfig } from '@ctem/resilience';
+import { InternalHttpPolicy } from '@ctem/resilience';
 import type { NotificationChannel, NotificationMessage } from './channel.registry';
 import { PLATFORM_SLACK_CREDENTIAL_REF, requireSlackWebhookCredential } from './credentials';
+import { createNotificationEgressPolicy } from './notification-egress';
 import { allowlistedSlackWebhookUrl, tenantSuppliedWebhookUrls } from './slack.egress';
 
 /**
@@ -10,23 +11,6 @@ import { allowlistedSlackWebhookUrl, tenantSuppliedWebhookUrls } from './slack.e
  * Jira Cloud issue create uses the same policy under `egress:jira-api`.
  */
 export const EGRESS_SLACK_WEBHOOK = 'egress:slack-webhook';
-
-/**
- * Shared Slack + Jira egress policy (`@ctem/resilience` `InternalHttpPolicy`,
- * the same type as the gateway and publishers).
- *
- * Attempts are always 1. These POSTs are not idempotent (Jira creates an issue
- * per call), so JetStream redelivery is the only retry. Other platform
- * `CTEM_CB_*` knobs (threshold, window, cooldown) still apply. No new env var.
- */
-export function createNotificationEgressPolicy(
-  source: NodeJS.ProcessEnv = process.env,
-): InternalHttpPolicy {
-  return new InternalHttpPolicy(
-    { ...loadCircuitBreakerConfig(source), maxAttempts: 1 },
-    { log: rootLogger.child({ component: 'notification-egress' }) },
-  );
-}
 
 /**
  * Slack incoming webhook. The hook URL is platform-operated `env:SLACK_*`

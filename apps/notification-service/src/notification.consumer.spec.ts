@@ -9,7 +9,7 @@ import {
 import { ChannelRegistry } from './channels/channel.registry';
 import { JiraChannel } from './channels/jira.channel';
 import { SlackChannel } from './channels/slack.channel';
-import { WebhookChannel } from './channels/webhook.channel';
+import { EGRESS_TENANT_WEBHOOK, WebhookChannel } from './channels/webhook.channel';
 import { NotificationConsumer } from './notification.consumer';
 
 const orgId = '11111111-1111-4111-8111-111111111111';
@@ -170,6 +170,51 @@ describe('notification-dispatch consumer', () => {
       channel: 'jira',
       template: 'policy.violated',
       target: 'jira',
+      data: {},
+    });
+    await dispatch(handlers.get('notification-dispatch')!, msg);
+    expect(fetchFn).not.toHaveBeenCalled();
+    expect(msg.nak).toHaveBeenCalledTimes(1);
+    expect(msg.ack).not.toHaveBeenCalled();
+  });
+
+  it('naks an open tenant-webhook circuit and does not ack or fetch', async () => {
+    const policy = openOnFirstFailure();
+    const webhook = new WebhookChannel(policy);
+    const target = 'https://tenant.example/hooks/ctem';
+    const fetchFn = vi.fn(async () => new Response('unavailable', { status: 503 }));
+    vi.stubGlobal('fetch', fetchFn);
+    await expect(
+      webhook.send({ orgId, template: 'policy.violated', target, data: {} }),
+    ).rejects.toThrow(`Webhook ${target} responded 503`);
+    await expect(
+      webhook.send({ orgId, template: 'policy.violated', target, data: {} }),
+    ).rejects.toMatchObject({ name: 'CircuitOpenError', circuit: EGRESS_TENANT_WEBHOOK });
+    fetchFn.mockClear();
+
+    const handlers = new Map<string, (payload: unknown, envelope: unknown) => Promise<void>>();
+    const consumer = new NotificationConsumer(
+      {
+        subscribe: vi.fn(
+          async (
+            _subject: string,
+            options: { durable: string },
+            handler: (payload: unknown, envelope: unknown) => Promise<void>,
+          ) => {
+            handlers.set(options.durable, handler);
+          },
+        ),
+      } as unknown as EventBus,
+      new ChannelRegistry(),
+      webhook,
+      new SlackChannel(policy),
+      new JiraChannel(policy),
+    );
+    await consumer.onApplicationBootstrap();
+    const msg = jetstreamMessage({
+      channel: 'webhook',
+      template: 'policy.violated',
+      target,
       data: {},
     });
     await dispatch(handlers.get('notification-dispatch')!, msg);

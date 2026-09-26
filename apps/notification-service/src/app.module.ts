@@ -10,7 +10,8 @@ import { HealthController } from '@ctem/service-kit';
 import { NotificationConsumer } from './notification.consumer';
 import { ChannelRegistry } from './channels/channel.registry';
 import { JiraChannel } from './channels/jira.channel';
-import { SlackChannel, createNotificationEgressPolicy } from './channels/slack.channel';
+import { createNotificationEgressPolicy } from './channels/notification-egress';
+import { SlackChannel } from './channels/slack.channel';
 import { WebhookChannel } from './channels/webhook.channel';
 
 @Module({
