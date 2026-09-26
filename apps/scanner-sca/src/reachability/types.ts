@@ -3,7 +3,7 @@ import type { ResolvedComponent } from '../sbom.parser';
 export const REACHABILITY_VERDICTS = ['reachable', 'not_reachable', 'unknown'] as const;
 export type ReachabilityVerdict = (typeof REACHABILITY_VERDICTS)[number];
 
-export const REACHABILITY_LANGUAGES = ['javascript', 'python', 'go'] as const;
+export const REACHABILITY_LANGUAGES = ['javascript', 'python', 'go', 'rust'] as const;
 export type ReachabilityLanguage = (typeof REACHABILITY_LANGUAGES)[number];
 
 /**
@@ -15,7 +15,7 @@ export type ReachabilityLanguage = (typeof REACHABILITY_LANGUAGES)[number];
 export interface ReachabilityGraph {
   /** Languages for which at least one first-party source file was parsed. */
   languages: Set<ReachabilityLanguage>;
-  /** Package names (or Go import paths) referenced by first-party code. */
+  /** Package names (Go import paths, or Rust crate idents) referenced by first-party code. */
   imported: Map<ReachabilityLanguage, Set<string>>;
   /** Languages with unresolved dynamic imports — cannot prove not_reachable. */
   ambiguous: Set<ReachabilityLanguage>;
@@ -54,6 +54,7 @@ const ECOSYSTEM_LANGUAGE: Record<string, ReachabilityLanguage> = {
   npm: 'javascript',
   PyPI: 'python',
   Go: 'go',
+  'crates.io': 'rust',
 };
 
 export function languageForEcosystem(ecosystem: string): ReachabilityLanguage | undefined {
@@ -63,6 +64,24 @@ export function languageForEcosystem(ecosystem: string): ReachabilityLanguage | 
 export function normalizePyName(name: string): string {
   return name.toLowerCase().replace(/[-_.]+/g, '-');
 }
+
+/** crates.io package ids and Rust idents: case-insensitive, `-` matches `_`. */
+export function normalizeRustCrate(name: string): string {
+  return name.toLowerCase().replace(/-/g, '_');
+}
+
+/**
+ * Package name (normalized) → rustc library ident, when those differ.
+ * Fixed table only — no network lookup of lib names.
+ */
+const RUST_LIB_ALIASES: Readonly<Record<string, string>> = {
+  xml_rs: 'xml',
+  md_5: 'md5',
+  sha_1: 'sha1',
+  rust_crypto: 'crypto',
+  rust_ini: 'ini',
+  rust_s3: 's3',
+};
 
 /**
  * Verdict from a produced graph. Lockfile presence is not an input.
@@ -81,7 +100,22 @@ export function verdictForComponent(
   const imported = graph.imported.get(language) ?? new Set();
   if (isImported(component.name, component.ecosystem, imported)) return 'reachable';
   if (graph.truncated || graph.ambiguous.has(language)) return 'unknown';
+  if (language === 'rust' && rustPackageMayDifferFromLib(component.name)) return 'unknown';
   return 'not_reachable';
+}
+
+/** `xml-rs`, `md-5`, `rust-crypto`, and the same shapes: lib name may not be the package id. */
+function rustPackageMayDifferFromLib(name: string): boolean {
+  const hyphenated = name.toLowerCase().replace(/_/g, '-');
+  const underscored = name.toLowerCase().replace(/-/g, '_');
+  return (
+    /^rust-/.test(hyphenated) ||
+    /-rs$/.test(hyphenated) ||
+    /-\d+$/.test(hyphenated) ||
+    /^rust_/.test(underscored) ||
+    /_rs$/.test(underscored) ||
+    /_\d+$/.test(underscored)
+  );
 }
 
 function isImported(name: string, ecosystem: string, imported: Set<string>): boolean {
@@ -94,5 +128,20 @@ function isImported(name: string, ecosystem: string, imported: Set<string>): boo
   if (ecosystem === 'PyPI') {
     return imported.has(normalizePyName(name));
   }
+  if (ecosystem === 'crates.io') return rustCrateImported(name, imported);
   return imported.has(name);
+}
+
+function rustCrateImported(name: string, imported: Set<string>): boolean {
+  const needle = normalizeRustCrate(name);
+  if (rustImportHas(imported, needle)) return true;
+  const alias = RUST_LIB_ALIASES[needle];
+  return alias !== undefined && rustImportHas(imported, normalizeRustCrate(alias));
+}
+
+function rustImportHas(imported: Set<string>, needle: string): boolean {
+  for (const importedName of imported) {
+    if (normalizeRustCrate(importedName) === needle) return true;
+  }
+  return false;
 }
