@@ -12,6 +12,7 @@ import {
   type AwsService,
 } from './aws.egress';
 import { signAwsRequest } from './aws.sigv4';
+import { EGRESS_AWS_API, inventoryEgressFetch } from './inventory-egress';
 import { extractTagBlocks, xmlIsTruncated, xmlNextToken, xmlTag, xmlTags } from './aws.xml';
 
 export const AwsResourceType = z.enum([
@@ -422,11 +423,10 @@ export class AwsConnector implements AssetConnector {
   ): Promise<string> {
     // Belt: never send keys off the allowlist even if a caller built `signed`.
     allowlistedAwsUrl(signed.url);
-    const res = await fetch(signed.url, {
+    const res = await inventoryEgressFetch(EGRESS_AWS_API, signed.url, {
       method: signed.method,
       headers: signed.headers,
       body: signed.method === 'POST' ? signed.body : undefined,
-      signal: AbortSignal.timeout(20_000),
     });
     if (!res.ok) {
       throw new Error(`AWS ${service} API returned ${res.status} for ${action}`);

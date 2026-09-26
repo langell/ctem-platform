@@ -6,6 +6,7 @@ import type { AssetConnector, DiscoveryContext } from './connector.registry';
 import { requireAzureCredentials, type AzureCredentials } from './credentials';
 import { ACR_AAD_SCOPE, AZURE_GUID_RE, allowlistedAzureArmUrl } from './azure.egress';
 import { exchangeAzureAccessToken } from './azure.token';
+import { EGRESS_AZURE_API, inventoryEgressFetch } from './inventory-egress';
 import {
   ACR_REGISTRY_NAME_RE,
   ACR_REPOSITORY_RE,
@@ -499,11 +500,10 @@ export class AcrConnector implements AssetConnector {
       tenant: creds.tenantId,
       access_token: aadToken,
     }).toString();
-    const res = await fetch(url, {
+    const res = await inventoryEgressFetch(EGRESS_AZURE_API, url, {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
       body,
-      signal: AbortSignal.timeout(20_000),
     });
     if (!res.ok) {
       throw new Error(`ACR oauth exchange returned ${res.status}`);
@@ -529,11 +529,10 @@ export class AcrConnector implements AssetConnector {
       scope,
       refresh_token: refreshToken,
     }).toString();
-    const res = await fetch(url, {
+    const res = await inventoryEgressFetch(EGRESS_AZURE_API, url, {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
       body,
-      signal: AbortSignal.timeout(20_000),
     });
     if (!res.ok) {
       throw new Error(`ACR oauth token returned ${res.status}`);
@@ -547,13 +546,12 @@ export class AcrConnector implements AssetConnector {
 
   private async getArmJson(url: string, accessToken: string, label: string): Promise<unknown> {
     allowlistedAzureArmUrl(url);
-    const res = await fetch(url, {
+    const res = await inventoryEgressFetch(EGRESS_AZURE_API, url, {
       method: 'GET',
       headers: {
         accept: 'application/json',
         authorization: `Bearer ${accessToken}`,
       },
-      signal: AbortSignal.timeout(20_000),
     });
     if (!res.ok) {
       throw new Error(`ACR ${label} ARM API returned ${res.status}`);
@@ -568,13 +566,12 @@ export class AcrConnector implements AssetConnector {
     label: string,
   ): Promise<{ json: unknown; next: string | undefined }> {
     const dest = allowlistedAcrDataUrl(url, loginServer);
-    const res = await fetch(dest, {
+    const res = await inventoryEgressFetch(EGRESS_AZURE_API, dest, {
       method: 'GET',
       headers: {
         accept: 'application/json',
         authorization: `Bearer ${accessToken}`,
       },
-      signal: AbortSignal.timeout(20_000),
     });
     if (!res.ok) {
       throw new Error(`ACR ${label} API returned ${res.status}`);

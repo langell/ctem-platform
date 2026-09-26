@@ -25,7 +25,9 @@ import {
   normalizeDiscoveredName,
   refuseTenantDnsDial,
   type CrtShGet,
+  type CrtShHttpResult,
 } from './dns.egress';
+import { EGRESS_DNS_CT, inventoryEgressExecute } from './inventory-egress';
 
 export interface OsDnsResolver {
   resolve4(hostname: string): Promise<string[]>;
@@ -244,7 +246,7 @@ export class DnsEnumConnector implements AssetConnector {
       const parsed = new URL(allowlisted);
       const path = `${parsed.pathname}${parsed.search}`;
 
-      const res = await this.crtShGet({
+      const res = await this.ctRequest({
         connectIp: addresses[0]!,
         path,
         timeoutMs: DNS_CT_TIMEOUT_MS,
@@ -268,6 +270,30 @@ export class DnsEnumConnector implements AssetConnector {
     }
 
     return names;
+  }
+
+  /**
+   * crt.sh HTTP on `egress:dns-ct`. The caller allowlists `url` before this
+   * runs, so a refused host never reaches the circuit. An open circuit or
+   * exhausted retry propagates and fails the sync.
+   */
+  private async ctRequest(args: {
+    connectIp: string;
+    path: string;
+    timeoutMs: number;
+    maxBytes: number;
+  }): Promise<CrtShHttpResult> {
+    let captured: CrtShHttpResult | undefined;
+    await inventoryEgressExecute(EGRESS_DNS_CT, async (signal) => {
+      const http = await this.crtShGet({ ...args, signal });
+      captured = http;
+      const status = http.statusCode >= 100 && http.statusCode <= 599 ? http.statusCode : 500;
+      return new Response(http.body, { status });
+    });
+    if (!captured) {
+      throw new Error('DNS CT listing failed — refusing incomplete inventory');
+    }
+    return captured;
   }
 
   /** Resolve crt.sh via the OS resolver; refuse private/unresolved before HTTPS. */

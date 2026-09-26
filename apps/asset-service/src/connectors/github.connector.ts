@@ -5,6 +5,7 @@ import { rootLogger } from '@ctem/observability';
 import type { UpsertAssetRequest } from '@ctem/contracts';
 import type { AssetConnector, DiscoveryContext } from './connector.registry';
 import { resolveCredential } from './credentials';
+import { EGRESS_GITHUB_API, inventoryEgressFetch } from './inventory-egress';
 
 export interface GitHubRepo {
   name: string;
@@ -114,15 +115,18 @@ export class GitHubConnector implements AssetConnector {
 
     for (let page = 1; page <= GITHUB_MAX_PAGES; page++) {
       const sep = path.includes('?') ? '&' : '?';
-      const res = await fetch(`${base}${path}${sep}per_page=${GITHUB_PER_PAGE}&page=${page}`, {
-        headers: {
-          accept: 'application/vnd.github+json',
-          'x-github-api-version': '2022-11-28',
-          'user-agent': 'ctem-platform',
-          ...(token ? { authorization: `Bearer ${token}` } : {}),
+      const res = await inventoryEgressFetch(
+        EGRESS_GITHUB_API,
+        `${base}${path}${sep}per_page=${GITHUB_PER_PAGE}&page=${page}`,
+        {
+          headers: {
+            accept: 'application/vnd.github+json',
+            'x-github-api-version': '2022-11-28',
+            'user-agent': 'ctem-platform',
+            ...(token ? { authorization: `Bearer ${token}` } : {}),
+          },
         },
-        signal: AbortSignal.timeout(20_000),
-      });
+      );
       if (!res.ok) {
         throw new Error(`GitHub API returned ${res.status} for ${path} (page ${page})`);
       }

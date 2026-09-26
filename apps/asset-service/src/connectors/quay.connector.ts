@@ -12,6 +12,7 @@ import {
   quayTagsUrl,
   refuseTenantWritableEndpoint,
 } from './quay.egress';
+import { EGRESS_QUAY_API, inventoryEgressFetch } from './inventory-egress';
 
 export const QuayConnectorConfig = z.object({
   /** Quay.org / user id whose repositories to inventory. Never a host. */
@@ -298,14 +299,13 @@ export class QuayConnector implements AssetConnector {
   private async getJson(url: string, token: string, label: string): Promise<unknown> {
     // Belt: never send the bearer token off quay.io /api/v1 even if a caller built `url`.
     const dest = allowlistedQuayApiUrl(url);
-    const res = await fetch(dest, {
+    const res = await inventoryEgressFetch(EGRESS_QUAY_API, dest, {
       method: 'GET',
       headers: {
         accept: 'application/json',
         'user-agent': 'ctem-platform',
         authorization: `Bearer ${token}`,
       },
-      signal: AbortSignal.timeout(20_000),
     });
     if (!res.ok) {
       throw new Error(`Quay ${label} API returned ${res.status}`);

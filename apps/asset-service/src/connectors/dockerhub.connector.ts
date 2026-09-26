@@ -13,6 +13,7 @@ import {
   dockerhubTagsUrl,
   refuseTenantWritableEndpoint,
 } from './dockerhub.egress';
+import { EGRESS_DOCKERHUB_API, inventoryEgressFetch } from './inventory-egress';
 
 export const DockerhubConnectorConfig = z.object({
   /** Docker Hub org or user id whose repositories to inventory. Never a host. */
@@ -290,7 +291,7 @@ export class DockerhubConnector implements AssetConnector {
 
   private async login(creds: DockerhubCredentials): Promise<string> {
     const dest = allowlistedDockerhubUrl(dockerhubLoginUrl());
-    const res = await fetch(dest, {
+    const res = await inventoryEgressFetch(EGRESS_DOCKERHUB_API, dest, {
       method: 'POST',
       headers: {
         accept: 'application/json',
@@ -299,7 +300,6 @@ export class DockerhubConnector implements AssetConnector {
       },
       body: JSON.stringify({ username: creds.username, password: creds.token }),
       redirect: 'error',
-      signal: AbortSignal.timeout(20_000),
     });
     if (!res.ok) {
       throw new Error(`Docker Hub login API returned ${res.status}`);
@@ -316,7 +316,7 @@ export class DockerhubConnector implements AssetConnector {
   private async getJson(url: string, token: string, label: string): Promise<unknown> {
     // Belt: never send the Hub JWT off hub.docker.com even if a caller built `url`.
     const dest = allowlistedDockerhubUrl(url);
-    const res = await fetch(dest, {
+    const res = await inventoryEgressFetch(EGRESS_DOCKERHUB_API, dest, {
       method: 'GET',
       headers: {
         accept: 'application/json',
@@ -324,7 +324,6 @@ export class DockerhubConnector implements AssetConnector {
         authorization: `JWT ${token}`,
       },
       redirect: 'error',
-      signal: AbortSignal.timeout(20_000),
     });
     if (!res.ok) {
       throw new Error(`Docker Hub ${label} API returned ${res.status}`);

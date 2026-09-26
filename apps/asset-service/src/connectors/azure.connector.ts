@@ -14,6 +14,7 @@ import {
   refuseTenantWritableEndpoint,
 } from './azure.egress';
 import { exchangeAzureAccessToken } from './azure.token';
+import { EGRESS_AZURE_API, inventoryEgressFetch } from './inventory-egress';
 
 export const AzureResourceType = z.enum([
   'virtual_machine',
@@ -442,13 +443,12 @@ export class AzureConnector implements AssetConnector {
   private async getJson(url: string, accessToken: string, label: string): Promise<unknown> {
     // Belt: never send the bearer token off the ARM allowlist even if a caller built `url`.
     allowlistedAzureArmUrl(url);
-    const res = await fetch(url, {
+    const res = await inventoryEgressFetch(EGRESS_AZURE_API, url, {
       method: 'GET',
       headers: {
         accept: 'application/json',
         authorization: `Bearer ${accessToken}`,
       },
-      signal: AbortSignal.timeout(20_000),
     });
     if (!res.ok) {
       throw new Error(`Azure ${label} API returned ${res.status}`);

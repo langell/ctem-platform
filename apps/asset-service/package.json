@@ -25,6 +25,7 @@
     "@ctem/contracts": "workspace:*",
     "@ctem/config": "workspace:*",
     "@ctem/observability": "workspace:*",
+    "@ctem/resilience": "workspace:*",
     "@ctem/auth": "workspace:*",
     "@ctem/db": "workspace:*",
     "@ctem/events": "workspace:*",
