@@ -6,7 +6,8 @@ import {
   type CircuitBreakerConfig,
 } from '@ctem/resilience';
 import { JiraChannel, EGRESS_JIRA_API, jiraBasicAuth, jiraIssuePayload } from './jira.channel';
-import { SlackChannel, createNotificationEgressPolicy } from './slack.channel';
+import { createNotificationEgressPolicy } from './notification-egress';
+import { SlackChannel } from './slack.channel';
 import type { NotificationMessage } from './channel.registry';
 
 const SITE = 'https://acme.atlassian.net';
