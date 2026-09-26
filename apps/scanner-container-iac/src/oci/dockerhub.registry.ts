@@ -11,6 +11,7 @@ import {
   ContainerEgressError,
 } from '../container.egress';
 import { DockerhubEgressError, isDockerhubRegistryHost } from '../dockerhub.egress';
+import { EGRESS_DOCKERHUB_REGISTRY, registryPullFetch } from './pull-egress';
 import {
   ContainerPullError,
   MAX_IMAGE_LAYERS,
@@ -38,8 +39,9 @@ export interface DockerhubImagePuller {
  * In-process OCI pull from allowlisted `registry-1.docker.io`.
  * Auth is HTTP Basic (`DOCKERHUB_USERNAME` + `DOCKERHUB_TOKEN`) on exact
  * `auth.docker.io` `/token`, then a registry bearer on
- * `registry-1.docker.io`. No docker / podman / skopeo / crane. No Hub
- * listing host (`hub.docker.com`). No CDN follow. Layer blobs are cached
+ * `registry-1.docker.io`. Token, manifest, and blob HTTP use
+ * `@ctem/resilience` (`egress:dockerhub-registry`). No docker / podman /
+ * skopeo / crane. No Hub listing host (`hub.docker.com`). No CDN follow. Layer blobs are cached
  * by digest for the life of the worker. Pull is by digest only.
  */
 @Injectable()
@@ -62,7 +64,12 @@ export class DockerhubRegistry implements DockerhubImagePuller {
 
     const registryToken = await this.registryToken(ref, credentials, checkDeadline);
     const manifestJson = await this.getManifest(ref, ref.digest, registryToken, checkDeadline);
-    const platform = await this.resolvePlatformManifest(ref, manifestJson, registryToken, checkDeadline);
+    const platform = await this.resolvePlatformManifest(
+      ref,
+      manifestJson,
+      registryToken,
+      checkDeadline,
+    );
     const layers = platform.layers ?? [];
     if (layers.length > MAX_IMAGE_LAYERS) {
       throw new ContainerPullError(
@@ -73,12 +80,16 @@ export class DockerhubRegistry implements DockerhubImagePuller {
     const snapshots: LayerSnapshot[] = [];
     for (const layer of layers) {
       if (!checkDeadline()) {
-        throw new ContainerPullError('Job deadline exceeded mid-pull — refusing incomplete inventory');
+        throw new ContainerPullError(
+          'Job deadline exceeded mid-pull — refusing incomplete inventory',
+        );
       }
       const digest = layer.digest;
       const mediaType = layer.mediaType ?? '';
       if (!digest || !/^sha256:[a-f0-9]{64}$/i.test(digest)) {
-        throw new ContainerPullError('Layer descriptor missing sha256 digest — refusing incomplete inventory');
+        throw new ContainerPullError(
+          'Layer descriptor missing sha256 digest — refusing incomplete inventory',
+        );
       }
       const cached = this.layerCache.get(digest.toLowerCase());
       if (cached) {
@@ -115,15 +126,19 @@ export class DockerhubRegistry implements DockerhubImagePuller {
     );
     let res: Response;
     try {
-      res = await this.fetchImpl(url, {
-        method: 'GET',
-        headers: {
-          'user-agent': 'ctem-platform',
-          authorization: `Basic ${basic}`,
+      res = await registryPullFetch(
+        EGRESS_DOCKERHUB_REGISTRY,
+        url,
+        {
+          method: 'GET',
+          headers: {
+            'user-agent': 'ctem-platform',
+            authorization: `Basic ${basic}`,
+          },
+          redirect: 'error',
         },
-        redirect: 'error',
-        signal: AbortSignal.timeout(20_000),
-      });
+        this.fetchImpl,
+      );
     } catch (err) {
       if (err instanceof DockerhubEgressError || err instanceof ContainerEgressError) throw err;
       throw new ContainerPullError(
@@ -131,10 +146,14 @@ export class DockerhubRegistry implements DockerhubImagePuller {
       );
     }
     if (res.status === 401 || res.status === 403) {
-      throw new ContainerPullError(`Docker Hub token exchange returned ${res.status} — refusing pull`);
+      throw new ContainerPullError(
+        `Docker Hub token exchange returned ${res.status} — refusing pull`,
+      );
     }
     if (!res.ok) {
-      throw new ContainerPullError(`Docker Hub token exchange returned ${res.status} — refusing pull`);
+      throw new ContainerPullError(
+        `Docker Hub token exchange returned ${res.status} — refusing pull`,
+      );
     }
     let json: unknown;
     try {
@@ -142,7 +161,8 @@ export class DockerhubRegistry implements DockerhubImagePuller {
     } catch {
       throw new ContainerPullError('Docker Hub token exchange was not JSON — refusing pull');
     }
-    const rec = json && typeof json === 'object' ? (json as { token?: unknown; access_token?: unknown }) : {};
+    const rec =
+      json && typeof json === 'object' ? (json as { token?: unknown; access_token?: unknown }) : {};
     const token =
       typeof rec.token === 'string'
         ? rec.token
@@ -161,14 +181,19 @@ export class DockerhubRegistry implements DockerhubImagePuller {
     registryToken: string,
     checkDeadline: () => boolean,
   ): Promise<unknown> {
-    if (!checkDeadline()) throw new ContainerPullError('Job deadline exceeded during manifest pull');
+    if (!checkDeadline())
+      throw new ContainerPullError('Job deadline exceeded during manifest pull');
     const url = dockerhubManifestUrl(ref.namespace, ref.repository, digest);
     const res = await this.dockerhubGet(url, registryToken, MANIFEST_ACCEPT);
     if (res.status === 401 || res.status === 403) {
-      throw new ContainerPullError(`Docker Hub manifest GET returned ${res.status} — refusing pull`);
+      throw new ContainerPullError(
+        `Docker Hub manifest GET returned ${res.status} — refusing pull`,
+      );
     }
     if (!res.ok) {
-      throw new ContainerPullError(`Docker Hub manifest GET returned ${res.status} — refusing pull`);
+      throw new ContainerPullError(
+        `Docker Hub manifest GET returned ${res.status} — refusing pull`,
+      );
     }
     return res.json();
   }
@@ -201,11 +226,15 @@ export class DockerhubRegistry implements DockerhubImagePuller {
 
   private requireImageManifest(json: unknown): OciManifest {
     if (!json || typeof json !== 'object') {
-      throw new ContainerPullError('Docker Hub manifest was not JSON — refusing incomplete inventory');
+      throw new ContainerPullError(
+        'Docker Hub manifest was not JSON — refusing incomplete inventory',
+      );
     }
     const rec = json as OciManifest;
     if (!Array.isArray(rec.layers)) {
-      throw new ContainerPullError('Docker Hub image manifest missing layers — refusing incomplete inventory');
+      throw new ContainerPullError(
+        'Docker Hub image manifest missing layers — refusing incomplete inventory',
+      );
     }
     return rec;
   }
@@ -244,12 +273,16 @@ export class DockerhubRegistry implements DockerhubImagePuller {
       'user-agent': 'ctem-platform',
       authorization: `Bearer ${registryToken}`,
     };
-    const res = await this.fetchImpl(dest, {
-      method: 'GET',
-      headers,
-      redirect: followBlobRedirect ? 'manual' : 'error',
-      signal: AbortSignal.timeout(60_000),
-    });
+    const res = await registryPullFetch(
+      EGRESS_DOCKERHUB_REGISTRY,
+      dest,
+      {
+        method: 'GET',
+        headers,
+        redirect: followBlobRedirect ? 'manual' : 'error',
+      },
+      this.fetchImpl,
+    );
 
     if (!followBlobRedirect) return res;
     if (res.status < 300 || res.status >= 400) return res;
@@ -264,12 +297,16 @@ export class DockerhubRegistry implements DockerhubImagePuller {
     if (isDockerhubRegistryHost(nextHost)) {
       nextHeaders.authorization = `Bearer ${registryToken}`;
     }
-    return this.fetchImpl(next, {
-      method: 'GET',
-      headers: nextHeaders,
-      redirect: 'error',
-      signal: AbortSignal.timeout(60_000),
-    });
+    return registryPullFetch(
+      EGRESS_DOCKERHUB_REGISTRY,
+      next,
+      {
+        method: 'GET',
+        headers: nextHeaders,
+        redirect: 'error',
+      },
+      this.fetchImpl,
+    );
   }
 }
 

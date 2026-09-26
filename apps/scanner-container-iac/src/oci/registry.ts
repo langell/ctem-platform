@@ -9,13 +9,8 @@ import {
   isGhcrRegistryHost,
   ContainerEgressError,
 } from '../container.egress';
-import {
-  decompressLayer,
-  isInventoryPath,
-  parseTar,
-  LayerUnpackError,
-  type TarEntry,
-} from './tar';
+import { decompressLayer, isInventoryPath, parseTar, LayerUnpackError, type TarEntry } from './tar';
+import { EGRESS_GHCR_REGISTRY, registryPullFetch } from './pull-egress';
 
 export class ContainerPullError extends Error {
   constructor(message: string) {
@@ -77,6 +72,7 @@ export interface OciManifest {
 
 /**
  * In-process OCI pull from allowlisted ghcr.io. No docker/podman/skopeo/crane.
+ * Token, manifest, and blob HTTP use `@ctem/resilience` (`egress:ghcr-registry`).
  * Layer blobs are cached by digest for the life of the worker.
  */
 @Injectable()
@@ -103,7 +99,12 @@ export class GhcrRegistry implements ImagePuller {
 
     const registryToken = await this.registryToken(ref, token);
     const manifestJson = await this.getManifest(ref, ref.digest, registryToken, checkDeadline);
-    const platform = await this.resolvePlatformManifest(ref, manifestJson, registryToken, checkDeadline);
+    const platform = await this.resolvePlatformManifest(
+      ref,
+      manifestJson,
+      registryToken,
+      checkDeadline,
+    );
     const layers = platform.layers ?? [];
     if (layers.length > MAX_IMAGE_LAYERS) {
       throw new ContainerPullError(
@@ -114,12 +115,16 @@ export class GhcrRegistry implements ImagePuller {
     const snapshots: LayerSnapshot[] = [];
     for (const layer of layers) {
       if (!checkDeadline()) {
-        throw new ContainerPullError('Job deadline exceeded mid-pull — refusing incomplete inventory');
+        throw new ContainerPullError(
+          'Job deadline exceeded mid-pull — refusing incomplete inventory',
+        );
       }
       const digest = layer.digest;
       const mediaType = layer.mediaType ?? '';
       if (!digest || !/^sha256:[a-f0-9]{64}$/i.test(digest)) {
-        throw new ContainerPullError('Layer descriptor missing sha256 digest — refusing incomplete inventory');
+        throw new ContainerPullError(
+          'Layer descriptor missing sha256 digest — refusing incomplete inventory',
+        );
       }
       const cached = this.layerCache.get(digest.toLowerCase());
       if (cached) {
@@ -135,11 +140,19 @@ export class GhcrRegistry implements ImagePuller {
     return { digest: ref.digest, owner: ref.owner, name: ref.name, layers: snapshots };
   }
 
-  private async registryToken(ref: GhcrImageRef, githubToken: string | undefined): Promise<string | undefined> {
+  private async registryToken(
+    ref: GhcrImageRef,
+    githubToken: string | undefined,
+  ): Promise<string | undefined> {
     const url = ghcrTokenUrl(ref.owner, ref.name);
     const headers: Record<string, string> = { 'user-agent': 'ctem-platform' };
     if (githubToken) headers.authorization = `Bearer ${githubToken}`;
-    const res = await this.fetchImpl(url, { method: 'GET', headers, signal: AbortSignal.timeout(20_000) });
+    const res = await registryPullFetch(
+      EGRESS_GHCR_REGISTRY,
+      url,
+      { method: 'GET', headers },
+      this.fetchImpl,
+    );
     if (res.status === 404 || res.status === 401 || res.status === 403) {
       if (!githubToken) {
         throw new ContainerPullError(
@@ -152,7 +165,12 @@ export class GhcrRegistry implements ImagePuller {
       throw new ContainerPullError(`GHCR token exchange returned ${res.status} — refusing pull`);
     }
     const body = (await res.json()) as { token?: unknown; access_token?: unknown };
-    const token = typeof body.token === 'string' ? body.token : typeof body.access_token === 'string' ? body.access_token : undefined;
+    const token =
+      typeof body.token === 'string'
+        ? body.token
+        : typeof body.access_token === 'string'
+          ? body.access_token
+          : undefined;
     if (!token || !token.trim()) {
       throw new ContainerPullError('GHCR token exchange returned no token — refusing pull');
     }
@@ -165,7 +183,8 @@ export class GhcrRegistry implements ImagePuller {
     registryToken: string | undefined,
     checkDeadline: () => boolean,
   ): Promise<unknown> {
-    if (!checkDeadline()) throw new ContainerPullError('Job deadline exceeded during manifest pull');
+    if (!checkDeadline())
+      throw new ContainerPullError('Job deadline exceeded during manifest pull');
     const url = ghcrManifestUrl(ref.owner, ref.name, digest);
     const res = await this.ghcrGet(url, registryToken, MANIFEST_ACCEPT);
     if (res.status === 401 || res.status === 403) {
@@ -193,7 +212,9 @@ export class GhcrRegistry implements ImagePuller {
     if (isIndex && rec.manifests?.length) {
       const chosen = pickPlatform(rec.manifests);
       if (!chosen?.digest) {
-        throw new ContainerPullError('GHCR index has no linux platform manifest — refusing incomplete inventory');
+        throw new ContainerPullError(
+          'GHCR index has no linux platform manifest — refusing incomplete inventory',
+        );
       }
       const nested = await this.getManifest(ref, chosen.digest, registryToken, checkDeadline);
       return this.requireImageManifest(nested);
@@ -207,7 +228,9 @@ export class GhcrRegistry implements ImagePuller {
     }
     const rec = json as OciManifest;
     if (!Array.isArray(rec.layers)) {
-      throw new ContainerPullError('GHCR image manifest missing layers — refusing incomplete inventory');
+      throw new ContainerPullError(
+        'GHCR image manifest missing layers — refusing incomplete inventory',
+      );
     }
     return rec;
   }
@@ -247,12 +270,16 @@ export class GhcrRegistry implements ImagePuller {
       'user-agent': 'ctem-platform',
     };
     if (registryToken) headers.authorization = `Bearer ${registryToken}`;
-    const res = await this.fetchImpl(dest, {
-      method: 'GET',
-      headers,
-      redirect: followBlobRedirect ? 'manual' : 'error',
-      signal: AbortSignal.timeout(60_000),
-    });
+    const res = await registryPullFetch(
+      EGRESS_GHCR_REGISTRY,
+      dest,
+      {
+        method: 'GET',
+        headers,
+        redirect: followBlobRedirect ? 'manual' : 'error',
+      },
+      this.fetchImpl,
+    );
 
     if (!followBlobRedirect) return res;
     if (res.status < 300 || res.status >= 400) return res;
@@ -268,12 +295,16 @@ export class GhcrRegistry implements ImagePuller {
     if (isGhcrRegistryHost(nextHost) && registryToken) {
       nextHeaders.authorization = `Bearer ${registryToken}`;
     }
-    return this.fetchImpl(next, {
-      method: 'GET',
-      headers: nextHeaders,
-      redirect: 'error',
-      signal: AbortSignal.timeout(60_000),
-    });
+    return registryPullFetch(
+      EGRESS_GHCR_REGISTRY,
+      next,
+      {
+        method: 'GET',
+        headers: nextHeaders,
+        redirect: 'error',
+      },
+      this.fetchImpl,
+    );
   }
 }
 

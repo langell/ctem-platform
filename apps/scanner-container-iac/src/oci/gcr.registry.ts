@@ -13,6 +13,7 @@ import {
 } from '../container.egress';
 import { allowlistedGcpTokenUrl, GCP_TOKEN_URL, GcpEgressError } from '../gcp.egress';
 import { exchangeGcpAccessToken } from '../gcp.jwt';
+import { EGRESS_GCR_REGISTRY, registryPullFetch } from './pull-egress';
 import {
   ContainerPullError,
   MAX_IMAGE_LAYERS,
@@ -38,10 +39,12 @@ export interface GcrImagePuller {
 
 /**
  * In-process OCI pull from allowlisted `{location}-docker.pkg.dev`.
- * Auth is a Google OAuth access token from `oauth2.googleapis.com`, then
- * a docker registry token on the pinned AR docker host. No docker / podman
- * / skopeo / crane. Layer blobs are cached by digest for the life of the
- * worker. Pull is by digest only.
+ * Auth is a Google OAuth access token from `oauth2.googleapis.com` (that
+ * host stays on its own allowlisted fetch — it is not this circuit), then
+ * a docker registry token on the pinned AR docker host. Docker token,
+ * manifest, and blob HTTP use `@ctem/resilience` (`egress:gcr-registry`).
+ * No docker / podman / skopeo / crane. Layer blobs are cached by digest for the
+ * life of the worker. Pull is by digest only.
  */
 @Injectable()
 export class GcrRegistry implements GcrImagePuller {
@@ -63,7 +66,12 @@ export class GcrRegistry implements GcrImagePuller {
 
     const registryToken = await this.registryToken(ref, credentials, checkDeadline);
     const manifestJson = await this.getManifest(ref, ref.digest, registryToken, checkDeadline);
-    const platform = await this.resolvePlatformManifest(ref, manifestJson, registryToken, checkDeadline);
+    const platform = await this.resolvePlatformManifest(
+      ref,
+      manifestJson,
+      registryToken,
+      checkDeadline,
+    );
     const layers = platform.layers ?? [];
     if (layers.length > MAX_IMAGE_LAYERS) {
       throw new ContainerPullError(
@@ -74,12 +82,16 @@ export class GcrRegistry implements GcrImagePuller {
     const snapshots: LayerSnapshot[] = [];
     for (const layer of layers) {
       if (!checkDeadline()) {
-        throw new ContainerPullError('Job deadline exceeded mid-pull — refusing incomplete inventory');
+        throw new ContainerPullError(
+          'Job deadline exceeded mid-pull — refusing incomplete inventory',
+        );
       }
       const digest = layer.digest;
       const mediaType = layer.mediaType ?? '';
       if (!digest || !/^sha256:[a-f0-9]{64}$/i.test(digest)) {
-        throw new ContainerPullError('Layer descriptor missing sha256 digest — refusing incomplete inventory');
+        throw new ContainerPullError(
+          'Layer descriptor missing sha256 digest — refusing incomplete inventory',
+        );
       }
       const cached = this.layerCache.get(digest.toLowerCase());
       if (cached) {
@@ -124,19 +136,27 @@ export class GcrRegistry implements GcrImagePuller {
     }
 
     const url = gcrTokenUrl(ref.location, ref.projectId, ref.repository, ref.image);
-    const res = await this.fetchImpl(url, {
-      method: 'GET',
-      headers: {
-        'user-agent': 'ctem-platform',
-        authorization: `Bearer ${googleToken}`,
+    const res = await registryPullFetch(
+      EGRESS_GCR_REGISTRY,
+      url,
+      {
+        method: 'GET',
+        headers: {
+          'user-agent': 'ctem-platform',
+          authorization: `Bearer ${googleToken}`,
+        },
       },
-      signal: AbortSignal.timeout(20_000),
-    });
+      this.fetchImpl,
+    );
     if (res.status === 401 || res.status === 403) {
-      throw new ContainerPullError(`GCR docker token exchange returned ${res.status} — refusing pull`);
+      throw new ContainerPullError(
+        `GCR docker token exchange returned ${res.status} — refusing pull`,
+      );
     }
     if (!res.ok) {
-      throw new ContainerPullError(`GCR docker token exchange returned ${res.status} — refusing pull`);
+      throw new ContainerPullError(
+        `GCR docker token exchange returned ${res.status} — refusing pull`,
+      );
     }
     let json: unknown;
     try {
@@ -144,7 +164,8 @@ export class GcrRegistry implements GcrImagePuller {
     } catch {
       throw new ContainerPullError('GCR docker token exchange was not JSON — refusing pull');
     }
-    const rec = json && typeof json === 'object' ? (json as { token?: unknown; access_token?: unknown }) : {};
+    const rec =
+      json && typeof json === 'object' ? (json as { token?: unknown; access_token?: unknown }) : {};
     const token =
       typeof rec.token === 'string'
         ? rec.token
@@ -163,7 +184,8 @@ export class GcrRegistry implements GcrImagePuller {
     registryToken: string,
     checkDeadline: () => boolean,
   ): Promise<unknown> {
-    if (!checkDeadline()) throw new ContainerPullError('Job deadline exceeded during manifest pull');
+    if (!checkDeadline())
+      throw new ContainerPullError('Job deadline exceeded during manifest pull');
     const url = gcrManifestUrl(ref.location, ref.projectId, ref.repository, ref.image, digest);
     const res = await this.gcrGet(url, ref, registryToken, MANIFEST_ACCEPT);
     if (res.status === 401 || res.status === 403) {
@@ -191,7 +213,9 @@ export class GcrRegistry implements GcrImagePuller {
     if (isIndex && rec.manifests?.length) {
       const chosen = pickPlatform(rec.manifests);
       if (!chosen?.digest) {
-        throw new ContainerPullError('GCR index has no linux platform manifest — refusing incomplete inventory');
+        throw new ContainerPullError(
+          'GCR index has no linux platform manifest — refusing incomplete inventory',
+        );
       }
       const nested = await this.getManifest(ref, chosen.digest, registryToken, checkDeadline);
       return this.requireImageManifest(nested);
@@ -205,7 +229,9 @@ export class GcrRegistry implements GcrImagePuller {
     }
     const rec = json as OciManifest;
     if (!Array.isArray(rec.layers)) {
-      throw new ContainerPullError('GCR image manifest missing layers — refusing incomplete inventory');
+      throw new ContainerPullError(
+        'GCR image manifest missing layers — refusing incomplete inventory',
+      );
     }
     return rec;
   }
@@ -246,12 +272,16 @@ export class GcrRegistry implements GcrImagePuller {
       'user-agent': 'ctem-platform',
       authorization: `Bearer ${registryToken}`,
     };
-    const res = await this.fetchImpl(dest, {
-      method: 'GET',
-      headers,
-      redirect: followBlobRedirect ? 'manual' : 'error',
-      signal: AbortSignal.timeout(60_000),
-    });
+    const res = await registryPullFetch(
+      EGRESS_GCR_REGISTRY,
+      dest,
+      {
+        method: 'GET',
+        headers,
+        redirect: followBlobRedirect ? 'manual' : 'error',
+      },
+      this.fetchImpl,
+    );
 
     if (!followBlobRedirect) return res;
     if (res.status < 300 || res.status >= 400) return res;
@@ -266,12 +296,16 @@ export class GcrRegistry implements GcrImagePuller {
     if (isGcrRegistryHost(nextHost, ref.location)) {
       nextHeaders.authorization = `Bearer ${registryToken}`;
     }
-    return this.fetchImpl(next, {
-      method: 'GET',
-      headers: nextHeaders,
-      redirect: 'error',
-      signal: AbortSignal.timeout(60_000),
-    });
+    return registryPullFetch(
+      EGRESS_GCR_REGISTRY,
+      next,
+      {
+        method: 'GET',
+        headers: nextHeaders,
+        redirect: 'error',
+      },
+      this.fetchImpl,
+    );
   }
 }
 

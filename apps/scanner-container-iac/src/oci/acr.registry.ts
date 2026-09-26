@@ -13,8 +13,14 @@ import {
   isAcrRegistryHost,
   ContainerEgressError,
 } from '../container.egress';
-import { ACR_AAD_SCOPE, AzureEgressError, allowlistedAzureTokenUrl, azureTokenUrl } from '../azure.egress';
+import {
+  ACR_AAD_SCOPE,
+  AzureEgressError,
+  allowlistedAzureTokenUrl,
+  azureTokenUrl,
+} from '../azure.egress';
 import { exchangeAzureAccessToken } from '../azure.token';
+import { EGRESS_ACR_REGISTRY, registryPullFetch } from './pull-egress';
 import {
   ContainerPullError,
   MAX_IMAGE_LAYERS,
@@ -41,8 +47,10 @@ export interface AcrImagePuller {
 /**
  * In-process OCI pull from allowlisted `{registry}.azurecr.io`.
  * Auth is an AAD client-credentials token from `login.microsoftonline.com`
- * (ACR audience), then ACR oauth exchange + access token on the pinned
- * `{registry}.azurecr.io` host. No docker / podman / skopeo / crane.
+ * (ACR audience; that host stays on its own allowlisted fetch — it is not
+ * this circuit), then ACR oauth exchange + access token on the pinned
+ * `{registry}.azurecr.io` host. ACR oauth, manifest, and blob HTTP use
+ * `@ctem/resilience` (`egress:acr-registry`). No docker / podman / skopeo / crane.
  * Layer blobs are cached by digest for the life of the worker. Pull is
  * by digest only.
  */
@@ -66,7 +74,12 @@ export class AcrRegistry implements AcrImagePuller {
 
     const registryToken = await this.registryToken(ref, credentials, checkDeadline);
     const manifestJson = await this.getManifest(ref, ref.digest, registryToken, checkDeadline);
-    const platform = await this.resolvePlatformManifest(ref, manifestJson, registryToken, checkDeadline);
+    const platform = await this.resolvePlatformManifest(
+      ref,
+      manifestJson,
+      registryToken,
+      checkDeadline,
+    );
     const layers = platform.layers ?? [];
     if (layers.length > MAX_IMAGE_LAYERS) {
       throw new ContainerPullError(
@@ -77,12 +90,16 @@ export class AcrRegistry implements AcrImagePuller {
     const snapshots: LayerSnapshot[] = [];
     for (const layer of layers) {
       if (!checkDeadline()) {
-        throw new ContainerPullError('Job deadline exceeded mid-pull — refusing incomplete inventory');
+        throw new ContainerPullError(
+          'Job deadline exceeded mid-pull — refusing incomplete inventory',
+        );
       }
       const digest = layer.digest;
       const mediaType = layer.mediaType ?? '';
       if (!digest || !/^sha256:[a-f0-9]{64}$/i.test(digest)) {
-        throw new ContainerPullError('Layer descriptor missing sha256 digest — refusing incomplete inventory');
+        throw new ContainerPullError(
+          'Layer descriptor missing sha256 digest — refusing incomplete inventory',
+        );
       }
       const cached = this.layerCache.get(digest.toLowerCase());
       if (cached) {
@@ -146,12 +163,19 @@ export class AcrRegistry implements AcrImagePuller {
       tenant: credentials.tenantId,
       access_token: aadToken,
     }).toString();
-    const res = await this.fetchImpl(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded', 'user-agent': 'ctem-platform' },
-      body,
-      signal: AbortSignal.timeout(20_000),
-    });
+    const res = await registryPullFetch(
+      EGRESS_ACR_REGISTRY,
+      url,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/x-www-form-urlencoded',
+          'user-agent': 'ctem-platform',
+        },
+        body,
+      },
+      this.fetchImpl,
+    );
     if (res.status === 401 || res.status === 403) {
       throw new ContainerPullError(`ACR oauth exchange returned ${res.status} — refusing pull`);
     }
@@ -180,12 +204,19 @@ export class AcrRegistry implements AcrImagePuller {
       scope: `repository:${ref.repository}:pull`,
       refresh_token: refreshToken,
     }).toString();
-    const res = await this.fetchImpl(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded', 'user-agent': 'ctem-platform' },
-      body,
-      signal: AbortSignal.timeout(20_000),
-    });
+    const res = await registryPullFetch(
+      EGRESS_ACR_REGISTRY,
+      url,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/x-www-form-urlencoded',
+          'user-agent': 'ctem-platform',
+        },
+        body,
+      },
+      this.fetchImpl,
+    );
     if (res.status === 401 || res.status === 403) {
       throw new ContainerPullError(`ACR oauth token returned ${res.status} — refusing pull`);
     }
@@ -211,7 +242,8 @@ export class AcrRegistry implements AcrImagePuller {
     registryToken: string,
     checkDeadline: () => boolean,
   ): Promise<unknown> {
-    if (!checkDeadline()) throw new ContainerPullError('Job deadline exceeded during manifest pull');
+    if (!checkDeadline())
+      throw new ContainerPullError('Job deadline exceeded during manifest pull');
     const url = acrManifestUrl(ref.registry, ref.repository, digest);
     const res = await this.acrGet(url, ref, registryToken, MANIFEST_ACCEPT);
     if (res.status === 401 || res.status === 403) {
@@ -239,7 +271,9 @@ export class AcrRegistry implements AcrImagePuller {
     if (isIndex && rec.manifests?.length) {
       const chosen = pickPlatform(rec.manifests);
       if (!chosen?.digest) {
-        throw new ContainerPullError('ACR index has no linux platform manifest — refusing incomplete inventory');
+        throw new ContainerPullError(
+          'ACR index has no linux platform manifest — refusing incomplete inventory',
+        );
       }
       const nested = await this.getManifest(ref, chosen.digest, registryToken, checkDeadline);
       return this.requireImageManifest(nested);
@@ -253,7 +287,9 @@ export class AcrRegistry implements AcrImagePuller {
     }
     const rec = json as OciManifest;
     if (!Array.isArray(rec.layers)) {
-      throw new ContainerPullError('ACR image manifest missing layers — refusing incomplete inventory');
+      throw new ContainerPullError(
+        'ACR image manifest missing layers — refusing incomplete inventory',
+      );
     }
     return rec;
   }
@@ -293,12 +329,16 @@ export class AcrRegistry implements AcrImagePuller {
       'user-agent': 'ctem-platform',
       authorization: `Bearer ${registryToken}`,
     };
-    const res = await this.fetchImpl(dest, {
-      method: 'GET',
-      headers,
-      redirect: followBlobRedirect ? 'manual' : 'error',
-      signal: AbortSignal.timeout(60_000),
-    });
+    const res = await registryPullFetch(
+      EGRESS_ACR_REGISTRY,
+      dest,
+      {
+        method: 'GET',
+        headers,
+        redirect: followBlobRedirect ? 'manual' : 'error',
+      },
+      this.fetchImpl,
+    );
 
     if (!followBlobRedirect) return res;
     if (res.status < 300 || res.status >= 400) return res;
@@ -313,12 +353,16 @@ export class AcrRegistry implements AcrImagePuller {
     if (isAcrRegistryHost(nextHost, ref.registry)) {
       nextHeaders.authorization = `Bearer ${registryToken}`;
     }
-    return this.fetchImpl(next, {
-      method: 'GET',
-      headers: nextHeaders,
-      redirect: 'error',
-      signal: AbortSignal.timeout(60_000),
-    });
+    return registryPullFetch(
+      EGRESS_ACR_REGISTRY,
+      next,
+      {
+        method: 'GET',
+        headers: nextHeaders,
+        redirect: 'error',
+      },
+      this.fetchImpl,
+    );
   }
 }
 
