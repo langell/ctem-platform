@@ -2,6 +2,7 @@ import { createPrivateKey, createSign } from 'node:crypto';
 import type { GcpCredentials } from './credentials';
 import { normalizeGcpPrivateKey } from './credentials';
 import { allowlistedGcpUrl, GCP_TOKEN_URL } from './gcp.egress';
+import { EGRESS_GCP_API, inventoryEgressFetch } from './inventory-egress';
 
 /** Inventory-only scopes. Not cloud-platform, not write. */
 export const GCP_OAUTH_SCOPE = [
@@ -49,11 +50,10 @@ export async function exchangeGcpAccessToken(
     grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
     assertion,
   }).toString();
-  const res = await fetch(url, {
+  const res = await inventoryEgressFetch(EGRESS_GCP_API, url, {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body,
-    signal: AbortSignal.timeout(20_000),
   });
   if (!res.ok) {
     throw new Error(`GCP token API returned ${res.status}`);

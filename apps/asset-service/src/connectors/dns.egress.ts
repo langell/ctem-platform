@@ -419,6 +419,8 @@ export type CrtShGet = (args: {
   path: string;
   timeoutMs: number;
   maxBytes: number;
+  /** Set by the inventory egress policy so `CTEM_CB_TIMEOUT_MS` aborts a hang. */
+  signal?: AbortSignal;
 }) => Promise<CrtShHttpResult>;
 
 /**
@@ -426,7 +428,7 @@ export type CrtShGet = (args: {
  * Size-cap hits set `truncated` so the caller can fail closed.
  */
 export const httpsGetCrtSh: CrtShGet = async (args) => {
-  const { connectIp, path, timeoutMs, maxBytes } = args;
+  const { connectIp, path, timeoutMs, maxBytes, signal } = args;
   if (!isPublicAddress(connectIp)) {
     throw new DnsEgressError(`DNS refused non-public CT connect IP: ${connectIp}`);
   }
@@ -434,13 +436,27 @@ export const httpsGetCrtSh: CrtShGet = async (args) => {
   return await new Promise<CrtShHttpResult>((resolve, reject) => {
     let settled = false;
     let timer: NodeJS.Timeout | undefined;
+    let onAbort: (() => void) | undefined;
     const settle = (value: CrtShHttpResult | Error) => {
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
+      if (signal && onAbort) signal.removeEventListener('abort', onAbort);
       if (value instanceof Error) reject(value);
       else resolve(value);
     };
+
+    const abortReason = (): Error => {
+      const reason = signal?.reason;
+      return reason instanceof Error
+        ? reason
+        : new DnsEgressError('DNS CT request aborted — refusing incomplete inventory');
+    };
+
+    if (signal?.aborted) {
+      settle(abortReason());
+      return;
+    }
 
     const req = httpsRequest(
       {
@@ -484,6 +500,14 @@ export const httpsGetCrtSh: CrtShGet = async (args) => {
         });
       },
     );
+
+    if (signal) {
+      onAbort = () => {
+        req.destroy();
+        settle(abortReason());
+      };
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
 
     timer = setTimeout(() => {
       req.destroy();

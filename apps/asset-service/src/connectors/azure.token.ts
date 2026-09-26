@@ -6,6 +6,7 @@ import {
   allowlistedAzureTokenUrl,
   azureTokenUrl,
 } from './azure.egress';
+import { EGRESS_AZURE_API, inventoryEgressFetch } from './inventory-egress';
 
 /**
  * Exchange client credentials at login.microsoftonline.com only. The client
@@ -31,11 +32,10 @@ export async function exchangeAzureAccessToken(
     client_secret: creds.clientSecret,
     scope,
   }).toString();
-  const res = await fetch(url, {
+  const res = await inventoryEgressFetch(EGRESS_AZURE_API, url, {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body,
-    signal: AbortSignal.timeout(20_000),
   });
   if (!res.ok) {
     throw new Error(`Azure token API returned ${res.status}`);

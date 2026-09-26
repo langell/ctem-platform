@@ -11,6 +11,7 @@ import {
   nextRelFromLinkHeader,
   refuseTenantWritableEndpoint,
 } from './ghcr.egress';
+import { EGRESS_GITHUB_API, inventoryEgressFetch } from './inventory-egress';
 
 export const GhcrConnectorConfig = z.object({
   /** User or organization whose GHCR container packages to inventory. */
@@ -251,7 +252,7 @@ export class GhcrConnector implements AssetConnector {
   ): Promise<{ json: unknown; next: string | undefined }> {
     // Belt: never send the bearer token off api.github.com even if a caller built `url`.
     const dest = allowlistedGithubApiUrl(url);
-    const res = await fetch(dest, {
+    const res = await inventoryEgressFetch(EGRESS_GITHUB_API, dest, {
       method: 'GET',
       headers: {
         accept: 'application/vnd.github+json',
@@ -259,7 +260,6 @@ export class GhcrConnector implements AssetConnector {
         'user-agent': 'ctem-platform',
         authorization: `Bearer ${token}`,
       },
-      signal: AbortSignal.timeout(20_000),
     });
     if (!res.ok) {
       throw new Error(`GHCR ${label} API returned ${res.status}`);

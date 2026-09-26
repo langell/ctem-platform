@@ -12,6 +12,7 @@ import {
   refuseTenantWritableEndpoint,
 } from './gcp.egress';
 import { exchangeGcpAccessToken } from './gcp.jwt';
+import { EGRESS_GCP_API, inventoryEgressFetch } from './inventory-egress';
 
 export const GcpResourceType = z.enum([
   'gce_instance',
@@ -412,13 +413,12 @@ export class GcpConnector implements AssetConnector {
   private async getJson(url: string, accessToken: string, label: string): Promise<unknown> {
     // Belt: never send the bearer token off the allowlist even if a caller built `url`.
     allowlistedGcpUrl(url);
-    const res = await fetch(url, {
+    const res = await inventoryEgressFetch(EGRESS_GCP_API, url, {
       method: 'GET',
       headers: {
         accept: 'application/json',
         authorization: `Bearer ${accessToken}`,
       },
-      signal: AbortSignal.timeout(20_000),
     });
     if (!res.ok) {
       throw new Error(`GCP ${label} API returned ${res.status}`);

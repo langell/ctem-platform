@@ -15,6 +15,7 @@ import { xmlTag } from './aws.xml';
 import { allowlistedAzureArmUrl } from './azure.egress';
 import { exchangeAzureAccessToken } from './azure.token';
 import { exchangeGcpAccessToken } from './gcp.jwt';
+import { EGRESS_K8S_CONTROLPLANE, inventoryEgressFetch } from './inventory-egress';
 import {
   AWS_REGION_RE,
   AZURE_GUID_RE,
@@ -568,13 +569,12 @@ export class KubernetesConnector implements AssetConnector {
 
   private async gkeGet(url: string, accessToken: string, label: string): Promise<unknown> {
     allowlistedGkeApiUrl(url);
-    const res = await fetch(url, {
+    const res = await inventoryEgressFetch(EGRESS_K8S_CONTROLPLANE, url, {
       method: 'GET',
       headers: {
         accept: 'application/json',
         authorization: `Bearer ${accessToken}`,
       },
-      signal: AbortSignal.timeout(20_000),
     });
     if (!res.ok) {
       throw new Error(`GKE ${label} API returned ${res.status}`);
@@ -584,13 +584,12 @@ export class KubernetesConnector implements AssetConnector {
 
   private async aksGet(url: string, accessToken: string, label: string): Promise<unknown> {
     allowlistedAzureArmUrl(url);
-    const res = await fetch(url, {
+    const res = await inventoryEgressFetch(EGRESS_K8S_CONTROLPLANE, url, {
       method: 'GET',
       headers: {
         accept: 'application/json',
         authorization: `Bearer ${accessToken}`,
       },
-      signal: AbortSignal.timeout(20_000),
     });
     if (!res.ok) {
       throw new Error(`AKS ${label} API returned ${res.status}`);
@@ -605,11 +604,10 @@ export class KubernetesConnector implements AssetConnector {
   ): Promise<string> {
     if (service === 'eks') allowlistedEksApiUrl(signed.url);
     else allowlistedAwsUrl(signed.url);
-    const res = await fetch(signed.url, {
+    const res = await inventoryEgressFetch(EGRESS_K8S_CONTROLPLANE, signed.url, {
       method: signed.method,
       headers: signed.headers,
       body: signed.method === 'POST' ? signed.body : undefined,
-      signal: AbortSignal.timeout(20_000),
     });
     if (!res.ok) {
       throw new Error(`EKS ${service} API returned ${res.status} for ${action}`);

@@ -5,6 +5,7 @@ import type { UpsertAssetRequest } from '@ctem/contracts';
 import type { AssetConnector, DiscoveryContext } from './connector.registry';
 import { requireGcpCredentials } from './credentials';
 import { exchangeGcpAccessToken } from './gcp.jwt';
+import { EGRESS_GCP_API, inventoryEgressFetch } from './inventory-egress';
 import {
   GCP_LOCATION_ID_RE,
   GCP_PROJECT_ID_RE,
@@ -388,13 +389,12 @@ export class GcrConnector implements AssetConnector {
   private async getJson(url: string, accessToken: string, label: string): Promise<unknown> {
     // Belt: never send the bearer token off artifactregistry.googleapis.com.
     allowlistedGcrApiUrl(url);
-    const res = await fetch(url, {
+    const res = await inventoryEgressFetch(EGRESS_GCP_API, url, {
       method: 'GET',
       headers: {
         accept: 'application/json',
         authorization: `Bearer ${accessToken}`,
       },
-      signal: AbortSignal.timeout(20_000),
     });
     if (!res.ok) {
       throw new Error(`GCR ${label} API returned ${res.status}`);

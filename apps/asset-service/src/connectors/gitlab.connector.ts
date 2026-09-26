@@ -12,6 +12,7 @@ import {
   parseGitLabBaseUrl,
   refuseExtraGitLabHosts,
 } from './gitlab.egress';
+import { EGRESS_GITLAB_API, inventoryEgressFetch } from './inventory-egress';
 
 export interface GitLabProject {
   name: string;
@@ -169,13 +170,12 @@ export class GitLabConnector implements AssetConnector {
         `${origin.apiUrl}${path}${sep}per_page=${GITLAB_PER_PAGE}&page=${page}`,
         origin,
       );
-      const res = await fetch(url, {
+      const res = await inventoryEgressFetch(EGRESS_GITLAB_API, url, {
         headers: {
           accept: 'application/json',
           'user-agent': 'ctem-platform',
           ...(token ? { authorization: `Bearer ${token}` } : {}),
         },
-        signal: AbortSignal.timeout(20_000),
       });
       if (!res.ok) {
         throw new Error(`GitLab API returned ${res.status} for ${path} (page ${page})`);

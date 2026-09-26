@@ -8,6 +8,7 @@ import { AWS_REGION_RE, allowlistedAwsUrl, awsServiceUrl } from './aws.egress';
 import { signAwsRequest } from './aws.sigv4';
 import { xmlTag } from './aws.xml';
 import { allowlistedEcrApiUrl, ecrApiUrl, refuseTenantWritableEndpoint } from './ecr.egress';
+import { EGRESS_AWS_API, inventoryEgressFetch } from './inventory-egress';
 
 export const EcrConnectorConfig = z
   .object({
@@ -387,11 +388,10 @@ export class EcrConnector implements AssetConnector {
     // Belt: never send keys off the allowlist even if a caller built `signed`.
     if (kind === 'ecr') allowlistedEcrApiUrl(signed.url);
     else allowlistedAwsUrl(signed.url);
-    const res = await fetch(signed.url, {
+    const res = await inventoryEgressFetch(EGRESS_AWS_API, signed.url, {
       method: signed.method,
       headers: signed.headers,
       body: signed.method === 'POST' ? signed.body : undefined,
-      signal: AbortSignal.timeout(20_000),
     });
     if (!res.ok) {
       throw new Error(`ECR ${service} API returned ${res.status} for ${action}`);

@@ -23,6 +23,9 @@
       "path": "../../libs/observability"
     },
     {
+      "path": "../../libs/resilience"
+    },
+    {
       "path": "../../libs/auth"
     },
     {
