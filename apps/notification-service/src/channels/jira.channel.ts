@@ -4,7 +4,7 @@ import { InternalHttpPolicy } from '@ctem/resilience';
 import type { NotificationChannel, NotificationMessage } from './channel.registry';
 import { PLATFORM_JIRA_CREDENTIAL_REF, requireJiraCredentials } from './credentials';
 import { jiraCreateIssueUrl, tenantSuppliedJiraUrls } from './jira.egress';
-import { createNotificationEgressPolicy } from './slack.channel';
+import { createNotificationEgressPolicy } from './notification-egress';
 
 /**
  * One breaker for every Jira Cloud issue create. Not per org and not per message.

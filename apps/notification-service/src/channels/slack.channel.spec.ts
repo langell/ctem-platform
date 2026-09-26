@@ -5,12 +5,8 @@ import {
   InternalHttpPolicy,
   type CircuitBreakerConfig,
 } from '@ctem/resilience';
-import {
-  EGRESS_SLACK_WEBHOOK,
-  SlackChannel,
-  createNotificationEgressPolicy,
-  slackPayload,
-} from './slack.channel';
+import { createNotificationEgressPolicy } from './notification-egress';
+import { EGRESS_SLACK_WEBHOOK, SlackChannel, slackPayload } from './slack.channel';
 import type { NotificationMessage } from './channel.registry';
 
 const HOOK = 'https://hooks.slack.com/services/TEST/HOOK/dummy';
