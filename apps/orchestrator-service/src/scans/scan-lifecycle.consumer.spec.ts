@@ -5,13 +5,14 @@ import type { GithubChecksPublisher } from './github-checks.publisher';
 import type { GithubDeploymentsPublisher } from './github-deployments.publisher';
 import type { GitlabCommitStatusPublisher } from './gitlab-statuses.publisher';
 import type { GitlabDeploymentsPublisher } from './gitlab-deployments.publisher';
+import type { BitbucketBuildStatusPublisher } from './bitbucket-statuses.publisher';
 
 const ORG = '4a6f9f4e-1111-4222-8333-444455556666';
 const SCAN = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const JOB = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 
-describe('ScanLifecycleConsumer GitHub Checks, Deployments, and GitLab publishers wiring', () => {
-  it('publishes Checks, Deployments, and GitLab publishers after scanCompleted using the event org, not a client header', async () => {
+describe('ScanLifecycleConsumer GitHub Checks, Deployments, GitLab, and Bitbucket publishers wiring', () => {
+  it('publishes Checks, Deployments, GitLab, and Bitbucket publishers after scanCompleted using the event org, not a client header', async () => {
     const terminal = { id: SCAN, status: 'succeeded', jobsCompleted: 1, jobsTotal: 1 };
     const tx = {
       scanJob: { update: vi.fn(async () => ({})), count: vi.fn(async () => 0) },
@@ -30,6 +31,7 @@ describe('ScanLifecycleConsumer GitHub Checks, Deployments, and GitLab publisher
     const deployments = { publishForCompletedScan: vi.fn(async () => undefined) };
     const gitlabStatuses = { publishForCompletedScan: vi.fn(async () => undefined) };
     const gitlabDeployments = { publishForCompletedScan: vi.fn(async () => undefined) };
+    const bitbucketStatuses = { publishForCompletedScan: vi.fn(async () => undefined) };
 
     const consumer = new ScanLifecycleConsumer(
       prisma as never,
@@ -38,6 +40,7 @@ describe('ScanLifecycleConsumer GitHub Checks, Deployments, and GitLab publisher
       deployments as unknown as GithubDeploymentsPublisher,
       gitlabStatuses as unknown as GitlabCommitStatusPublisher,
       gitlabDeployments as unknown as GitlabDeploymentsPublisher,
+      bitbucketStatuses as unknown as BitbucketBuildStatusPublisher,
     );
 
     await consumer.applyResult({
@@ -64,9 +67,10 @@ describe('ScanLifecycleConsumer GitHub Checks, Deployments, and GitLab publisher
     expect(deployments.publishForCompletedScan).toHaveBeenCalledWith(ORG, SCAN);
     expect(gitlabStatuses.publishForCompletedScan).toHaveBeenCalledWith(ORG, SCAN);
     expect(gitlabDeployments.publishForCompletedScan).toHaveBeenCalledWith(ORG, SCAN);
+    expect(bitbucketStatuses.publishForCompletedScan).toHaveBeenCalledWith(ORG, SCAN);
   });
 
-  it('does not publish Checks, Deployments, or GitLab publishers until the last job completes', async () => {
+  it('does not publish Checks, Deployments, GitLab, or Bitbucket publishers until the last job completes', async () => {
     const tx = {
       scanJob: { update: vi.fn(async () => ({})) },
       scan: { update: vi.fn(async () => ({ id: SCAN, jobsCompleted: 1, jobsTotal: 2 })) },
@@ -78,6 +82,7 @@ describe('ScanLifecycleConsumer GitHub Checks, Deployments, and GitLab publisher
     const deployments = { publishForCompletedScan: vi.fn(async () => undefined) };
     const gitlabStatuses = { publishForCompletedScan: vi.fn(async () => undefined) };
     const gitlabDeployments = { publishForCompletedScan: vi.fn(async () => undefined) };
+    const bitbucketStatuses = { publishForCompletedScan: vi.fn(async () => undefined) };
     const consumer = new ScanLifecycleConsumer(
       prisma as never,
       { publish: vi.fn() } as never,
@@ -85,6 +90,7 @@ describe('ScanLifecycleConsumer GitHub Checks, Deployments, and GitLab publisher
       deployments as unknown as GithubDeploymentsPublisher,
       gitlabStatuses as unknown as GitlabCommitStatusPublisher,
       gitlabDeployments as unknown as GitlabDeploymentsPublisher,
+      bitbucketStatuses as unknown as BitbucketBuildStatusPublisher,
     );
     await consumer.applyResult({
       jobId: JOB,
@@ -104,5 +110,6 @@ describe('ScanLifecycleConsumer GitHub Checks, Deployments, and GitLab publisher
     expect(deployments.publishForCompletedScan).not.toHaveBeenCalled();
     expect(gitlabStatuses.publishForCompletedScan).not.toHaveBeenCalled();
     expect(gitlabDeployments.publishForCompletedScan).not.toHaveBeenCalled();
+    expect(bitbucketStatuses.publishForCompletedScan).not.toHaveBeenCalled();
   });
 });

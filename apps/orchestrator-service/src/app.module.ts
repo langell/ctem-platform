@@ -19,6 +19,7 @@ import { GithubChecksPublisher } from './scans/github-checks.publisher';
 import { GithubDeploymentsPublisher } from './scans/github-deployments.publisher';
 import { GitlabCommitStatusPublisher } from './scans/gitlab-statuses.publisher';
 import { GitlabDeploymentsPublisher } from './scans/gitlab-deployments.publisher';
+import { BitbucketBuildStatusPublisher } from './scans/bitbucket-statuses.publisher';
 
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { GitlabDeploymentsPublisher } from './scans/gitlab-deployments.publisher
     GithubDeploymentsPublisher,
     GitlabCommitStatusPublisher,
     GitlabDeploymentsPublisher,
+    BitbucketBuildStatusPublisher,
     { provide: APP_GUARD, useClass: InternalAuthGuard },
   ],
 })

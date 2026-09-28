@@ -17,6 +17,7 @@ import { GithubChecksPublisher } from './github-checks.publisher';
 import { GithubDeploymentsPublisher } from './github-deployments.publisher';
 import { GitlabCommitStatusPublisher } from './gitlab-statuses.publisher';
 import { GitlabDeploymentsPublisher } from './gitlab-deployments.publisher';
+import { BitbucketBuildStatusPublisher } from './bitbucket-statuses.publisher';
 import {
   isPrismaUniqueConflict,
   resolveScanKickIdempotencyKey,
@@ -79,6 +80,7 @@ export class ScanDispatcherService {
     @Optional() private readonly deployments?: GithubDeploymentsPublisher,
     @Optional() private readonly gitlabStatuses?: GitlabCommitStatusPublisher,
     @Optional() private readonly gitlabDeployments?: GitlabDeploymentsPublisher,
+    @Optional() private readonly bitbucketStatuses?: BitbucketBuildStatusPublisher,
   ) {}
 
   /**
@@ -173,13 +175,15 @@ export class ScanDispatcherService {
     const row = latest ?? scan;
     // Zero-asset (already terminal) scans never emit scanCompleted via lifecycle.
     // Checks (concludeScan), GitHub Deployments (concludeDeploy), GitLab
-    // statuses (concludeScan), and GitLab Deployments (concludeDeploy) each
-    // soft-fail independently — any order is fine.
+    // statuses (concludeScan), GitLab Deployments (concludeDeploy), and
+    // Bitbucket Cloud build statuses (concludeScan) each soft-fail
+    // independently — any order is fine.
     if (row.status !== 'queued' && row.status !== 'running') {
       await this.checks?.publishForCompletedScan(orgId, scan.id);
       await this.deployments?.publishForCompletedScan(orgId, scan.id);
       await this.gitlabStatuses?.publishForCompletedScan(orgId, scan.id);
       await this.gitlabDeployments?.publishForCompletedScan(orgId, scan.id);
+      await this.bitbucketStatuses?.publishForCompletedScan(orgId, scan.id);
     }
     return { ...row, jobsDispatched: jobs.length };
   }

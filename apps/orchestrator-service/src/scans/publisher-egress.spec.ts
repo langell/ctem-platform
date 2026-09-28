@@ -12,7 +12,10 @@ import { GithubDeploymentsPublisher } from './github-deployments.publisher';
 import { allowlistedGitLabApiUrl, GITLAB_COM } from './gitlab-statuses.egress';
 import { GitlabCommitStatusPublisher } from './gitlab-statuses.publisher';
 import { GitlabDeploymentsPublisher } from './gitlab-deployments.publisher';
+import { allowlistedBitbucketBuildStatusUrl } from './bitbucket-statuses.egress';
+import { BitbucketBuildStatusPublisher } from './bitbucket-statuses.publisher';
 import {
+  EGRESS_BITBUCKET_API,
   EGRESS_GITHUB_API,
   EGRESS_GITLAB_API,
   resetPublisherEgressPolicy,
@@ -26,10 +29,10 @@ const ASSET_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1';
 
 type PublishCase = {
   name: string;
-  circuit: typeof EGRESS_GITHUB_API | typeof EGRESS_GITLAB_API;
+  circuit: typeof EGRESS_GITHUB_API | typeof EGRESS_GITLAB_API | typeof EGRESS_BITBUCKET_API;
   host: string;
   write: 'POST' | 'PUT';
-  tokenEnv: 'GITHUB_TOKEN' | 'GITLAB_TOKEN';
+  tokenEnv: 'GITHUB_TOKEN' | 'GITLAB_TOKEN' | 'BITBUCKET_TOKEN';
   publish: () => Promise<void>;
   scanUpdate: ReturnType<typeof vi.fn>;
 };
@@ -96,15 +99,25 @@ function prismaFor(options: Record<string, unknown>, credentialRef: string) {
 }
 
 function cases(): PublishCase[] {
-  const githubChecks = prismaFor({ github: { repository: 'acme/api', sha: SHA } }, 'env:GITHUB_TOKEN');
+  const githubChecks = prismaFor(
+    { github: { repository: 'acme/api', sha: SHA } },
+    'env:GITHUB_TOKEN',
+  );
   const githubDeployments = prismaFor(
     { github: { repository: 'acme/api', deploymentId: 42 } },
     'env:GITHUB_TOKEN',
   );
-  const gitlabStatuses = prismaFor({ gitlab: { projectId: 'acme/api', sha: SHA } }, 'env:GITLAB_TOKEN');
+  const gitlabStatuses = prismaFor(
+    { gitlab: { projectId: 'acme/api', sha: SHA } },
+    'env:GITLAB_TOKEN',
+  );
   const gitlabDeployments = prismaFor(
     { gitlab: { projectId: 'acme/api', deploymentId: 42 } },
     'env:GITLAB_TOKEN',
+  );
+  const bitbucketStatuses = prismaFor(
+    { bitbucket: { workspace: 'langell', repoSlug: 'ctem-platform', sha: SHA } },
+    'env:BITBUCKET_TOKEN',
   );
   return [
     {
@@ -114,7 +127,10 @@ function cases(): PublishCase[] {
       write: 'POST',
       tokenEnv: 'GITHUB_TOKEN',
       publish: () =>
-        new GithubChecksPublisher(githubChecks.prisma as never).publishForCompletedScan(ORG_A, SCAN_ID),
+        new GithubChecksPublisher(githubChecks.prisma as never).publishForCompletedScan(
+          ORG_A,
+          SCAN_ID,
+        ),
       scanUpdate: githubChecks.tx.scan.update,
     },
     {
@@ -124,7 +140,10 @@ function cases(): PublishCase[] {
       write: 'POST',
       tokenEnv: 'GITHUB_TOKEN',
       publish: () =>
-        new GithubDeploymentsPublisher(githubDeployments.prisma as never).publishForCompletedScan(ORG_A, SCAN_ID),
+        new GithubDeploymentsPublisher(githubDeployments.prisma as never).publishForCompletedScan(
+          ORG_A,
+          SCAN_ID,
+        ),
       scanUpdate: githubDeployments.tx.scan.update,
     },
     {
@@ -134,7 +153,10 @@ function cases(): PublishCase[] {
       write: 'POST',
       tokenEnv: 'GITLAB_TOKEN',
       publish: () =>
-        new GitlabCommitStatusPublisher(gitlabStatuses.prisma as never).publishForCompletedScan(ORG_A, SCAN_ID),
+        new GitlabCommitStatusPublisher(gitlabStatuses.prisma as never).publishForCompletedScan(
+          ORG_A,
+          SCAN_ID,
+        ),
       scanUpdate: gitlabStatuses.tx.scan.update,
     },
     {
@@ -144,22 +166,41 @@ function cases(): PublishCase[] {
       write: 'PUT',
       tokenEnv: 'GITLAB_TOKEN',
       publish: () =>
-        new GitlabDeploymentsPublisher(gitlabDeployments.prisma as never).publishForCompletedScan(ORG_A, SCAN_ID),
+        new GitlabDeploymentsPublisher(gitlabDeployments.prisma as never).publishForCompletedScan(
+          ORG_A,
+          SCAN_ID,
+        ),
       scanUpdate: gitlabDeployments.tx.scan.update,
+    },
+    {
+      name: 'Bitbucket build statuses',
+      circuit: EGRESS_BITBUCKET_API,
+      host: 'api.bitbucket.org',
+      write: 'POST',
+      tokenEnv: 'BITBUCKET_TOKEN',
+      publish: () =>
+        new BitbucketBuildStatusPublisher(
+          bitbucketStatuses.prisma as never,
+        ).publishForCompletedScan(ORG_A, SCAN_ID),
+      scanUpdate: bitbucketStatuses.tx.scan.update,
     },
   ];
 }
 
 function installFetch(on: (method: string, url: string) => Response) {
-  const fn = vi.fn(async (url: string, init?: { method?: string; headers?: Record<string, string> }) => {
-    return on(init?.method ?? 'GET', String(url));
-  });
+  const fn = vi.fn(
+    async (url: string, init?: { method?: string; headers?: Record<string, string> }) => {
+      return on(init?.method ?? 'GET', String(url));
+    },
+  );
   vi.stubGlobal('fetch', fn);
   return fn;
 }
 
 function writes(fn: ReturnType<typeof installFetch>, method: string): unknown[][] {
-  return fn.mock.calls.filter((call) => ((call[1] as { method?: string } | undefined)?.method ?? 'GET') === method);
+  return fn.mock.calls.filter(
+    (call) => ((call[1] as { method?: string } | undefined)?.method ?? 'GET') === method,
+  );
 }
 
 beforeEach(() => {
@@ -170,6 +211,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   delete process.env.GITHUB_TOKEN;
   delete process.env.GITLAB_TOKEN;
+  delete process.env.BITBUCKET_TOKEN;
   resetPublisherEgressPolicy();
 });
 
@@ -180,6 +222,7 @@ describe('publisher egress circuit breaker', () => {
     usePublisherEgressPolicy(policy);
     await policy.execute(EGRESS_GITHUB_API, async () => new Response('down', { status: 500 }));
     await policy.execute(EGRESS_GITLAB_API, async () => new Response('down', { status: 500 }));
+    await policy.execute(EGRESS_BITBUCKET_API, async () => new Response('down', { status: 500 }));
     expect(warns).toContain('circuit opened');
 
     const publishers = cases();
@@ -211,7 +254,8 @@ describe('publisher egress circuit breaker', () => {
       expect(writes(fetchMock, publisher.write)).toHaveLength(2);
       expect(writesSeen).toBeLessThanOrEqual(3);
       const sent = fetchMock.mock.calls.find(
-        (call) => ((call[1] as { method?: string } | undefined)?.method ?? 'GET') === publisher.write,
+        (call) =>
+          ((call[1] as { method?: string } | undefined)?.method ?? 'GET') === publisher.write,
       );
       const headers = (sent?.[1] as { headers?: Record<string, string> } | undefined)?.headers;
       expect(headers?.authorization).toMatch(/^Bearer /);
@@ -277,22 +321,45 @@ describe('publisher egress circuit breaker', () => {
     for (const call of gitlabFetch.mock.calls) {
       expect(new URL(String(call[0])).hostname).toBe('gitlab.com');
     }
+
+    process.env.BITBUCKET_TOKEN = 'bb-test';
+    const bitbucketFetch = installFetch(
+      () => new Response(JSON.stringify({ key: 'ctem-scan' }), { status: 201 }),
+    );
+    const bitbucket = publishers.find((publisher) => publisher.circuit === EGRESS_BITBUCKET_API);
+    await expect(bitbucket!.publish()).resolves.toBeUndefined();
+    expect(writes(bitbucketFetch, 'POST')).toHaveLength(1);
+    for (const call of bitbucketFetch.mock.calls) {
+      expect(new URL(String(call[0])).hostname).toBe('api.bitbucket.org');
+    }
   });
 
   it('refuses non-allowlisted hosts before any fetch', () => {
     const fetchMock = installFetch(() => new Response('no', { status: 200 }));
-    expect(() => allowlistedGithubApiUrl('https://github.example.com/api/v3/repos/acme/api/check-runs')).toThrow(
-      /only api\.github\.com/,
-    );
-    expect(() => allowlistedGitLabApiUrl('https://evil.example/api/v4/projects/1/statuses/abc', GITLAB_COM)).toThrow(
-      /only gitlab\.com is allowlisted/,
-    );
+    expect(() =>
+      allowlistedGithubApiUrl('https://github.example.com/api/v3/repos/acme/api/check-runs'),
+    ).toThrow(/only api\.github\.com/);
+    expect(() =>
+      allowlistedGitLabApiUrl('https://evil.example/api/v4/projects/1/statuses/abc', GITLAB_COM),
+    ).toThrow(/only gitlab\.com is allowlisted/);
+    expect(() =>
+      allowlistedBitbucketBuildStatusUrl(
+        `https://bitbucket.example.com/2.0/repositories/acme/api/commit/${SHA}/statuses/build`,
+        'acme',
+        'api',
+        SHA,
+      ),
+    ).toThrow(/only api\.bitbucket\.org is allowlisted/);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('fails closed on invalid or unknown CTEM_CB_* and does not add publisher-only knobs', () => {
-    expect(() => resetPublisherEgressPolicy({ CTEM_CB_TIMEOUT_MS: 'nope' })).toThrow(CircuitBreakerConfigError);
-    expect(() => resetPublisherEgressPolicy({ CTEM_CB_PUBLISHER_TIMEOUT_MS: '1000' })).toThrow(/allowlisted/);
+    expect(() => resetPublisherEgressPolicy({ CTEM_CB_TIMEOUT_MS: 'nope' })).toThrow(
+      CircuitBreakerConfigError,
+    );
+    expect(() => resetPublisherEgressPolicy({ CTEM_CB_PUBLISHER_TIMEOUT_MS: '1000' })).toThrow(
+      /allowlisted/,
+    );
     expect(() => resetPublisherEgressPolicy({ CTEM_CB_ENABLED: 'false' })).toThrow(/fail closed/);
   });
 

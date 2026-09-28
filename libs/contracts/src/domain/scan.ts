@@ -18,9 +18,9 @@ export const ScanStatus = z.enum(['queued', 'running', 'succeeded', 'partial', '
 export type ScanStatus = z.infer<typeof ScanStatus>;
 
 /**
- * CI-facing GET. It is not a writeable column. GitHub Checks and GitLab
- * Commit Statuses (optional, additive) map the same concludeScan result; they
- * do not replace this field.
+ * CI-facing GET. It is not a writeable column. GitHub Checks, GitLab Commit
+ * Statuses, and Bitbucket Cloud build statuses (optional, additive) map the
+ * same concludeScan result; they do not replace this field.
  */
 export const ScanConclusion = z.enum(['pending', 'passed', 'failed']);
 export type ScanConclusion = z.infer<typeof ScanConclusion>;
@@ -209,8 +209,16 @@ export const CreateScanRequest = z.preprocess(
      * Tenant `baseUrl` / `apiUrl` / host keys on the scan are not the GitLab
      * API origin (gitlab.com, or the scan asset's GitLab connector `baseUrl`).
      *
+     * Optional Bitbucket Cloud build-status context (allowlisted keys under
+     * `options.bitbucket` or top-level): `workspace` and `repoSlug` (or
+     * `repository`) are Bitbucket identifiers (`[\w.-]+`, not a URL or host),
+     * `sha` is a 40-char commit. Optional `key` (default `ctem-scan-{scanId}`),
+     * `name`, `description`, and `url` (`url` must be a CTEM URL or omit).
+     * The API host is exact `api.bitbucket.org` only — tenant `baseUrl` /
+     * `apiUrl` / `bitbucketHost` are not an endpoint (no Server/Data Center).
+     *
      * Client conclusion keys stay refused — they are not Checks, Deployments,
-     * or GitLab status context.
+     * GitLab status, or Bitbucket build-status context.
      */
     options: z.record(z.unknown()).default({}),
     ...kickIdempotencyFields,

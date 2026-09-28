@@ -7,6 +7,7 @@ import { GithubChecksPublisher } from './github-checks.publisher';
 import { GithubDeploymentsPublisher } from './github-deployments.publisher';
 import { GitlabCommitStatusPublisher } from './gitlab-statuses.publisher';
 import { GitlabDeploymentsPublisher } from './gitlab-deployments.publisher';
+import { BitbucketBuildStatusPublisher } from './bitbucket-statuses.publisher';
 
 /**
  * Tracks job completions and closes out the parent scan. A scan with any failed
@@ -24,6 +25,7 @@ export class ScanLifecycleConsumer implements OnApplicationBootstrap {
     private readonly deployments: GithubDeploymentsPublisher,
     private readonly gitlabStatuses: GitlabCommitStatusPublisher,
     private readonly gitlabDeployments: GitlabDeploymentsPublisher,
+    private readonly bitbucketStatuses: BitbucketBuildStatusPublisher,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -79,15 +81,16 @@ export class ScanLifecycleConsumer implements OnApplicationBootstrap {
       });
       this.log.info({ scanId: scan.id, status: scan.status }, 'scan completed');
       // Additive Check Run from concludeScan, GitHub Deployment status from
-      // concludeDeploy, GitLab Commit Status from concludeScan, and GitLab
-      // Deployment PUT from concludeDeploy. Org is the signed event / scan
-      // row, never a client header. Any order is fine; each publisher
-      // soft-fails independently (do not roll back this terminal status or
-      // poison GET).
+      // concludeDeploy, GitLab Commit Status from concludeScan, GitLab
+      // Deployment PUT from concludeDeploy, and Bitbucket Cloud build status
+      // from concludeScan. Org is the signed event / scan row, never a client
+      // header. Any order is fine; each publisher soft-fails independently
+      // (do not roll back this terminal status or poison GET).
       await this.checks.publishForCompletedScan(result.orgId, scan.id);
       await this.deployments.publishForCompletedScan(result.orgId, scan.id);
       await this.gitlabStatuses.publishForCompletedScan(result.orgId, scan.id);
       await this.gitlabDeployments.publishForCompletedScan(result.orgId, scan.id);
+      await this.bitbucketStatuses.publishForCompletedScan(result.orgId, scan.id);
     }
   }
 }
