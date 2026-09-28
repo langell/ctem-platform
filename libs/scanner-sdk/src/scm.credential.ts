@@ -1,11 +1,10 @@
 /**
- * Same allowlist as `apps/asset-service/src/connectors/credentials.ts`.
- * Env refs are platform-operated: only `GITHUB_*` / `GITLAB_*` names, never a
- * tenant-writable read of replica secrets. A set-but-unusable credentialRef
- * must fail the job.
+ * Scanner checkout env refs are platform-operated: only `GITHUB_*` /
+ * `GITLAB_*` / `BITBUCKET_*` names, never a tenant-writable read of replica
+ * secrets. A set-but-unusable credentialRef must fail the job.
  */
 
-const ENV_ALLOWLIST = /^(GITHUB|GITLAB)_[A-Z0-9_]+$/;
+const ENV_ALLOWLIST = /^(GITHUB|GITLAB|BITBUCKET)_[A-Z0-9_]+$/;
 
 export function resolveGithubCredential(ref: string | null): string | undefined {
   if (!ref) return undefined;
@@ -17,7 +16,7 @@ export function resolveGithubCredential(ref: string | null): string | undefined 
   if (scheme === 'env') {
     if (!key || !ENV_ALLOWLIST.test(key)) {
       throw new Error(
-        `credentialRef 'env:${key || '<empty>'}' is not allowlisted — env: is platform-operated and only GITHUB_* / GITLAB_* names are permitted`,
+        `credentialRef 'env:${key || '<empty>'}' is not allowlisted — env: is platform-operated and only GITHUB_* / GITLAB_* / BITBUCKET_* names are permitted`,
       );
     }
     return process.env[key] || undefined;

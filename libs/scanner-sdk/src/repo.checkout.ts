@@ -10,7 +10,14 @@ const execFileAsync = promisify(execFile);
 
 const SAFE_REF = /^[A-Za-z0-9._/-]+$/;
 const SCM_SEGMENT = /^[\w.-]+$/;
-const ALLOWED_CLONE_HOSTS = new Set(['github.com', 'www.github.com', 'gitlab.com', 'www.gitlab.com']);
+const ALLOWED_CLONE_HOSTS = new Set([
+  'github.com',
+  'www.github.com',
+  'gitlab.com',
+  'www.gitlab.com',
+  'bitbucket.org',
+  'www.bitbucket.org',
+]);
 
 export class CheckoutError extends Error {
   constructor(message: string) {
@@ -34,16 +41,20 @@ export interface ResolvedCheckout {
  * The SDK already creates and deletes that directory — this does not invent
  * a second sandbox.
  *
- * Egress is allowlisted: `https://github.com/owner/repo` or
- * `https://gitlab.com/owner/repo` (nested GitLab groups allowed) from
- * `cloneUrl`, or a `github:owner/repo` / `gitlab:owner/repo` externalKey.
- * The github:/gitlab: key is the asset identity: when both a cloneUrl and a
- * key are present they must canonicalize to the same host+path or the job
- * fails closed (a tenant-writable cloneUrl cannot redirect the clone).
- * Tenant-writable `htmlUrl` / `url` / `git@` are refused. Missing or refused
- * sources throw so the job fails closed instead of scanning an empty workDir.
- * Self-hosted GitLab is the connector `gitlabHost` (from `baseUrl`) — clone
- * and identity use that host, not an arbitrary hostname in cloneUrl.
+ * Egress is allowlisted: `https://github.com/owner/repo`,
+ * `https://gitlab.com/owner/repo` (nested GitLab groups allowed), or
+ * Bitbucket Cloud `https://bitbucket.org/{workspace}/{repo_slug}` (exactly
+ * two segments) from `cloneUrl`, or a `github:owner/repo` /
+ * `gitlab:owner/repo` / `bitbucket:{workspace}/{repo_slug}` externalKey.
+ * The github:/gitlab:/bitbucket: key is the asset identity: when both a
+ * cloneUrl and a key are present they must canonicalize to the same
+ * host+path or the job fails closed (a tenant-writable cloneUrl cannot
+ * redirect the clone). Tenant-writable `htmlUrl` / `url` / `git@` are
+ * refused. Missing or refused sources throw so the job fails closed instead
+ * of scanning an empty workDir. Self-hosted GitLab is the connector
+ * `gitlabHost` (from `baseUrl`) — clone and identity use that host, not an
+ * arbitrary hostname in cloneUrl. Bitbucket is Cloud-only (`bitbucket.org`);
+ * there is no Server/Data Center or tenant `bitbucketHost`.
  */
 @Injectable()
 export class GitRepoCheckout implements RepoCheckout {
@@ -89,7 +100,7 @@ export function resolveCloneUrl(target: Record<string, unknown>): string {
     return fromKey;
   }
   throw new CheckoutError(
-    'Source scan needs an allowlisted clone source (cloneUrl on github.com or gitlab.com, or github:owner/repo / gitlab:owner/repo). ' +
+    'Source scan needs an allowlisted clone source (cloneUrl on github.com, gitlab.com, or bitbucket.org, or github:owner/repo / gitlab:owner/repo / bitbucket:workspace/repo). ' +
       'htmlUrl / url / git@ are refused so tenant-writable target metadata cannot drive scanner egress.',
   );
 }
@@ -114,11 +125,7 @@ export function allowlistedCloneHttps(raw: string, allowedGitlabHost?: string): 
   }
   const canonical = canonicalCloneHost(parsed.hostname, allowedGitlabHost);
   if (!canonical) {
-    throw new CheckoutError(
-      allowedGitlabHost
-        ? `Refusing clone host '${parsed.hostname}' — only github.com, gitlab.com, and the configured GitLab host '${allowedGitlabHost}' are allowlisted`
-        : `Refusing clone host '${parsed.hostname}' — only github.com and gitlab.com are allowlisted`,
-    );
+    throw new CheckoutError(refusedCloneHostMessage(parsed.hostname, allowedGitlabHost));
   }
   if (parsed.port && parsed.port !== '443') {
     throw new CheckoutError(`Refusing clone URL with non-default port: ${raw}`);
@@ -132,6 +139,12 @@ export function allowlistedCloneHttps(raw: string, allowedGitlabHost?: string): 
       throw new CheckoutError(`Refusing clone URL with an unexpected GitHub path: ${raw}`);
     }
     return `https://github.com/${parts[0]}/${parts[1]}.git`;
+  }
+  if (canonical === 'bitbucket.org') {
+    if (parts.length !== 2 || !parts.every((p) => SCM_SEGMENT.test(p))) {
+      throw new CheckoutError(`Refusing clone URL with an unexpected Bitbucket Cloud path: ${raw}`);
+    }
+    return `https://bitbucket.org/${parts[0]}/${parts[1]}.git`;
   }
   if (parts.length < 2 || parts.length > 10 || !parts.every((p) => SCM_SEGMENT.test(p))) {
     throw new CheckoutError(`Refusing clone URL with an unexpected GitLab path: ${raw}`);
@@ -147,6 +160,14 @@ export function githubKeyToHttps(externalKey: string): string {
   return `https://github.com/${m[1]}/${m[2]}.git`;
 }
 
+export function bitbucketKeyToHttps(externalKey: string): string {
+  const m = /^bitbucket:([\w.-]+)\/([\w.-]+)$/.exec(externalKey);
+  if (!m) {
+    throw new CheckoutError(`Refusing malformed bitbucket externalKey: ${externalKey}`);
+  }
+  return `https://bitbucket.org/${m[1]}/${m[2]}.git`;
+}
+
 export function gitlabKeyToHttps(externalKey: string, host = 'gitlab.com'): string {
   const m = /^gitlab:([\w.-]+(?:\/[\w.-]+)+)$/.exec(externalKey);
   if (!m) {
@@ -159,10 +180,11 @@ export function gitlabKeyToHttps(externalKey: string, host = 'gitlab.com'): stri
   return `https://${host}/${m[1]}.git`;
 }
 
-/** github: / gitlab: keys only — other externalKeys are not clone identities. */
+/** github: / gitlab: / bitbucket: keys only — other externalKeys are not clone identities. */
 function httpsFromScmIdentityKey(externalKey: string, gitlabHost?: string): string | null {
   if (externalKey.startsWith('github:')) return githubKeyToHttps(externalKey);
   if (externalKey.startsWith('gitlab:')) return gitlabKeyToHttps(externalKey, gitlabHost ?? 'gitlab.com');
+  if (externalKey.startsWith('bitbucket:')) return bitbucketKeyToHttps(externalKey);
   return null;
 }
 
@@ -171,11 +193,7 @@ function canonicalHostPath(url: string, allowedGitlabHost?: string): string {
   const parsed = new URL(url);
   const host = canonicalCloneHost(parsed.hostname, allowedGitlabHost);
   if (!host) {
-    throw new CheckoutError(
-      allowedGitlabHost
-        ? `Refusing clone host '${parsed.hostname}' — only github.com, gitlab.com, and the configured GitLab host '${allowedGitlabHost}' are allowlisted`
-        : `Refusing clone host '${parsed.hostname}' — only github.com and gitlab.com are allowlisted`,
-    );
+    throw new CheckoutError(refusedCloneHostMessage(parsed.hostname, allowedGitlabHost));
   }
   const path = parsed.pathname.replace(/\.git$/, '').replace(/\/+$/, '');
   return `${host}${path}`.toLowerCase();
@@ -185,8 +203,23 @@ function canonicalCloneHost(hostname: string, allowedGitlabHost?: string): strin
   const host = hostname.toLowerCase().replace(/\.$/, '');
   if (host === 'github.com' || host === 'www.github.com') return 'github.com';
   if (host === 'gitlab.com' || host === 'www.gitlab.com') return 'gitlab.com';
+  if (host === 'bitbucket.org' || host === 'www.bitbucket.org') return 'bitbucket.org';
   if (allowedGitlabHost && host === allowedGitlabHost) return allowedGitlabHost;
   return null;
+}
+
+/** Keep the GitHub/GitLab phrase other scanners assert, and name Bitbucket Cloud. */
+function refusedCloneHostMessage(hostname: string, allowedGitlabHost?: string): string {
+  if (allowedGitlabHost) {
+    return (
+      `Refusing clone host '${hostname}' — only github.com, gitlab.com, and the configured GitLab host '${allowedGitlabHost}' are allowlisted` +
+      '; Bitbucket Cloud (bitbucket.org) is also allowlisted'
+    );
+  }
+  return (
+    `Refusing clone host '${hostname}' — only github.com and gitlab.com are allowlisted` +
+    '; Bitbucket Cloud (bitbucket.org) is also allowlisted'
+  );
 }
 
 /**
@@ -220,7 +253,13 @@ function parseTargetGitlabHost(target: Record<string, unknown>): string | undefi
     throw new CheckoutError('Refusing gitlabHost with a non-default port');
   }
   const host = parsed.hostname.toLowerCase().replace(/\.$/, '');
-  if (!host || host === 'github.com' || host === 'www.github.com') {
+  if (
+    !host ||
+    host === 'github.com' ||
+    host === 'www.github.com' ||
+    host === 'bitbucket.org' ||
+    host === 'www.bitbucket.org'
+  ) {
     throw new CheckoutError(`Refusing gitlabHost '${parsed.hostname}'`);
   }
   if (host === 'www.gitlab.com') return 'gitlab.com';
@@ -244,11 +283,11 @@ function requireUsableCredential(job: Pick<ScanJob, 'target' | 'credentialRef'>)
     if (ref) {
       throw new CheckoutError(
         `credentialRef '${ref}' is set but cannot be used — refusing to clone unauthenticated ` +
-          '(private GitHub/GitLab assets would be missed; a public-only clone must not report empty success)',
+          '(private GitHub/GitLab/Bitbucket Cloud assets would be missed; a public-only clone must not report empty success)',
       );
     }
     throw new CheckoutError(
-      'Private repository requires a usable credentialRef (env:GITHUB_* or env:GITLAB_*). ' +
+      'Private repository requires a usable credentialRef (env:GITHUB_* or env:GITLAB_* or env:BITBUCKET_*). ' +
         'Refusing to clone unauthenticated.',
     );
   }
@@ -265,9 +304,15 @@ export function gitlabHttpExtraHeader(token: string): string {
   return basicAuthExtraHeader('oauth2', token);
 }
 
+/** Bitbucket Cloud HTTPS — access token / app password, basic user `x-token-auth`. */
+export function bitbucketHttpExtraHeader(token: string): string {
+  return basicAuthExtraHeader('x-token-auth', token);
+}
+
 export function cloneHttpExtraHeader(url: string, token: string): string {
-  const host = new URL(url).hostname.toLowerCase();
+  const host = new URL(url).hostname.toLowerCase().replace(/\.$/, '');
   if (host === 'github.com' || host === 'www.github.com') return githubHttpExtraHeader(token);
+  if (host === 'bitbucket.org' || host === 'www.bitbucket.org') return bitbucketHttpExtraHeader(token);
   return gitlabHttpExtraHeader(token);
 }
 

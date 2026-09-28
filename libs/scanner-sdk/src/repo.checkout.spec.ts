@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   CheckoutError,
+  bitbucketHttpExtraHeader,
+  cloneHttpExtraHeader,
   githubHttpExtraHeader,
   gitlabHttpExtraHeader,
   gitCheckoutCommands,
@@ -13,6 +15,7 @@ import {
 afterEach(() => {
   delete process.env.GITHUB_TOKEN;
   delete process.env.GITLAB_TOKEN;
+  delete process.env.BITBUCKET_TOKEN;
 });
 
 describe('resolveCloneUrl', () => {
@@ -43,6 +46,71 @@ describe('resolveCloneUrl', () => {
     );
   });
 
+  it('synthesizes a Bitbucket Cloud URL from bitbucket: externalKey', () => {
+    expect(resolveCloneUrl({ kind: 'repository', externalKey: 'bitbucket:acme/api' })).toBe(
+      'https://bitbucket.org/acme/api.git',
+    );
+  });
+
+  it('accepts an allowlisted cloneUrl on bitbucket.org', () => {
+    expect(resolveCloneUrl({ cloneUrl: 'https://bitbucket.org/acme/api.git' })).toBe(
+      'https://bitbucket.org/acme/api.git',
+    );
+    expect(resolveCloneUrl({ cloneUrl: 'https://www.bitbucket.org/acme/api' })).toBe(
+      'https://bitbucket.org/acme/api.git',
+    );
+  });
+
+  it('refuses Bitbucket lookalikes, nested paths, and Server-style hosts', () => {
+    expect(() => resolveCloneUrl({ cloneUrl: 'https://bitbucket.org.evil.example/acme/api.git' })).toThrow(
+      /Bitbucket Cloud \(bitbucket\.org\)/,
+    );
+    expect(() => resolveCloneUrl({ cloneUrl: 'https://evil.bitbucket.org/acme/api.git' })).toThrow(
+      /only github.com and gitlab.com are allowlisted/,
+    );
+    expect(() => resolveCloneUrl({ cloneUrl: 'https://api.bitbucket.org/acme/api.git' })).toThrow(/allowlisted/);
+    expect(() => resolveCloneUrl({ cloneUrl: 'https://notbitbucket.org/acme/api.git' })).toThrow(/allowlisted/);
+    expect(() => resolveCloneUrl({ cloneUrl: 'https://bitbucket.example.com/scm/acme/api.git' })).toThrow(
+      /allowlisted/,
+    );
+    expect(() => resolveCloneUrl({ cloneUrl: 'https://bitbucket.org/acme/group/api.git' })).toThrow(
+      /unexpected Bitbucket Cloud path/,
+    );
+    expect(() => resolveCloneUrl({ cloneUrl: 'https://bitbucket.org/acme.git' })).toThrow(
+      /unexpected Bitbucket Cloud path/,
+    );
+    expect(() => resolveCloneUrl({ cloneUrl: 'https://bitbucket.org:8443/acme/api.git' })).toThrow(/non-default port/);
+    expect(() => resolveCloneUrl({ cloneUrl: 'https://user:token@bitbucket.org/acme/api.git' })).toThrow(
+      /embeds credentials/,
+    );
+    expect(() => resolveCloneUrl({ cloneUrl: 'git@bitbucket.org:acme/api.git' })).toThrow(/git@/);
+    expect(() => resolveCloneUrl({ cloneUrl: 'ssh://git@bitbucket.org/acme/api.git' })).toThrow(/ssh/);
+    expect(() => resolveCloneUrl({ externalKey: 'bitbucket:acme/group/api' })).toThrow(
+      /malformed bitbucket externalKey/,
+    );
+  });
+
+  it('ignores tenant bitbucketHost and does not let gitlabHost retarget Bitbucket Cloud', () => {
+    expect(() =>
+      resolveCloneUrl({
+        bitbucketHost: 'bitbucket.example.com',
+        cloneUrl: 'https://bitbucket.example.com/acme/api.git',
+      }),
+    ).toThrow(/allowlisted/);
+    expect(
+      resolveCloneUrl({
+        externalKey: 'bitbucket:acme/api',
+        gitlabHost: 'gitlab.example.com',
+      }),
+    ).toBe('https://bitbucket.org/acme/api.git');
+    expect(() =>
+      resolveCloneUrl({
+        externalKey: 'bitbucket:acme/api',
+        gitlabHost: 'bitbucket.org',
+      }),
+    ).toThrow(/Refusing gitlabHost/);
+  });
+
   it('proceeds when cloneUrl and a github:/gitlab: key canonicalize to the same host+path', () => {
     expect(
       resolveCloneUrl({
@@ -65,6 +133,13 @@ describe('resolveCloneUrl', () => {
         cloneUrl: 'https://gitlab.com/acme/platform/api.git',
       }),
     ).toBe('https://gitlab.com/acme/platform/api.git');
+    expect(
+      resolveCloneUrl({
+        kind: 'repository',
+        externalKey: 'bitbucket:acme/api',
+        cloneUrl: 'https://www.bitbucket.org/acme/api.git',
+      }),
+    ).toBe('https://bitbucket.org/acme/api.git');
   });
 
   it('fails closed when cloneUrl points at a different owner/repo than the github:/gitlab: key', () => {
@@ -89,6 +164,20 @@ describe('resolveCloneUrl', () => {
         cloneUrl: 'https://gitlab.com/acme/api.git',
       }),
     ).toThrow(/does not match asset identity/);
+    expect(() =>
+      resolveCloneUrl({
+        kind: 'repository',
+        externalKey: 'bitbucket:acme/api',
+        cloneUrl: 'https://bitbucket.org/evil/other.git',
+      }),
+    ).toThrow(/does not match asset identity 'bitbucket:acme\/api'/);
+    expect(() =>
+      resolveCloneUrl({
+        kind: 'repository',
+        externalKey: 'bitbucket:acme/api',
+        cloneUrl: 'https://github.com/acme/api.git',
+      }),
+    ).toThrow(/does not match asset identity/);
   });
 
   it('ignores htmlUrl even when it points at GitHub — tenant-writable metadata is not egress', () => {
@@ -99,7 +188,7 @@ describe('resolveCloneUrl', () => {
 
   it('refuses a non-allowlisted cloneUrl host', () => {
     expect(() => resolveCloneUrl({ cloneUrl: 'https://evil.example/acme/api.git' })).toThrow(
-      /only github.com and gitlab.com are allowlisted/,
+      /only github.com and gitlab.com are allowlisted; Bitbucket Cloud \(bitbucket\.org\) is also allowlisted/,
     );
     expect(() => resolveCloneUrl({ cloneUrl: 'https://gitlab.example.com/acme/api.git' })).toThrow(
       /only github.com and gitlab.com are allowlisted/,
@@ -249,6 +338,43 @@ describe('resolveCheckout credentials', () => {
     });
   });
 
+  it('fails closed on a private Bitbucket target without a usable BITBUCKET_* credential', () => {
+    expect(() =>
+      resolveCheckout({
+        target: { kind: 'repository', externalKey: 'bitbucket:acme/api', private: true },
+        credentialRef: null,
+      }),
+    ).toThrow(/env:BITBUCKET_\*/);
+    expect(() =>
+      resolveCheckout({
+        target: { kind: 'repository', cloneUrl: 'https://bitbucket.org/acme/api.git', visibility: 'private' },
+        credentialRef: 'env:BITBUCKET_TOKEN',
+      }),
+    ).toThrow(/cannot be used/);
+  });
+
+  it('uses an allowlisted BITBUCKET_* token for a Bitbucket Cloud target', () => {
+    process.env.BITBUCKET_TOKEN = 'bb_token';
+    expect(
+      resolveCheckout({
+        target: { kind: 'repository', externalKey: 'bitbucket:acme/api' },
+        credentialRef: 'env:BITBUCKET_TOKEN',
+      }),
+    ).toEqual({
+      url: 'https://bitbucket.org/acme/api.git',
+      token: 'bb_token',
+    });
+  });
+
+  it('clones public Bitbucket Cloud without a credential', () => {
+    expect(
+      resolveCheckout({
+        target: { kind: 'repository', cloneUrl: 'https://bitbucket.org/acme/api.git' },
+        credentialRef: null,
+      }),
+    ).toEqual({ url: 'https://bitbucket.org/acme/api.git' });
+  });
+
   it('uses an allowlisted GITLAB_* token for a self-hosted GitLab target', () => {
     process.env.GITLAB_TOKEN = 'glpat_test';
     expect(
@@ -311,6 +437,39 @@ describe('shallowClone', () => {
     expect(envs.every((opts) => !opts.env?.GIT_CONFIG_VALUE_0?.includes(token))).toBe(true);
   });
 
+  it('uses x-token-auth for bitbucket.org and leaves GitHub and GitLab users unchanged', () => {
+    const token = 'bb_not_for_remote_url';
+    const header = cloneHttpExtraHeader('https://bitbucket.org/acme/api.git', token);
+    expect(header).toBe(bitbucketHttpExtraHeader(token));
+    expect(Buffer.from(header.replace('AUTHORIZATION: basic ', ''), 'base64').toString('utf8')).toBe(
+      `x-token-auth:${token}`,
+    );
+    expect(header).not.toContain(token);
+    expect(cloneHttpExtraHeader('https://www.bitbucket.org/acme/api.git', token)).toBe(header);
+    expect(cloneHttpExtraHeader('https://github.com/acme/api.git', token)).toBe(githubHttpExtraHeader(token));
+    expect(cloneHttpExtraHeader('https://gitlab.com/acme/api.git', token)).toBe(gitlabHttpExtraHeader(token));
+    expect(cloneHttpExtraHeader('https://gitlab.example.com/acme/api.git', token)).toBe(gitlabHttpExtraHeader(token));
+  });
+
+  it('passes a Bitbucket token as extraHeader and never embeds it in the remote URL', async () => {
+    const token = 'bb_not_for_remote_url';
+    const exec = vi.fn(async () => ({ stdout: '', stderr: '' }));
+    await shallowClone('https://bitbucket.org/acme/api.git', 'main', '/tmp/work', {
+      exec: exec as never,
+      token,
+    });
+
+    const argLists = exec.mock.calls.map((c) => c[1] as string[]);
+    expect(argLists.some((args) => args.includes('https://bitbucket.org/acme/api.git'))).toBe(true);
+    expect(JSON.stringify(argLists)).not.toContain(token);
+    expect(JSON.stringify(argLists)).not.toContain('x-token-auth');
+
+    const envs = exec.mock.calls.map((c) => c[2] as { env?: NodeJS.ProcessEnv });
+    expect(envs.every((opts) => opts.env?.GIT_CONFIG_KEY_0 === 'http.extraHeader')).toBe(true);
+    expect(envs.every((opts) => opts.env?.GIT_CONFIG_VALUE_0 === bitbucketHttpExtraHeader(token))).toBe(true);
+    expect(envs.every((opts) => !opts.env?.GIT_CONFIG_VALUE_0?.includes(token))).toBe(true);
+  });
+
   it('passes a GitLab PAT as extraHeader and never embeds it in the remote URL', async () => {
     const token = 'glpat_not_for_remote_url';
     const exec = vi.fn(async () => ({ stdout: '', stderr: '' }));
@@ -338,6 +497,18 @@ describe('shallowClone', () => {
     await expect(
       shallowClone('https://oauth2:glpat_leak@gitlab.com/acme/api.git', 'main', '/tmp/w'),
     ).rejects.toThrow(/embeds credentials/);
+  });
+
+  it('allows a bitbucket.org origin and refuses a Server-style host', async () => {
+    const exec = vi.fn(async () => ({ stdout: '', stderr: '' }));
+    await shallowClone('https://bitbucket.org/acme/api.git', 'main', '/tmp/work', { exec: exec as never });
+    expect(exec).toHaveBeenCalled();
+    await expect(shallowClone('https://bitbucket.example.com/acme/api.git', 'main', '/tmp/w')).rejects.toThrow(
+      /unsupported scheme or host/,
+    );
+    await expect(shallowClone('https://bitbucket.org.evil.example/acme/api.git', 'main', '/tmp/w')).rejects.toThrow(
+      /unsupported scheme or host/,
+    );
   });
 
   it('allows a gitlab.com origin and refuses a self-hosted host', async () => {
