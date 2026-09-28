@@ -1,0 +1,40 @@
+# Nightly metrics, published to GitHub Pages.
+# Enable Pages first: Settings -> Pages -> Source: GitHub Actions.
+name: agent-dora
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: agent-dora
+  cancel-in-progress: true
+
+jobs:
+  metrics:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # durability needs full history
+
+      - uses: langell/agent-dora@v0
+        id: dora
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ steps.dora.outputs.report-dir }}
+
+      - uses: actions/deploy-pages@v4
+        id: deploy
