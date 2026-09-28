@@ -4,6 +4,7 @@ import { isPrivateTarget, resolveGithubCredential } from './scm.credential';
 afterEach(() => {
   delete process.env.GITHUB_TOKEN;
   delete process.env.GITLAB_TOKEN;
+  delete process.env.BITBUCKET_TOKEN;
 });
 
 describe('resolveGithubCredential', () => {
@@ -19,6 +20,15 @@ describe('resolveGithubCredential', () => {
   it('reads an allowlisted GITLAB_* env var', () => {
     process.env.GITLAB_TOKEN = 'glpat_test';
     expect(resolveGithubCredential('env:GITLAB_TOKEN')).toBe('glpat_test');
+  });
+
+  it('reads an allowlisted BITBUCKET_* env var', () => {
+    process.env.BITBUCKET_TOKEN = 'bb_token';
+    expect(resolveGithubCredential('env:BITBUCKET_TOKEN')).toBe('bb_token');
+  });
+
+  it('returns undefined when BITBUCKET_* is unset', () => {
+    expect(resolveGithubCredential('env:BITBUCKET_TOKEN')).toBeUndefined();
   });
 
   it('refuses env:DATABASE_URL', () => {
