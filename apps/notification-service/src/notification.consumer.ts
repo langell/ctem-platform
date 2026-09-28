@@ -49,9 +49,10 @@ export class NotificationConsumer implements OnApplicationBootstrap {
       },
     );
 
-    // Policy hits become Slack on notify and Jira on ticket. Hosts are
-    // platform env:SLACK_* / env:JIRA_* — not tenant config/body/query,
-    // not message.target. CORS and unknown query forwarding stay comments.
+    // Policy hits enqueue one notification per channel. HTTP stays on
+    // notification-dispatch (env:SLACK_* / env:JIRA_* — not tenant config,
+    // body, query, or message.target). CORS and unknown query forwarding
+    // stay comments.
     await this.bus.subscribe(
       SUBJECTS.policyViolated,
       { durable: 'notification-policy' },
@@ -62,7 +63,9 @@ export class NotificationConsumer implements OnApplicationBootstrap {
           actions: string[];
         };
         this.log.info({ orgId: envelope.orgId, payload: notice }, 'policy violation received');
-        await dispatchPolicyViolated(envelope.orgId, notice, { slack: this.slack, jira: this.jira });
+        await dispatchPolicyViolated(envelope.orgId, notice, this.bus, {
+          causationId: envelope.causationId,
+        });
       },
     );
   }

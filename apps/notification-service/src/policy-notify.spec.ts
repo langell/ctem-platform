@@ -1,31 +1,25 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { JiraChannel } from './channels/jira.channel';
-import { SlackChannel } from './channels/slack.channel';
+import { describe, expect, it, vi } from 'vitest';
+import { NotificationRequestedPayload, SUBJECTS } from '@ctem/contracts';
+import type { EventBus } from '@ctem/events';
 import { dispatchPolicyViolated, shouldNotify, shouldTicket } from './policy-notify';
 
-const HOOK = 'https://hooks.slack.com/services/TEST/HOOK/dummy';
-const SITE = 'https://acme.atlassian.net';
-const TENANT_HOOK = 'https://evil.example/hooks/steal';
-const TENANT_JIRA = 'https://evil.example/rest/api/3/issue';
 const orgId = '11111111-1111-4111-8111-111111111111';
 const findingId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const policyId = '00000000-0000-4000-8000-00000000c7e1';
+const causationId = '44444444-4444-4444-8444-444444444444';
 
-function setJiraEnv() {
-  process.env.JIRA_API_TOKEN = 'jira-token';
-  process.env.JIRA_EMAIL = 'sec@example.com';
-  process.env.JIRA_BASE_URL = SITE;
-  process.env.JIRA_PROJECT_KEY = 'SEC';
+function requested(channel: 'slack' | 'jira', actions: string[]) {
+  return {
+    channel,
+    template: 'policy.violated',
+    target: channel,
+    data: { findingId, policyId, actions },
+  };
 }
 
-afterEach(() => {
-  vi.unstubAllGlobals();
-  delete process.env.SLACK_WEBHOOK_URL;
-  delete process.env.JIRA_API_TOKEN;
-  delete process.env.JIRA_EMAIL;
-  delete process.env.JIRA_BASE_URL;
-  delete process.env.JIRA_PROJECT_KEY;
-});
+function mockBus(publish = vi.fn(async () => undefined)) {
+  return { publish, bus: { publish } as Pick<EventBus, 'publish'> };
+}
 
 describe('shouldNotify / shouldTicket', () => {
   it('is true only when actions include notify', () => {
@@ -48,112 +42,90 @@ describe('shouldNotify / shouldTicket', () => {
 });
 
 describe('dispatchPolicyViolated', () => {
-  it('POSTs to the allowlisted Slack hook on policy.violated notify', async () => {
-    process.env.SLACK_WEBHOOK_URL = HOOK;
-    const fetchFn = vi.fn(async () => new Response('ok', { status: 200 }));
-    vi.stubGlobal('fetch', fetchFn);
+  it('publishes slack then jira notificationRequested and does not send channels', async () => {
+    const actions = ['notify', 'ticket'];
+    const { publish, bus } = mockBus();
 
-    await dispatchPolicyViolated(
+    await dispatchPolicyViolated(orgId, { findingId, policyId, actions }, bus, { causationId });
+
+    expect(publish).toHaveBeenCalledTimes(2);
+    expect(publish.mock.calls[0]).toEqual([
+      SUBJECTS.notificationRequested,
       orgId,
-      { findingId, policyId, actions: ['notify'] },
-      { slack: new SlackChannel(), jira: new JiraChannel() },
+      requested('slack', actions),
+      { causationId },
+    ]);
+    expect(publish.mock.calls[1]).toEqual([
+      SUBJECTS.notificationRequested,
+      orgId,
+      requested('jira', actions),
+      { causationId },
+    ]);
+    expect(NotificationRequestedPayload.parse(publish.mock.calls[0][2])).toEqual(
+      requested('slack', actions),
     );
-
-    expect(fetchFn).toHaveBeenCalledTimes(1);
-    expect(fetchFn.mock.calls[0][0]).toBe(HOOK);
-    const body = JSON.parse(String((fetchFn.mock.calls[0][1] as RequestInit).body));
-    expect(body.text).toContain(findingId);
-    expect(body.text).toContain(policyId);
+    expect(NotificationRequestedPayload.parse(publish.mock.calls[1][2])).toEqual(
+      requested('jira', actions),
+    );
   });
 
-  it('POSTs a Jira issue to the allowlisted Atlassian host on ticket', async () => {
-    setJiraEnv();
-    const fetchFn = vi.fn(async () => new Response(JSON.stringify({ key: 'SEC-1' }), { status: 201 }));
-    vi.stubGlobal('fetch', fetchFn);
+  it('publishes only slack when actions include notify and omit ticket', async () => {
+    const actions = ['notify', 'fail_build'];
+    const { publish, bus } = mockBus();
 
-    await dispatchPolicyViolated(
-      orgId,
-      { findingId, policyId, actions: ['ticket'] },
-      { slack: new SlackChannel(), jira: new JiraChannel() },
-    );
+    await dispatchPolicyViolated(orgId, { findingId, policyId, actions }, bus);
 
-    expect(fetchFn).toHaveBeenCalledTimes(1);
-    expect(fetchFn.mock.calls[0][0]).toBe(`${SITE}/rest/api/3/issue`);
-    expect(new URL(String(fetchFn.mock.calls[0][0])).hostname).toBe('acme.atlassian.net');
+    expect(publish).toHaveBeenCalledTimes(1);
+    expect(publish.mock.calls[0][0]).toBe(SUBJECTS.notificationRequested);
+    expect(publish.mock.calls[0][2]).toEqual(requested('slack', actions));
   });
 
-  it('does not POST Slack when the matched actions omit notify', async () => {
-    process.env.SLACK_WEBHOOK_URL = HOOK;
-    setJiraEnv();
-    const fetchFn = vi.fn(async () => new Response(JSON.stringify({ key: 'SEC-1' }), { status: 201 }));
-    vi.stubGlobal('fetch', fetchFn);
-    await dispatchPolicyViolated(
-      orgId,
-      { findingId, policyId, actions: ['ticket'] },
-      { slack: new SlackChannel(), jira: new JiraChannel() },
-    );
-    expect(fetchFn).toHaveBeenCalledTimes(1);
-    expect(String(fetchFn.mock.calls[0][0])).toContain('atlassian.net');
-    expect(String(fetchFn.mock.calls[0][0])).not.toContain('hooks.slack.com');
+  it('publishes only jira when actions include ticket and omit notify', async () => {
+    const actions = ['ticket', 'block_deploy'];
+    const { publish, bus } = mockBus();
+
+    await dispatchPolicyViolated(orgId, { findingId, policyId, actions }, bus);
+
+    expect(publish).toHaveBeenCalledTimes(1);
+    expect(publish.mock.calls[0][2]).toEqual(requested('jira', actions));
   });
 
-  it('does not POST Jira when the matched actions omit ticket', async () => {
-    process.env.SLACK_WEBHOOK_URL = HOOK;
-    setJiraEnv();
-    const fetchFn = vi.fn(async () => new Response('ok', { status: 200 }));
-    vi.stubGlobal('fetch', fetchFn);
-    await dispatchPolicyViolated(
-      orgId,
-      { findingId, policyId, actions: ['notify'] },
-      { slack: new SlackChannel(), jira: new JiraChannel() },
-    );
-    expect(fetchFn).toHaveBeenCalledTimes(1);
-    expect(fetchFn.mock.calls[0][0]).toBe(HOOK);
+  it('does not publish when actions omit notify and ticket', async () => {
+    for (const actions of [['fail_build'], ['block_deploy'], []] as string[][]) {
+      const { publish, bus } = mockBus();
+      await dispatchPolicyViolated(orgId, { findingId, policyId, actions }, bus);
+      expect(publish).not.toHaveBeenCalled();
+    }
   });
 
-  it('fails closed on missing SLACK_* and never POSTs a tenant webhook', async () => {
-    const fetchFn = vi.fn(async () => new Response('ok', { status: 200 }));
-    vi.stubGlobal('fetch', fetchFn);
-    const slack = {
-      name: 'slack',
-      send: (msg: { target: string; data: Record<string, unknown> }) =>
-        new SlackChannel().send({
-          orgId,
-          template: 'policy.violated',
-          target: TENANT_HOOK,
-          data: { ...msg.data, webhookUrl: TENANT_HOOK },
-        }),
-    };
+  it('throws when slack publish fails and does not enqueue jira', async () => {
+    const publish = vi.fn(async () => {
+      throw new Error('bus down');
+    });
     await expect(
       dispatchPolicyViolated(
         orgId,
-        { findingId, policyId, actions: ['notify'] },
-        { slack, jira: new JiraChannel() },
+        { findingId, policyId, actions: ['notify', 'ticket'] },
+        { publish },
       ),
-    ).rejects.toThrow(/fails closed/);
-    expect(fetchFn).not.toHaveBeenCalled();
+    ).rejects.toThrow(/bus down/);
+    expect(publish).toHaveBeenCalledTimes(1);
+    expect(publish.mock.calls[0][2]).toMatchObject({ channel: 'slack' });
   });
 
-  it('fails closed on missing JIRA_* and never POSTs a tenant Jira URL', async () => {
-    const fetchFn = vi.fn(async () => new Response('ok', { status: 200 }));
-    vi.stubGlobal('fetch', fetchFn);
-    const jira = {
-      name: 'jira',
-      send: (msg: { target: string; data: Record<string, unknown> }) =>
-        new JiraChannel().send({
-          orgId,
-          template: 'policy.violated',
-          target: TENANT_JIRA,
-          data: { ...msg.data, jiraUrl: TENANT_JIRA },
-        }),
-    };
+  it('throws when jira publish fails after slack was enqueued', async () => {
+    const publish = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('bus down'));
     await expect(
       dispatchPolicyViolated(
         orgId,
-        { findingId, policyId, actions: ['ticket'] },
-        { slack: new SlackChannel(), jira },
+        { findingId, policyId, actions: ['notify', 'ticket'] },
+        { publish },
       ),
-    ).rejects.toThrow(/fails closed/);
-    expect(fetchFn).not.toHaveBeenCalled();
+    ).rejects.toThrow(/bus down/);
+    expect(publish).toHaveBeenCalledTimes(2);
+    expect(publish.mock.calls.map((call) => call[2].channel)).toEqual(['slack', 'jira']);
   });
 });
