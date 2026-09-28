@@ -12,6 +12,7 @@ import { InternalHttpPolicy } from '@ctem/resilience';
  *
  * - `egress:github-api` — GitHub repos and GHCR Packages REST (`api.github.com`)
  * - `egress:gitlab-api`
+ * - `egress:bitbucket-api` — Bitbucket Cloud repositories (`api.bitbucket.org`)
  * - `egress:aws-api` — AWS inventory and ECR discovery (including their STS calls)
  * - `egress:gcp-api` — GCP inventory, Artifact Registry, and the GCP token exchange
  * - `egress:azure-api` — ARM, ACR, and the Azure token exchange
@@ -31,6 +32,7 @@ import { InternalHttpPolicy } from '@ctem/resilience';
 
 export const EGRESS_GITHUB_API = 'egress:github-api';
 export const EGRESS_GITLAB_API = 'egress:gitlab-api';
+export const EGRESS_BITBUCKET_API = 'egress:bitbucket-api';
 export const EGRESS_AWS_API = 'egress:aws-api';
 export const EGRESS_GCP_API = 'egress:gcp-api';
 export const EGRESS_AZURE_API = 'egress:azure-api';
@@ -42,6 +44,7 @@ export const EGRESS_K8S_CONTROLPLANE = 'egress:k8s-controlplane';
 export type InventoryEgressCircuit =
   | typeof EGRESS_GITHUB_API
   | typeof EGRESS_GITLAB_API
+  | typeof EGRESS_BITBUCKET_API
   | typeof EGRESS_AWS_API
   | typeof EGRESS_GCP_API
   | typeof EGRESS_AZURE_API

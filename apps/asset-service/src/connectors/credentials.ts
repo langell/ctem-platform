@@ -5,8 +5,8 @@ import { createPrivateKey } from 'node:crypto';
  * never the credential itself. Schemes:
  *
  *   env:<VAR>  — platform-operated only. Reads a process environment variable
- *                whose name is allowlisted (`GITHUB_*`, `GITLAB_*`, `AWS_*`,
- *                `GCP_*`, `AZURE_*`, `QUAY_*`, or `DOCKERHUB_*`). This is not a tenant-writable secret store: a
+ *                whose name is allowlisted (`GITHUB_*`, `GITLAB_*`, `BITBUCKET_*`,
+ *                `AWS_*`, `GCP_*`, `AZURE_*`, `QUAY_*`, or `DOCKERHUB_*`). This is not a tenant-writable secret store: a
  *                tenant-supplied credentialRef cannot read DATABASE_URL, PATH,
  *                INTERNAL_TOKEN_SECRET, or other replica secrets. Every
  *                integration that points at the same env name shares that
@@ -17,7 +17,7 @@ import { createPrivateKey } from 'node:crypto';
  */
 
 /** Platform-controlled names only — not an open read of process.env. */
-const ENV_ALLOWLIST = /^(GITHUB|GITLAB|AWS|GCP|AZURE|QUAY|DOCKERHUB)_[A-Z0-9_]+$/;
+const ENV_ALLOWLIST = /^(GITHUB|GITLAB|BITBUCKET|AWS|GCP|AZURE|QUAY|DOCKERHUB)_[A-Z0-9_]+$/;
 
 export function resolveCredential(ref: string | null): string | undefined {
   if (!ref) return undefined;
@@ -29,7 +29,7 @@ export function resolveCredential(ref: string | null): string | undefined {
   if (scheme === 'env') {
     if (!key || !ENV_ALLOWLIST.test(key)) {
       throw new Error(
-        `credentialRef 'env:${key || '<empty>'}' is not allowlisted — env: is platform-operated and only GITHUB_* / GITLAB_* / AWS_* / GCP_* / AZURE_* / QUAY_* / DOCKERHUB_* names are permitted`,
+        `credentialRef 'env:${key || '<empty>'}' is not allowlisted — env: is platform-operated and only GITHUB_* / GITLAB_* / BITBUCKET_* / AWS_* / GCP_* / AZURE_* / QUAY_* / DOCKERHUB_* names are permitted`,
       );
     }
     return process.env[key] || undefined;
@@ -69,6 +69,44 @@ export function requireGithubToken(credentialRef: string | null): string {
   if (!token || !token.trim()) {
     throw new Error(
       `credentialRef '${credentialRef}' is set but cannot be used — refusing to list without usable GITHUB_* credentials`,
+    );
+  }
+
+  return token.trim();
+}
+
+const BITBUCKET_ENV_NAME = /^BITBUCKET_[A-Z0-9_]+$/;
+
+/**
+ * Bitbucket Cloud discovery has no unauthenticated public path. The
+ * integration pointer must be `env:BITBUCKET_*`, and the pointed token must
+ * be usable. A missing token must not list a workspace and report empty
+ * success (that would archiveStale unseen private repositories). Anonymous
+ * scrape is refused.
+ */
+export function requireBitbucketToken(credentialRef: string | null): string {
+  if (!credentialRef) {
+    throw new Error(
+      'Bitbucket discovery requires a usable credentialRef (env:BITBUCKET_*) — refusing unauthenticated listing',
+    );
+  }
+
+  const sep = credentialRef.indexOf(':');
+  const scheme = sep === -1 ? credentialRef : credentialRef.slice(0, sep);
+  const key = sep === -1 ? '' : credentialRef.slice(sep + 1);
+  if (scheme !== 'env' || !key || !BITBUCKET_ENV_NAME.test(key)) {
+    // Non-allowlisted names throw here without reading the secret (DATABASE_URL).
+    // Allowlisted-but-not-BITBUCKET names (GITHUB_*, GITLAB_*) are refused after that check.
+    resolveCredential(credentialRef);
+    throw new Error(
+      `credentialRef '${credentialRef}' is not an env:BITBUCKET_* pointer — Bitbucket discovery only accepts platform-operated BITBUCKET_* names`,
+    );
+  }
+
+  const token = resolveCredential(credentialRef);
+  if (!token || !token.trim()) {
+    throw new Error(
+      `credentialRef '${credentialRef}' is set but cannot be used — refusing to list without usable BITBUCKET_* credentials`,
     );
   }
 

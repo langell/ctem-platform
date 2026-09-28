@@ -12,7 +12,8 @@ export interface DiscoveryContext {
 /**
  * Asset discovery connectors. Each one turns an external system into a stream of
  * upsert requests; the service handles persistence, archival and events.
- * GitHub, GitLab (gitlab.com or explicit `baseUrl`), AWS, GCP, Azure, GHCR,
+ * GitHub, GitLab (gitlab.com or explicit `baseUrl`), Bitbucket Cloud
+ * (`api.bitbucket.org` only — no Server / Data Center), AWS, GCP, Azure, GHCR,
  * ECR, GCR / Artifact Registry, ACR, Docker Hub, Quay.io, Kubernetes (managed EKS/GKE/AKS), and DNS
  * enum (crt.sh + OS resolver) are registered; this remains the extension
  * point for further providers.
@@ -43,6 +44,7 @@ export class ConnectorRegistry {
 /**
  * Roadmap of connectors, in the order they earn their keep:
  *   github / gitlab      -> repositories, default branches, CODEOWNERS
+ *   bitbucket            -> Bitbucket Cloud repositories (api.bitbucket.org only)
  *   aws / gcp / azure    -> cloud resources, public IPs, security groups / firewalls / NSGs
  *   ghcr                 -> container images keyed by digest (Packages REST; no layer pull)
  *   ecr                  -> container images keyed by digest (ECR API; no layer pull)
@@ -60,6 +62,7 @@ export class ConnectorRegistry {
 export const PLANNED_CONNECTORS = [
   'github',
   'gitlab',
+  'bitbucket',
   'aws',
   'azure',
   'gcp',

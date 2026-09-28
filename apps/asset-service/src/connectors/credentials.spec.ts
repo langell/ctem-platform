@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   requireAwsCredentials,
   requireAzureCredentials,
+  requireBitbucketToken,
   requireDockerhubCredentials,
   requireGcpCredentials,
   requireGithubToken,
@@ -18,6 +19,8 @@ afterEach(() => {
   delete process.env.GITHUB_TOKEN;
   delete process.env.GITHUB_TEST_TOKEN;
   delete process.env.GITLAB_TOKEN;
+  delete process.env.BITBUCKET_TOKEN;
+  delete process.env.BITBUCKET_TEST_TOKEN;
   delete process.env.AWS_ACCESS_KEY_ID;
   delete process.env.AWS_SECRET_ACCESS_KEY;
   delete process.env.AWS_SESSION_TOKEN;
@@ -49,6 +52,11 @@ describe('resolveCredential', () => {
   it('reads an allowlisted GITLAB_* env var', () => {
     process.env.GITLAB_TOKEN = 'glpat_test';
     expect(resolveCredential('env:GITLAB_TOKEN')).toBe('glpat_test');
+  });
+
+  it('reads an allowlisted BITBUCKET_* env var', () => {
+    process.env.BITBUCKET_TOKEN = 'bb_test';
+    expect(resolveCredential('env:BITBUCKET_TOKEN')).toBe('bb_test');
   });
 
   it('reads an allowlisted AWS_* env var', () => {
@@ -122,6 +130,32 @@ describe('requireGithubToken', () => {
   it('returns the token when the ref points at a usable GITHUB_* name', () => {
     process.env.GITHUB_TOKEN = 'ghp_test';
     expect(requireGithubToken('env:GITHUB_TOKEN')).toBe('ghp_test');
+  });
+});
+
+describe('requireBitbucketToken', () => {
+  it('fails closed when credentialRef is missing', () => {
+    expect(() => requireBitbucketToken(null)).toThrow(/env:BITBUCKET_\*/);
+  });
+
+  it('fails closed when the pointed BITBUCKET_* env var is empty', () => {
+    expect(() => requireBitbucketToken('env:BITBUCKET_TOKEN')).toThrow(/cannot be used/);
+  });
+
+  it('refuses a GITHUB_* ref even when a BITBUCKET_TOKEN is present', () => {
+    process.env.BITBUCKET_TOKEN = 'bb_test';
+    process.env.GITHUB_TOKEN = 'ghp_test';
+    expect(() => requireBitbucketToken('env:GITHUB_TOKEN')).toThrow(/env:BITBUCKET_\*/);
+  });
+
+  it('refuses env:DATABASE_URL without reading the secret', () => {
+    process.env.DATABASE_URL = 'postgres://should-not-leak';
+    expect(() => requireBitbucketToken('env:DATABASE_URL')).toThrow(/not allowlisted/);
+  });
+
+  it('returns the token when the ref points at a usable BITBUCKET_* name', () => {
+    process.env.BITBUCKET_TOKEN = 'bb_test';
+    expect(requireBitbucketToken('env:BITBUCKET_TOKEN')).toBe('bb_test');
   });
 });
 

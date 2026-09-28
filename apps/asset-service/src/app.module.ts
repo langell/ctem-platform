@@ -21,6 +21,7 @@ import { EcrConnector } from './connectors/ecr.connector';
 import { GcrConnector } from './connectors/gcr.connector';
 import { GhcrConnector } from './connectors/ghcr.connector';
 import { QuayConnector } from './connectors/quay.connector';
+import { BitbucketConnector } from './connectors/bitbucket.connector';
 import { GitHubConnector } from './connectors/github.connector';
 import { GitLabConnector } from './connectors/gitlab.connector';
 import { DnsEnumConnector } from './connectors/dns.connector';
@@ -43,6 +44,7 @@ import { KubernetesConnector } from './connectors/kubernetes.connector';
     DiscoverySchedulerService,
     GitHubConnector,
     GitLabConnector,
+    BitbucketConnector,
     AwsConnector,
     AzureConnector,
     GcpConnector,
@@ -62,6 +64,7 @@ export class AppModule implements OnModuleInit {
     private readonly registry: ConnectorRegistry,
     private readonly github: GitHubConnector,
     private readonly gitlab: GitLabConnector,
+    private readonly bitbucket: BitbucketConnector,
     private readonly aws: AwsConnector,
     private readonly azure: AzureConnector,
     private readonly gcp: GcpConnector,
@@ -79,6 +82,7 @@ export class AppModule implements OnModuleInit {
   onModuleInit(): void {
     this.registry.register(this.github);
     this.registry.register(this.gitlab);
+    this.registry.register(this.bitbucket);
     this.registry.register(this.aws);
     this.registry.register(this.azure);
     this.registry.register(this.gcp);
