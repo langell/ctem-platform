@@ -38,6 +38,7 @@ model Organization {
   apiTokens         ApiToken[]
   auditLogs         AuditLog[]
   scanKicks         ScanKick[]
+  notificationDeliveryClaims NotificationDeliveryClaim[]
 
   @@map("organizations")
 }
@@ -469,4 +470,26 @@ model AuditLog {
 
   @@index([orgId, createdAt])
   @@map("audit_logs")
+}
+
+// ------------------------------------------------- notification delivery
+
+/// Durable at-most-once claim for a successful `policy.violated` Slack or Jira
+/// send. One row per (org, finding, policy, channel). Redis is not the source
+/// of truth. A failed send deletes the row so JetStream can re-claim.
+/// findingId and policyId are not foreign keys: the seed KEV/critical rule
+/// publishes a policy id that is not a `policies` row.
+model NotificationDeliveryClaim {
+  id        String   @id @default(uuid()) @db.Uuid
+  orgId     String   @db.Uuid
+  findingId String   @db.Uuid
+  policyId  String   @db.Uuid
+  /// slack | jira
+  channel   String
+  createdAt DateTime @default(now())
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, findingId, policyId, channel], map: "notification_delivery_claims_uniq")
+  @@map("notification_delivery_claims")
 }
