@@ -6,13 +6,16 @@ import {
   DEFAULT_CIRCUIT_BREAKER_CONFIG,
   InternalHttpPolicy,
 } from '@ctem/resilience';
-import { ChannelRegistry } from './channels/channel.registry';
+import { ChannelRegistry, type NotificationChannel } from './channels/channel.registry';
 import { JiraChannel } from './channels/jira.channel';
 import { SlackChannel } from './channels/slack.channel';
 import { EGRESS_TENANT_WEBHOOK, WebhookChannel } from './channels/webhook.channel';
 import { NotificationConsumer } from './notification.consumer';
 
 const orgId = '11111111-1111-4111-8111-111111111111';
+const findingId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const policyId = '00000000-0000-4000-8000-00000000c7e1';
+const causationId = '44444444-4444-4444-8444-444444444444';
 const HOOK = 'https://hooks.slack.com/services/TEST/HOOK/dummy';
 const SITE = 'https://acme.atlassian.net';
 
@@ -68,6 +71,7 @@ function jetstreamMessage(payload: unknown) {
 async function dispatch(
   handler: (payload: unknown, envelope: unknown) => Promise<void>,
   msg: ReturnType<typeof jetstreamMessage>,
+  subject: string = SUBJECTS.notificationRequested,
 ): Promise<void> {
   const bus = new EventBus({} as never);
   await (
@@ -78,7 +82,7 @@ async function dispatch(
         handler: (payload: unknown, envelope: unknown) => Promise<void>,
       ) => Promise<void>;
     }
-  ).handleMessage(SUBJECTS.notificationRequested, msg, handler);
+  ).handleMessage(subject, msg, handler);
 }
 
 describe('notification-dispatch consumer', () => {
@@ -257,5 +261,127 @@ describe('notification-dispatch consumer', () => {
     expect(fetchFn).toHaveBeenCalledTimes(1);
     expect(msg.ack).toHaveBeenCalledTimes(1);
     expect(msg.nak).not.toHaveBeenCalled();
+  });
+});
+
+describe('policy fan-out', () => {
+  function channel(name: string, send: NotificationChannel['send']): NotificationChannel {
+    return { name, send };
+  }
+
+  function boot(
+    publish: EventBus['publish'],
+    slackSend: NotificationChannel['send'],
+    jiraSend: NotificationChannel['send'],
+  ) {
+    const handlers = new Map<string, (payload: unknown, envelope: unknown) => Promise<void>>();
+    const consumer = new NotificationConsumer(
+      {
+        publish,
+        subscribe: vi.fn(
+          async (
+            _subject: string,
+            options: { durable: string; maxDeliver?: number },
+            handler: (payload: unknown, envelope: unknown) => Promise<void>,
+          ) => {
+            handlers.set(options.durable, handler);
+          },
+        ),
+      } as unknown as EventBus,
+      new ChannelRegistry(),
+      new WebhookChannel(),
+      channel('slack', slackSend) as SlackChannel,
+      channel('jira', jiraSend) as JiraChannel,
+    );
+    return { consumer, handlers };
+  }
+
+  it('enqueues slack and jira without calling channel.send, and a later jira failure does not re-invoke slack', async () => {
+    const published: unknown[] = [];
+    const publish = vi.fn(async (_subject: string, _orgId: string, payload: unknown) => {
+      published.push(payload);
+    });
+    const slackSend = vi.fn(async () => undefined);
+    const jiraSend = vi.fn(async () => {
+      throw new Error('jira down');
+    });
+    const { consumer, handlers } = boot(publish, slackSend, jiraSend);
+    await consumer.onApplicationBootstrap();
+
+    const actions = ['notify', 'ticket'];
+    const policyMsg = jetstreamMessage({ findingId, policyId, actions });
+    policyMsg.data = new TextEncoder().encode(
+      JSON.stringify({
+        id: '33333333-3333-4333-8333-333333333333',
+        subject: SUBJECTS.policyViolated,
+        orgId,
+        occurredAt: new Date().toISOString(),
+        traceId: 'trace-policy',
+        causationId,
+        version: 1,
+        producer: 'test',
+        payload: { findingId, policyId, actions },
+      }),
+    );
+
+    await dispatch(handlers.get('notification-policy')!, policyMsg, SUBJECTS.policyViolated);
+
+    expect(policyMsg.ack).toHaveBeenCalledTimes(1);
+    expect(policyMsg.nak).not.toHaveBeenCalled();
+    expect(slackSend).not.toHaveBeenCalled();
+    expect(jiraSend).not.toHaveBeenCalled();
+    expect(publish).toHaveBeenCalledTimes(2);
+    expect(publish.mock.calls[0][0]).toBe(SUBJECTS.notificationRequested);
+    expect(publish.mock.calls[0][2]).toMatchObject({
+      channel: 'slack',
+      template: 'policy.violated',
+      target: 'slack',
+      data: { findingId, policyId, actions },
+    });
+    expect(publish.mock.calls[0][3]).toEqual({ causationId });
+    expect(publish.mock.calls[1][2]).toMatchObject({ channel: 'jira', target: 'jira' });
+    expect(publish.mock.calls[1][3]).toEqual({ causationId });
+
+    const slackMsg = jetstreamMessage(published[0]);
+    await dispatch(handlers.get('notification-dispatch')!, slackMsg);
+    expect(slackSend).toHaveBeenCalledTimes(1);
+    expect(slackMsg.ack).toHaveBeenCalledTimes(1);
+    expect(jiraSend).not.toHaveBeenCalled();
+
+    const jiraMsg = jetstreamMessage(published[1]);
+    await dispatch(handlers.get('notification-dispatch')!, jiraMsg);
+    expect(jiraSend).toHaveBeenCalledTimes(1);
+    expect(jiraMsg.nak).toHaveBeenCalledTimes(1);
+    expect(jiraMsg.ack).not.toHaveBeenCalled();
+    expect(slackSend).toHaveBeenCalledTimes(1);
+
+    const jiraRedelivery = jetstreamMessage(published[1]);
+    await dispatch(handlers.get('notification-dispatch')!, jiraRedelivery);
+    expect(jiraSend).toHaveBeenCalledTimes(2);
+    expect(jiraRedelivery.nak).toHaveBeenCalledTimes(1);
+    expect(slackSend).toHaveBeenCalledTimes(1);
+  });
+
+  it('naks the policy delivery when notification publish fails and does not send', async () => {
+    const publish = vi.fn(async () => {
+      throw new Error('bus down');
+    });
+    const slackSend = vi.fn(async () => undefined);
+    const jiraSend = vi.fn(async () => undefined);
+    const { consumer, handlers } = boot(publish, slackSend, jiraSend);
+    await consumer.onApplicationBootstrap();
+
+    const msg = jetstreamMessage({
+      findingId,
+      policyId,
+      actions: ['notify', 'ticket'],
+    });
+    await dispatch(handlers.get('notification-policy')!, msg, SUBJECTS.policyViolated);
+
+    expect(msg.nak).toHaveBeenCalledTimes(1);
+    expect(msg.ack).not.toHaveBeenCalled();
+    expect(slackSend).not.toHaveBeenCalled();
+    expect(jiraSend).not.toHaveBeenCalled();
+    expect(publish).toHaveBeenCalledTimes(1);
   });
 });
