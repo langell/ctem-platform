@@ -6,6 +6,7 @@ import { ChannelRegistry } from './channels/channel.registry';
 import { JiraChannel } from './channels/jira.channel';
 import { SlackChannel } from './channels/slack.channel';
 import { WebhookChannel } from './channels/webhook.channel';
+import { PrismaPolicyDeliveryClaims, sendWithDeliveryClaim } from './delivery-claim';
 import { dispatchPolicyViolated } from './policy-notify';
 
 @Injectable()
@@ -18,6 +19,7 @@ export class NotificationConsumer implements OnApplicationBootstrap {
     private readonly webhook: WebhookChannel,
     private readonly slack: SlackChannel,
     private readonly jira: JiraChannel,
+    private readonly claims: PrismaPolicyDeliveryClaims,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -40,12 +42,31 @@ export class NotificationConsumer implements OnApplicationBootstrap {
           this.log.warn({ channel: message.channel }, 'no channel registered, dropping');
           return;
         }
-        await channel.send({
-          orgId: envelope.orgId,
-          template: message.template,
-          target: message.target,
-          data: message.data,
-        });
+        const data = message.data ?? {};
+        // Org is the envelope only. data.orgId and tenant host fields are not a claim key.
+        const outcome = await sendWithDeliveryClaim(
+          {
+            orgId: envelope.orgId,
+            channel: message.channel,
+            template: message.template,
+            target: message.target,
+            data,
+          },
+          () =>
+            channel.send({
+              orgId: envelope.orgId,
+              template: message.template,
+              target: message.target,
+              data,
+            }),
+          this.claims,
+        );
+        if (outcome === 'skipped') {
+          this.log.info(
+            { orgId: envelope.orgId, channel: message.channel, template: message.template },
+            'policy delivery already claimed; skipping send',
+          );
+        }
       },
     );
 

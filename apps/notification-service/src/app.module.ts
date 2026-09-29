@@ -7,6 +7,7 @@ import { EventsModule } from '@ctem/events';
 import { DbModule } from '@ctem/db';
 import { InternalHttpPolicy } from '@ctem/resilience';
 import { HealthController } from '@ctem/service-kit';
+import { PrismaPolicyDeliveryClaims } from './delivery-claim';
 import { NotificationConsumer } from './notification.consumer';
 import { ChannelRegistry } from './channels/channel.registry';
 import { JiraChannel } from './channels/jira.channel';
@@ -22,6 +23,7 @@ import { WebhookChannel } from './channels/webhook.channel';
     WebhookChannel,
     SlackChannel,
     JiraChannel,
+    PrismaPolicyDeliveryClaims,
     NotificationConsumer,
     { provide: InternalHttpPolicy, useFactory: () => createNotificationEgressPolicy() },
     { provide: APP_GUARD, useClass: InternalAuthGuard },
