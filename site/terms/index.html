@@ -7,25 +7,26 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&amp;display=swap"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600;700&amp;display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/styles.css" />
   </head>
-  <body>
+  <body class="rail">
     <a class="skip" href="#content">Skip to content</a>
-    <header class="bar">
-      <div class="wrap bar-inner">
-        <a class="wordmark" href="/">CTEM</a>
-        <nav class="nav" aria-label="Primary">
-          <a href="/">Home</a>
-          <a href="/sdk">SDK</a>
-          <a href="/contact">Contact</a>
-          <a href="/support">Support</a>
-        </nav>
+    <header class="top">
+      <a class="brand" href="/">CTEM</a>
+      <nav class="nav" aria-label="Primary">
+        <a href="/">CTEM</a>
+        <a href="/sdk">SDK</a>
+        <a href="/contact">Contact</a>
+        <a href="/support">Support</a>
+      </nav>
+      <div class="top-end">
+        <span class="api-pill">CTEM-API v2.4</span>
       </div>
     </header>
-    <main id="content" class="wrap page">
+    <main id="content" class="doc">
       <h1>Terms <span class="draft">Draft</span></h1>
       <p class="company">CTEM Labs</p>
       <p>
@@ -39,18 +40,20 @@
       </p>
     </main>
     <footer class="foot">
-      <div class="wrap">
-        <p class="company">CTEM Labs</p>
-        <p>
-          <a href="mailto:lonny.angell@gmail.com">lonny.angell@gmail.com</a>
-          <span class="company-line">current contact</span>
-        </p>
+      <div class="foot-bar">
+        <div class="foot-brand">
+          <span class="foot-name">CTEM Labs</span>
+          <span class="sys">Sys.spec</span>
+        </div>
+        <a class="foot-mail" href="mailto:lonny.angell@gmail.com">lonny.angell@gmail.com</a>
+        <span class="foot-role">current contact</span>
         <nav aria-label="Legal">
           <a href="/privacy">Privacy</a>
+          <span class="sep" aria-hidden="true">·</span>
           <a href="/terms" aria-current="page">Terms</a>
         </nav>
-        <p class="note">Static site. Not the product app. Not the agent-dora dashboard.</p>
       </div>
+      <p class="note">Static site. Not the product app. Not the agent-dora dashboard.</p>
     </footer>
   </body>
 </html>

@@ -7,26 +7,35 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&amp;display=swap"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600;700&amp;display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/styles.css" />
   </head>
-  <body class="sdk">
+  <body class="rail sdk">
     <a class="skip" href="#content">Skip to content</a>
-    <header class="bar">
-      <div class="wrap bar-inner">
-        <a class="wordmark" href="/">CTEM</a>
-        <nav class="nav" aria-label="Primary">
-          <a href="/">Home</a>
-          <a href="/sdk" aria-current="page">SDK</a>
-          <a href="/contact">Contact</a>
-          <a href="/support">Support</a>
-        </nav>
+    <header class="top">
+      <a class="brand" href="/">CTEM</a>
+      <nav class="nav" aria-label="Primary">
+        <a href="/">CTEM</a>
+        <a href="/sdk" aria-current="page">SDK</a>
+        <a href="/contact">Contact</a>
+        <a href="/support">Support</a>
+      </nav>
+      <div class="top-end">
+        <span class="api-pill">CTEM-API v2.4</span>
+        <span class="glyph" aria-hidden="true">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <circle cx="7" cy="4.5" r="2.1" stroke="currentColor" stroke-width="1.2" />
+            <path d="M2.6 12.2c.6-2.2 2.2-3.3 4.4-3.3s3.8 1.1 4.4 3.3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
+          </svg>
+        </span>
       </div>
     </header>
-    <main id="content" class="wrap page">
+    <main id="content">
+      <div class="frame">
       <h1>SDK</h1>
+      <div class="intro">
       <p class="lede">
         This is the CTEM gateway HTTP API. It is not a language SDK.
       </p>
@@ -37,6 +46,7 @@
         current controllers and contracts, not captured fixtures.
       </p>
       <p>Auth header on every example: <code>Authorization: Bearer &lt;token&gt;</code>.</p>
+      </div>
       <nav class="groups" aria-label="API groups">
         <a href="#session">Session</a>
         <a href="#scans">Scans</a>
@@ -430,20 +440,23 @@ Authorization: Bearer &lt;token&gt;</code></pre>
           added here.
         </p>
       </section>
+      </div>
     </main>
     <footer class="foot">
-      <div class="wrap">
-        <p class="company">CTEM Labs</p>
-        <p>
-          <a href="mailto:lonny.angell@gmail.com">lonny.angell@gmail.com</a>
-          <span class="company-line">current contact</span>
-        </p>
+      <div class="foot-bar">
+        <div class="foot-brand">
+          <span class="foot-name">CTEM Labs</span>
+          <span class="sys">Sys.spec</span>
+        </div>
+        <a class="foot-mail" href="mailto:lonny.angell@gmail.com">lonny.angell@gmail.com</a>
+        <span class="foot-role">current contact</span>
         <nav aria-label="Legal">
           <a href="/privacy">Privacy</a>
+          <span class="sep" aria-hidden="true">·</span>
           <a href="/terms">Terms</a>
         </nav>
-        <p class="note">Static site. Not the product app. Not the agent-dora dashboard.</p>
       </div>
+      <p class="note">Static site. Not the product app. Not the agent-dora dashboard.</p>
     </footer>
   </body>
 </html>
