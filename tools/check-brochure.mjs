@@ -1,11 +1,11 @@
-// Confirms the six CTEM Labs brochure pages exist and that internal links
-// stay inside that tree. Not a product-feature test.
+// Confirms the six brochure pages exist and that internal links stay on
+// this static site. Not a product-feature test.
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const root = path.resolve(process.argv[2] ?? path.join(here, '../site/labs'));
+const root = path.resolve(process.argv[2] ?? path.join(here, '../site'));
 
 const expected = [
   'index.html',
@@ -41,7 +41,9 @@ function inside(target) {
 }
 
 function resolveFile(fromFile, hrefPath) {
-  const target = path.resolve(path.dirname(fromFile), hrefPath);
+  const target = hrefPath.startsWith('/')
+    ? path.resolve(root, hrefPath.replace(/^\/+/, ''))
+    : path.resolve(path.dirname(fromFile), hrefPath);
   if (!inside(target)) return { error: `escapes the brochure (${hrefPath})` };
   if (existsSync(target) && statSync(target).isDirectory()) {
     const index = path.join(target, 'index.html');
@@ -76,6 +78,9 @@ for (const rel of want) {
   if (!html.includes('href="mailto:lonny.angell@gmail.com"')) {
     failures.push(`${rel}: missing mailto:lonny.angell@gmail.com`);
   }
+  if (html.includes('libs/scanner-sdk')) {
+    failures.push(`${rel}: documents libs/scanner-sdk`);
+  }
   const hrefs = [...html.matchAll(/\b(?:href|src)="([^"]*)"/g)].map((match) => match[1]);
   for (const href of hrefs) {
     links += 1;
@@ -86,8 +91,8 @@ for (const rel of want) {
       continue;
     }
     if (href.startsWith('https://') || href.startsWith('http://')) continue;
-    if (href.startsWith('//') || href.startsWith('/') || href.startsWith('javascript:')) {
-      failures.push(`${rel}: link leaves the brochure prefix (${href})`);
+    if (href.startsWith('//') || href.startsWith('javascript:')) {
+      failures.push(`${rel}: link leaves the site (${href})`);
       continue;
     }
     const hashAt = href.indexOf('#');

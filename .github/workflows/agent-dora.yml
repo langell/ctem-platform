@@ -1,10 +1,5 @@
 # Nightly metrics, published to GitHub Pages.
 # Enable Pages first: Settings -> Pages -> Source: GitHub Actions.
-#
-# One deploy. The artifact root is the agent-dora report, so
-# https://langell.github.io/ctem-platform/ stays that dashboard.
-# The CTEM Labs brochure is copied in beside it at labs/ before the
-# single upload. Do not add a second deploy-pages step.
 name: agent-dora
 
 on:
@@ -36,34 +31,6 @@ jobs:
 
       - uses: langell/agent-dora@v0
         id: dora
-
-      # Copy only. The report's index.html, metrics.json, and summary.md
-      # stay the bytes langell/agent-dora wrote.
-      - name: Add the CTEM Labs brochure under labs/
-        run: |
-          report="${{ steps.dora.outputs.report-dir }}"
-          if [ -z "$report" ] || [ ! -d "$report" ]; then
-            echo "::error::agent-dora did not publish a report directory"
-            exit 1
-          fi
-          for file in index.html metrics.json summary.md; do
-            if [ ! -f "$report/$file" ]; then
-              echo "::error::agent-dora report is missing $file"
-              exit 1
-            fi
-          done
-          if [ -e "$report/labs" ]; then
-            echo "::error::report directory already contains labs/; leaving agent-dora output untouched"
-            exit 1
-          fi
-          stamp="$(cd "$report" && sha256sum index.html metrics.json summary.md)"
-          cp -a site/labs "$report/labs"
-          now="$(cd "$report" && sha256sum index.html metrics.json summary.md)"
-          if [ "$stamp" != "$now" ]; then
-            echo "::error::agent-dora report files changed while adding labs/"
-            exit 1
-          fi
-          node tools/check-labs-site.mjs "$report/labs"
 
       - uses: actions/upload-pages-artifact@v3
         with:
