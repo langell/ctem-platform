@@ -1,0 +1,433 @@
+/* CTEM Labs brochure. Product hex, public surface — not the app shell. */
+
+:root {
+  color-scheme: dark;
+  --bg: #0b1016;
+  --panel: #141b24;
+  --panel-2: #1a2330;
+  --line: #2a3542;
+  --text: #e8eef4;
+  --muted: #8b9aab;
+  --accent: #6cb6ff;
+  --accent-pressed: #4a9ae8;
+  --danger: #f07178;
+  --warn: #e6c07b;
+  --ok: #9ccc65;
+  --sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+body {
+  font-family: var(--sans);
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 1.55;
+  min-height: 100vh;
+}
+
+.skip {
+  position: absolute;
+  left: 16px;
+  top: -40px;
+  background: var(--panel);
+  color: var(--accent);
+  padding: 8px 12px;
+  z-index: 2;
+}
+
+.skip:focus {
+  top: 12px;
+}
+
+a {
+  color: var(--accent);
+}
+
+a:hover {
+  color: var(--accent-pressed);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.wrap {
+  width: min(72ch, calc(100% - 48px));
+  margin-inline: auto;
+}
+
+/* Home is wide enough for the five-step row. Prose stays at 72ch. */
+body.home .wrap,
+body.sdk .wrap {
+  width: min(1000px, calc(100% - 48px));
+}
+
+.measure {
+  max-width: 72ch;
+}
+
+.bar {
+  border-bottom: 1px solid var(--line);
+}
+
+.bar-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px 28px;
+  min-height: 64px;
+  padding: 12px 0;
+  flex-wrap: wrap;
+}
+
+.wordmark {
+  color: var(--accent);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-decoration: none;
+  font-size: 15px;
+}
+
+.wordmark:hover {
+  color: var(--accent);
+}
+
+.nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 22px;
+}
+
+.nav a {
+  color: var(--text);
+  text-decoration: none;
+}
+
+.nav a:hover,
+.nav a[aria-current="page"] {
+  color: var(--accent);
+}
+
+.page {
+  padding: 40px 0 72px;
+}
+
+h1 {
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 1.2;
+  margin: 0 0 16px;
+}
+
+h1.brand {
+  color: var(--accent);
+  font-size: 44px;
+  letter-spacing: 0.08em;
+  margin-bottom: 20px;
+}
+
+h1.brand::after {
+  content: "";
+  display: block;
+  width: 48px;
+  height: 3px;
+  margin-top: 12px;
+  background: var(--accent);
+  border-radius: 2px;
+}
+
+h2 {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 32px 0 10px;
+}
+
+h3 {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 8px;
+}
+
+p,
+ul,
+ol {
+  margin: 0 0 16px;
+}
+
+.lede {
+  font-size: 18px;
+  line-height: 1.5;
+}
+
+.paths {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 14px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  color: var(--accent);
+  background: transparent;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.btn:hover {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+.btn.secondary {
+  border-color: var(--line);
+  color: var(--text);
+  font-weight: 500;
+}
+
+.btn.secondary:hover {
+  background: transparent;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.loop {
+  list-style: none;
+  counter-reset: step;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  padding: 0;
+  margin: 12px 0 28px;
+}
+
+.loop li {
+  counter-increment: step;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px 12px 16px;
+  min-width: 0;
+}
+
+.loop li::before {
+  content: counter(step);
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  margin-bottom: 8px;
+}
+
+.step-label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.step-text {
+  display: block;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin: 8px 0 8px;
+}
+
+.group {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 20px 20px 8px;
+  margin: 20px 0;
+}
+
+.group h2 {
+  margin: 0 0 6px;
+}
+
+.tag,
+.schema,
+.note,
+.company-line {
+  color: var(--muted);
+}
+
+.company {
+  font-weight: 600;
+}
+
+.tag {
+  margin-top: 0;
+  font-size: 14px;
+}
+
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 24px;
+  margin-top: 16px;
+}
+
+.route {
+  margin: 0 0 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.route:last-child {
+  border-bottom: 0;
+}
+
+.route-line {
+  margin: 0 0 6px;
+}
+
+.verb {
+  display: inline-block;
+  min-width: 4.5em;
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+code {
+  font-family: var(--mono);
+  font-size: 0.92em;
+}
+
+pre {
+  background: var(--panel-2);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.45;
+  padding: 14px 16px;
+  border-radius: 6px;
+  overflow: auto;
+  margin: 0 0 16px;
+}
+
+pre code {
+  font-size: 13px;
+}
+
+pre .k {
+  color: var(--accent);
+}
+
+.chips {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0;
+  margin: 8px 0 12px;
+}
+
+.chip {
+  display: inline-block;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.chip.ok {
+  color: var(--ok);
+}
+
+.chip.warn {
+  color: var(--warn);
+}
+
+.chip.danger {
+  color: var(--danger);
+}
+
+.kinds {
+  padding-left: 1.2em;
+}
+
+.kinds li {
+  margin: 0 0 4px;
+}
+
+.omitted {
+  border-top: 1px solid var(--line);
+  margin-top: 36px;
+  padding-top: 8px;
+}
+
+.draft {
+  display: inline-block;
+  margin-left: 10px;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
+.foot {
+  border-top: 1px solid var(--line);
+  padding: 28px 0 40px;
+}
+
+.foot .company {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.foot nav {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.foot .note {
+  color: var(--muted);
+  font-size: 14px;
+  margin: 0;
+}
+
+@media (max-width: 880px) {
+  .loop,
+  .split {
+    grid-template-columns: 1fr;
+  }
+
+  h1.brand {
+    font-size: 36px;
+  }
+}

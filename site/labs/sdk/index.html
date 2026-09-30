@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SDK · CTEM</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&amp;display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="../styles.css" />
+  </head>
+  <body class="sdk">
+    <a class="skip" href="#content">Skip to content</a>
+    <header class="bar">
+      <div class="wrap bar-inner">
+        <a class="wordmark" href="../">CTEM</a>
+        <nav class="nav" aria-label="Primary">
+          <a href="../">Home</a>
+          <a href="./" aria-current="page">SDK</a>
+          <a href="../contact/">Contact</a>
+          <a href="../support/">Support</a>
+        </nav>
+      </div>
+    </header>
+    <main id="content" class="wrap page">
+      <h1>SDK</h1>
+      <p class="lede">
+        This is the CTEM gateway HTTP API. It is not a language SDK.
+        <code>libs/scanner-sdk</code> is private and is not documented here.
+      </p>
+      <p>
+        Org comes from the bearer token (JWT or PAT). The client does not send an org id.
+        Unauthenticated calls to these routes are 401 when the route exists. Live request and
+        response schemas: the gateway’s <code>/docs</code>. Examples below are shapes from the
+        current controllers and contracts, not captured fixtures.
+      </p>
+      <p>Auth header on every example: <code>Authorization: Bearer &lt;token&gt;</code>.</p>
+      <nav class="groups" aria-label="API groups">
+        <a href="#session">Session</a>
+        <a href="#scans">Scans</a>
+        <a href="#assets">Assets</a>
+        <a href="#findings">Findings</a>
+        <a href="#policies">Policies</a>
+        <a href="#members">Members</a>
+        <a href="#meters">Meters</a>
+      </nav>
+
+      <section class="group" id="session">
+        <h2>Session</h2>
+        <p class="tag">tag <code>session</code></p>
+        <div class="split">
+          <div>
+            <article class="route">
+              <p class="route-line"><span class="verb">GET</span> <code>/v1/session</code></p>
+              <p>
+                Permission: bearer principal. No extra permission decorator on the controller.
+              </p>
+            </article>
+          </div>
+          <div>
+            <h3>Request</h3>
+            <pre><code>GET /v1/session
+Authorization: Bearer &lt;token&gt;</code></pre>
+            <h3>Response</h3>
+            <p>
+              Confirmed in the controller: <code>userId</code>, <code>orgId</code>,
+              <code>role</code>, <code>permissions</code>, <code>serviceAccount</code>.
+            </p>
+            <p class="schema">Full schema: gateway <code>/docs</code>.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="group" id="scans">
+        <h2>Scans</h2>
+        <p class="tag">tag <code>scans</code></p>
+        <p>
+          Read <code>scan:read</code>. Kick <code>scan:run</code>. Optional
+          <code>Idempotency-Key</code> on POST (forwarded; the gateway does not emit the meter
+          row).
+        </p>
+        <div class="split">
+          <div>
+            <article class="route">
+              <p class="route-line"><span class="verb">GET</span> <code>/v1/scans</code></p>
+              <p>Read <code>scan:read</code>.</p>
+            </article>
+            <article class="route">
+              <p class="route-line"><span class="verb">GET</span> <code>/v1/scans/:id</code></p>
+              <p>
+                Read <code>scan:read</code>. CI and deploy tooling poll this.
+                <code>conclusion</code> is fail-build. <code>deployConclusion</code> is
+                block-deploy. The client cannot POST either field.
+              </p>
+            </article>
+            <article class="route">
+              <p class="route-line"><span class="verb">POST</span> <code>/v1/scans</code></p>
+              <p>
+                Kick <code>scan:run</code>. Body from <code>CreateScanRequest</code>:
+                <code>scannerType</code> (<code>sca | sast | container | iac | secrets | asm | cloud_posture</code>),
+                optional <code>assetSelector</code> (<code>assetIds</code> uuids, <code>kinds</code>,
+                <code>tags</code>), <code>options</code> object (default <code>{}</code>). Optional
+                <code>externalId</code> for kick idempotency. Do not send <code>conclusion</code> or
+                <code>deployConclusion</code>.
+              </p>
+            </article>
+            <article class="route">
+              <p class="route-line"><span class="verb">POST</span> <code>/v1/scans/sbom</code></p>
+              <p>
+                Kick <code>scan:run</code>. <code>IngestSbomRequest</code>:
+                <code>assetExternalKey</code>, <code>format</code>
+                (<code>cyclonedx-json | spdx-json | syft-json</code>), exactly one of
+                <code>artifactKey</code> or <code>document</code>, optional <code>ref</code>,
+                <code>commitSha</code>, optional <code>externalId</code>.
+              </p>
+            </article>
+          </div>
+          <div>
+            <h3>Request</h3>
+            <pre><code>POST /v1/scans
+Authorization: Bearer &lt;token&gt;
+
+{
+  <span class="k">"scannerType"</span>: "sca",
+  <span class="k">"assetSelector"</span>: {}
+}</code></pre>
+            <h3>Response</h3>
+            <p>Partial. Confirmed fields on a scan include:</p>
+            <p>status</p>
+            <ul class="chips">
+              <li><span class="chip warn">queued</span></li>
+              <li><span class="chip warn">running</span></li>
+              <li><span class="chip ok">succeeded</span></li>
+              <li><span class="chip warn">partial</span></li>
+              <li><span class="chip danger">failed</span></li>
+              <li><span class="chip danger">cancelled</span></li>
+            </ul>
+            <p><code>conclusion</code></p>
+            <ul class="chips">
+              <li><span class="chip warn">pending</span></li>
+              <li><span class="chip ok">passed</span></li>
+              <li><span class="chip danger">failed</span></li>
+            </ul>
+            <p><code>deployConclusion</code></p>
+            <ul class="chips">
+              <li><span class="chip warn">pending</span></li>
+              <li><span class="chip ok">allowed</span></li>
+              <li><span class="chip danger">blocked</span></li>
+            </ul>
+            <p>Full object: gateway <code>/docs</code>. No sample score or finding list.</p>
+            <p class="schema">Full schema: gateway <code>/docs</code>.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="group" id="assets">
+        <h2>Assets</h2>
+        <p class="tag">tag <code>assets</code></p>
+        <p>
+          Read <code>asset:read</code>. Write <code>asset:write</code>. Discover
+          <code>integration:manage</code>.
+        </p>
+        <div class="split">
+          <div>
+            <article class="route">
+              <p class="route-line"><span class="verb">GET</span> <code>/v1/assets</code></p>
+              <p>
+                Read <code>asset:read</code>. Query from <code>ListAssetsQuery</code>: optional
+                <code>kind</code>, <code>exposure</code>, <code>criticality</code>,
+                <code>ownerTeam</code>, <code>q</code>, <code>cursor</code>, <code>limit</code>
+                (default 50, max 200).
+              </p>
+            </article>
+            <article class="route">
+              <p class="route-line"><span class="verb">GET</span> <code>/v1/assets/:id</code></p>
+              <p>Read <code>asset:read</code>.</p>
+            </article>
+            <article class="route">
+              <p class="route-line"><span class="verb">GET</span> <code>/v1/assets/:id/graph</code></p>
+              <p>
+                Read <code>asset:read</code>. Query <code>depth</code> (controller default
+                <code>"2"</code>).
+              </p>
+            </article>
+            <article class="route">
+              <p class="route-line"><span class="verb">POST</span> <code>/v1/assets/discover</code></p>
+              <p>Discover <code>integration:manage</code>. No body in the controller.</p>
+            </article>
+            <article class="route">
+              <p class="route-line"><span class="verb">POST</span> <code>/v1/assets</code></p>
+              <p>
+                Write <code>asset:write</code>. <code>UpsertAssetRequest</code>:
+                <code>kind</code>, <code>externalKey</code>, <code>name</code>, <code>source</code>,
+                plus optional exposure, criticality, data classes, owner, tags, attributes.
+              </p>
+            </article>
+          </div>
+          <div>
+            <h3>Request</h3>
+            <pre><code>POST /v1/assets
+Authorization: Bearer &lt;token&gt;
+
+{
+  <span class="k">"kind"</span>: "domain",
+  <span class="k">"externalKey"</span>: "example.com",
+  <span class="k">"name"</span>: "example.com",
+  <span class="k">"source"</span>: "asm"
+}</code></pre>
+            <h3>Response</h3>
+            <p>Unknown beyond “returns the asset”. Schema: gateway <code>/docs</code>.</p>
+            <p>Kinds confirmed in the contract:</p>
+            <ul class="kinds">
+              <li><code>repository</code></li>
+              <li><code>package</code></li>
+              <li><code>container_image</code></li>
+              <li><code>cloud_resource</code></li>
+              <li><code>kubernetes_workload</code></li>
+              <li><code>host</code></li>
+              <li><code>domain</code></li>
+              <li><code>ip_range</code></li>
+              <li><code>web_application</code></li>
+              <li><code>api_endpoint</code></li>
+              <li><code>saas_app</code></li>
+              <li><code>iac_stack</code></li>
+            </ul>
+            <p class="schema">Full schema: gateway <code>/docs</code>.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="group" id="findings">
+        <h2>Findings</h2>
+        <p class="tag">tag <code>findings</code></p>
+        <p>Read <code>finding:read</code>. Triage <code>finding:triage</code>.</p>
+        <div class="split">
+          <div>
+            <article class="route">
+              <p class="route-line"><span class="verb">GET</span> <code>/v1/findings</code></p>
+              <p>
+                Read <code>finding:read</code>. Query from <code>ListFindingsQuery</code>:
+                <code>assetId</code>, <code>scannerType</code>, <code>severity</code>,
+                <code>state</code>, <code>validation</code>, <code>minRiskScore</code>,
+                <code>fixAvailable</code>, <code>slaBreached</code>, <code>q</code>,
+                <code>cursor</code>, <code>limit</code>.
+              </p>
+            </article>
+            <article class="route">
+              <p class="route-line"><span class="verb">GET</span> <code>/v1/findings/:id</code></p>
+              <p>Read <code>finding:read</code>.</p>
+            </article>
+            <article class="route">
+              <p class="route-line"><span class="verb">GET</span> <code>/v1/findings/:id/risk</code></p>
+              <p>Read <code>finding:read</code>. Why the score is what it is.</p>
+            </article>
+            <article class="route">
+              <p class="route-line">
+                <span class="verb">PATCH</span> <code>/v1/findings/:id/triage</code>
+              </p>
+              <p>
+                Triage <code>finding:triage</code>. <code>TriageFindingRequest</code>:
+                <code>state</code>
+                (<code>open | triaged | in_progress | resolved | risk_accepted | false_positive | suppressed</code>),
+                <code>reason</code> (1–2000 chars), optional <code>expiresAt</code>. When state is
+                <code>risk_accepted</code>, <code>expiresAt</code> is required by the policy
+                service. That extra rule is enforced off this controller, not as a gateway check.
+              </p>
+            </article>
+          </div>
+          <div>
+            <h3>Request</h3>
+            <pre><code>PATCH /v1/findings/:id/triage
+Authorization: Bearer &lt;token&gt;
+
+{
+  <span class="k">"state"</span>: "triaged",
+  <span class="k">"reason"</span>: "Owner assigned"
+}</code></pre>
+            <h3>Response</h3>
+            <p>Unknown (proxied). Schema: gateway <code>/docs</code>.</p>
+            <p class="schema">Full schema: gateway <code>/docs</code>.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="group" id="policies">
+        <h2>Policies</h2>
+        <p class="tag">tag <code>policies</code></p>
+        <p>
+          Read <code>policy:read</code>. Write <code>policy:write</code>. Org comes from the token.
+        </p>
+        <div class="split">
+          <div>
+            <article class="route">
+              <p class="route-line"><span class="verb">GET</span> <code>/v1/policies</code></p>
+              <p>Read <code>policy:read</code>.</p>
+            </article>
+            <article class="route">
+              <p class="route-line"><span class="verb">GET</span> <code>/v1/policies/:id</code></p>
+              <p>Read <code>policy:read</code>.</p>
+            </article>
+            <article class="route">
+              <p class="route-line"><span class="verb">POST</span> <code>/v1/policies</code></p>
+              <p>
+                Write <code>policy:write</code>. <code>CreatePolicyRequest</code>:
+                <code>name</code>, <code>condition</code>, <code>actions</code> (non-empty subset of
+                <code>notify | ticket | fail_build | block_deploy</code>; <code>ignore</code> is not
+                an editor action), optional <code>description</code>, <code>enabled</code>,
+                <code>priority</code>, <code>slaHours</code>. Tenant webhook / Jira URL fields are
+                refused.
+              </p>
+            </article>
+            <article class="route">
+              <p class="route-line"><span class="verb">PATCH</span> <code>/v1/policies/:id</code></p>
+              <p>Write <code>policy:write</code>. Partial of the same request.</p>
+            </article>
+          </div>
+          <div>
+            <h3>Request</h3>
+            <pre><code>POST /v1/policies
+Authorization: Bearer &lt;token&gt;
+
+{
+  <span class="k">"name"</span>: "Block high risk deploys",
+  <span class="k">"condition"</span>: { <span class="k">"minRiskScore"</span>: 70 },
+  <span class="k">"actions"</span>: ["block_deploy"]
+}</code></pre>
+            <h3>Response</h3>
+            <p>Unknown (proxied). Schema: gateway <code>/docs</code>.</p>
+            <p class="schema">Full schema: gateway <code>/docs</code>.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="group" id="members">
+        <h2>Members</h2>
+        <p class="tag">tag <code>members</code></p>
+        <p>
+          List <code>org:read</code>. Invite, role, and disable <code>member:manage</code>.
+        </p>
+        <div class="split">
+          <div>
+            <article class="route">
+              <p class="route-line"><span class="verb">GET</span> <code>/v1/org/members</code></p>
+              <p>List <code>org:read</code>.</p>
+            </article>
+            <article class="route">
+              <p class="route-line"><span class="verb">POST</span> <code>/v1/org/members</code></p>
+              <p>
+                Invite <code>member:manage</code>. Body <code>{ "email", "role" }</code> with role
+                <code>owner | admin | security_analyst | developer | auditor</code>.
+              </p>
+            </article>
+            <article class="route">
+              <p class="route-line">
+                <span class="verb">PATCH</span> <code>/v1/org/members/:userId/role</code>
+              </p>
+              <p>Role <code>member:manage</code>. Body <code>{ "role" }</code>.</p>
+            </article>
+            <article class="route">
+              <p class="route-line">
+                <span class="verb">DELETE</span> <code>/v1/org/members/:userId</code>
+              </p>
+              <p>
+                Disable <code>member:manage</code>. Disables membership. Not a Keycloak Admin call.
+              </p>
+            </article>
+          </div>
+          <div>
+            <h3>Request</h3>
+            <pre><code>POST /v1/org/members
+Authorization: Bearer &lt;token&gt;
+
+{
+  <span class="k">"email"</span>: "teammate@example.com",
+  <span class="k">"role"</span>: "developer"
+}</code></pre>
+            <h3>Response</h3>
+            <p>Unknown (proxied). Schema: gateway <code>/docs</code>.</p>
+            <p class="schema">Full schema: gateway <code>/docs</code>.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="group" id="meters">
+        <h2>Meters</h2>
+        <p class="tag">tag <code>meters</code></p>
+        <p>
+          <code>scan:read</code>. Read-only. Query <code>orgId</code> is dropped. This route does
+          not emit a meter row.
+        </p>
+        <div class="split">
+          <div>
+            <article class="route">
+              <p class="route-line">
+                <span class="verb">GET</span> <code>/v1/meters/scan-kicks</code>
+              </p>
+              <p>
+                Read <code>scan:read</code>. Optional <code>from</code>, <code>to</code> (ISO-8601;
+                <code>from</code> inclusive, <code>to</code> exclusive), <code>source</code>
+                (<code>manual | api | webhook | ci | schedule</code>), <code>limit</code> (default
+                50, cap 200), <code>cursor</code>.
+              </p>
+            </article>
+          </div>
+          <div>
+            <h3>Request</h3>
+            <pre><code>GET /v1/meters/scan-kicks?source=ci&amp;limit=50
+Authorization: Bearer &lt;token&gt;</code></pre>
+            <h3>Response</h3>
+            <p>
+              Unknown (list shape not read from the controller). Schema: gateway
+              <code>/docs</code>. Summary confirmed: scan.kick usage for the token’s organization.
+            </p>
+            <p class="schema">Full schema: gateway <code>/docs</code>.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="omitted">
+        <h2>Not on this page</h2>
+        <p>
+          No public unauthenticated route was in the gateway route controllers. Health, OIDC, and
+          login are not documented. Browser sign-in stays in the product app (Keycloak). This site
+          does not document a login API.
+        </p>
+        <p>
+          Anything not listed above is unknown. Scanners, connectors, and internal paths are not
+          added here.
+        </p>
+      </section>
+    </main>
+    <footer class="foot">
+      <div class="wrap">
+        <p class="company">CTEM Labs</p>
+        <p>
+          <a href="mailto:lonny.angell@gmail.com">lonny.angell@gmail.com</a>
+          <span class="company-line">current contact</span>
+        </p>
+        <nav aria-label="Legal">
+          <a href="../privacy/">Privacy</a>
+          <a href="../terms/">Terms</a>
+        </nav>
+        <p class="note">Static site. Not the product app. Not the agent-dora dashboard.</p>
+      </div>
+    </footer>
+  </body>
+</html>

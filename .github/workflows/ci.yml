@@ -172,3 +172,13 @@ jobs:
       - name: Service logs on failure
         if: failure()
         run: tail -300 /tmp/stack.log 2>/dev/null || true
+
+  labs-brochure:
+    name: Labs brochure links
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Six pages and internal links
+        run: node tools/check-labs-site.mjs
