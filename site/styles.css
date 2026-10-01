@@ -742,3 +742,248 @@ pre .k {
     font-size: 36px;
   }
 }
+
+.helper {
+  color: var(--muted);
+}
+
+.mail {
+  display: grid;
+  gap: 14px;
+  margin: 8px 0 28px;
+}
+
+.mail label {
+  display: grid;
+  gap: 6px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.mail input,
+.mail textarea {
+  font: inherit;
+  font-weight: 400;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.mail textarea {
+  min-height: 120px;
+  resize: vertical;
+}
+
+.mail button {
+  justify-self: start;
+  font: inherit;
+  font-weight: 600;
+  color: #071018;
+  background: var(--accent);
+  border: 0;
+  border-radius: 8px;
+  padding: 10px 18px;
+  cursor: pointer;
+}
+
+.mail button:hover {
+  background: var(--accent-pressed);
+}
+
+.ref-intro {
+  width: min(1120px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: 28px 0 8px;
+}
+
+.ref {
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr);
+  align-items: start;
+  border-top: 1px solid var(--line);
+}
+
+.ref-nav {
+  position: sticky;
+  top: 56px;
+  max-height: calc(100vh - 56px);
+  overflow: auto;
+  padding: 12px 0 28px;
+  border-right: 1px solid var(--line);
+}
+
+.ref-group {
+  margin: 16px 16px 4px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ref-nav a {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 5px 16px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.ref-nav a:hover {
+  color: var(--text);
+}
+
+.ref-nav .verb {
+  min-width: 3.5em;
+  font-size: 10px;
+}
+
+.verb.get {
+  color: var(--ok);
+}
+
+.verb.post {
+  color: var(--accent);
+}
+
+.verb.patch {
+  color: var(--warn);
+}
+
+.verb.delete {
+  color: var(--danger);
+}
+
+.ref:not(:has(.ref-row:target)) .ref-nav a.is-default,
+.ref:has(#get-session:target) .ref-nav a[href="#get-session"],
+.ref:has(#get-scans:target) .ref-nav a[href="#get-scans"],
+.ref:has(#get-scan:target) .ref-nav a[href="#get-scan"],
+.ref:has(#post-scans:target) .ref-nav a[href="#post-scans"],
+.ref:has(#post-scans-sbom:target) .ref-nav a[href="#post-scans-sbom"],
+.ref:has(#get-assets:target) .ref-nav a[href="#get-assets"],
+.ref:has(#get-asset:target) .ref-nav a[href="#get-asset"],
+.ref:has(#get-asset-graph:target) .ref-nav a[href="#get-asset-graph"],
+.ref:has(#post-assets-discover:target) .ref-nav a[href="#post-assets-discover"],
+.ref:has(#post-assets:target) .ref-nav a[href="#post-assets"],
+.ref:has(#get-findings:target) .ref-nav a[href="#get-findings"],
+.ref:has(#get-finding:target) .ref-nav a[href="#get-finding"],
+.ref:has(#get-finding-risk:target) .ref-nav a[href="#get-finding-risk"],
+.ref:has(#patch-finding-triage:target) .ref-nav a[href="#patch-finding-triage"],
+.ref:has(#get-policies:target) .ref-nav a[href="#get-policies"],
+.ref:has(#get-policy:target) .ref-nav a[href="#get-policy"],
+.ref:has(#post-policies:target) .ref-nav a[href="#post-policies"],
+.ref:has(#patch-policy:target) .ref-nav a[href="#patch-policy"],
+.ref:has(#get-members:target) .ref-nav a[href="#get-members"],
+.ref:has(#post-members:target) .ref-nav a[href="#post-members"],
+.ref:has(#patch-member-role:target) .ref-nav a[href="#patch-member-role"],
+.ref:has(#delete-member:target) .ref-nav a[href="#delete-member"],
+.ref:has(#get-scan-kicks:target) .ref-nav a[href="#get-scan-kicks"] {
+  color: var(--text);
+  background: #121820;
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.ref-stage {
+  min-width: 0;
+}
+
+.ref-row {
+  display: none;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 420px);
+  align-items: start;
+}
+
+.ref-row:target,
+.ref-stage:not(:has(.ref-row:target)) > .ref-row:first-child {
+  display: grid;
+}
+
+.ref-main {
+  min-width: 0;
+  padding: 28px 28px 56px;
+}
+
+.ref-main h2 {
+  margin: 0 0 14px;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+}
+
+.ref-main h2 code {
+  font-size: 0.72em;
+}
+
+.ref-main h3 {
+  margin: 22px 0 8px;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.ref-main p,
+.ref-main li {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.ref-main ul {
+  margin: 0;
+  padding-left: 1.15em;
+}
+
+.ref-main li {
+  margin: 0 0 6px;
+}
+
+.ref-code {
+  min-width: 0;
+  padding: 28px 18px 40px;
+  border-left: 1px solid var(--line);
+  background: #0c1016;
+}
+
+.ref-code h3 {
+  margin: 0 0 10px;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.ref-code pre {
+  margin: 0;
+}
+
+@media (max-width: 980px) {
+  .ref {
+    grid-template-columns: 1fr;
+  }
+
+  .ref-nav {
+    position: static;
+    max-height: none;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .ref-row,
+  .ref-row:target,
+  .ref-stage:not(:has(.ref-row:target)) > .ref-row:first-child {
+    grid-template-columns: 1fr;
+  }
+
+  .ref-code {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+}

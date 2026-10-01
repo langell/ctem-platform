@@ -30,17 +30,37 @@
       <h1>Support</h1>
       <p class="company">CTEM Labs</p>
       <p>Product help. This is not a status page.</p>
-      <p>
-        <a href="mailto:lonny.angell@gmail.com">lonny.angell@gmail.com</a>
-        <span class="company-line">current contact</span>
+      <p class="helper">
+        The message goes to
+        <a href="mailto:lonny.angell@gmail.com">lonny.angell@gmail.com</a>.
       </p>
-      <p>Include:</p>
-      <ul>
-        <li>Organization</li>
-        <li>Scan id, if you have one</li>
-        <li>What you expected</li>
-        <li>What happened</li>
-      </ul>
+      <form class="mail" id="support-mail" action="mailto:lonny.angell@gmail.com" method="post" enctype="text/plain">
+        <label>
+          Name
+          <input name="name" type="text" autocomplete="name" required />
+        </label>
+        <label>
+          Email
+          <input name="email" type="email" autocomplete="email" required />
+        </label>
+        <label>
+          Organization
+          <input name="organization" type="text" autocomplete="organization" required />
+        </label>
+        <label>
+          Scan id (optional)
+          <input name="scanId" type="text" />
+        </label>
+        <label>
+          What you expected
+          <textarea name="expected" required></textarea>
+        </label>
+        <label>
+          What happened
+          <textarea name="happened" required></textarea>
+        </label>
+        <button type="submit">Send</button>
+      </form>
       <p>
         API shape questions belong on the <a href="/sdk">SDK</a> page and the gateway’s
         <code>/docs</code>, not a second docs site.
@@ -62,5 +82,24 @@
       </div>
       <p class="note">Static site. Not the product app. Not the agent-dora dashboard.</p>
     </footer>
+    <script>
+      document.getElementById("support-mail").addEventListener("submit", function (event) {
+        event.preventDefault();
+        var data = new FormData(event.currentTarget);
+        var body = [
+          "Name: " + data.get("name"),
+          "Email: " + data.get("email"),
+          "Organization: " + data.get("organization"),
+          "Scan id: " + data.get("scanId"),
+          "What you expected: " + data.get("expected"),
+          "What happened: " + data.get("happened"),
+        ].join("\n");
+        window.location.href =
+          "mailto:lonny.angell@gmail.com?subject=" +
+          encodeURIComponent("CTEM Labs support") +
+          "&body=" +
+          encodeURIComponent(body);
+      });
+    </script>
   </body>
 </html>
