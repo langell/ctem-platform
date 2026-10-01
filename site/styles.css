@@ -88,10 +88,20 @@ a:hover {
 
 .brand {
   justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   color: var(--text);
   font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.12em;
+}
+
+.mark {
+  display: block;
+  height: 14px;
+  width: auto;
+  flex: none;
 }
 
 .brand:hover {
