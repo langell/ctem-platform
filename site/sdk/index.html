@@ -14,572 +14,189 @@
     <link rel="icon" href="/favicon-16.png" sizes="16x16" type="image/png" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
-  <body class="rail sdk">
+  <body class="screen screen-sdk">
     <a class="skip" href="#content">Skip to content</a>
-    <header class="top">
-      <a class="brand" href="/"><svg class="mark" viewBox="0 0 31 26" aria-hidden="true" focusable="false"><rect width="3" height="26" rx="2" fill="#a7d0ff"/><rect x="7" width="3" height="26" rx="2" fill="#8a919c"/><rect x="14" width="3" height="26" rx="2" fill="#8a919c"/><rect x="21" width="3" height="26" rx="2" fill="#8a919c"/><rect x="28" width="3" height="26" rx="2" fill="#8a919c"/></svg>CTEM</a>
-      <nav class="nav" aria-label="Primary">
-        <a href="/">CTEM</a>
-        <a href="/sdk" aria-current="page">SDK</a>
-        <a href="/contact">Contact</a>
-        <a href="/support">Support</a>
-      </nav>
-      <div class="top-end">
-        <span class="api-pill">CTEM-API v2.4</span>
-        <span class="glyph" aria-hidden="true">
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <circle cx="7" cy="4.5" r="2.1" stroke="currentColor" stroke-width="1.2" />
-            <path d="M2.6 12.2c.6-2.2 2.2-3.3 4.4-3.3s3.8 1.1 4.4 3.3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
-          </svg>
-        </span>
+    <header class="screen-top">
+      <div class="screen-top-inner">
+        <a class="screen-brand" href="/"><svg class="mark" viewBox="0 0 31 26" aria-hidden="true" focusable="false"><rect width="3" height="26" rx="2" fill="#a7d0ff"/><rect x="7" width="3" height="26" rx="2" fill="#8a919c"/><rect x="14" width="3" height="26" rx="2" fill="#8a919c"/><rect x="21" width="3" height="26" rx="2" fill="#8a919c"/><rect x="28" width="3" height="26" rx="2" fill="#8a919c"/></svg>CTEM</a>
+        <nav class="screen-nav" aria-label="Primary">
+          <a href="/">Home</a>
+          <a href="/sdk" aria-current="page">SDK</a>
+          <a href="/contact">Contact</a>
+          <a href="/support">Support</a>
+        </nav>
       </div>
     </header>
-    <main id="content">
-      <div class="ref-intro">
-        <h1>SDK</h1>
-        <div class="intro">
+    <main id="content" class="screen-main">
+      <div class="sdk-wrap">
+        <header class="sdk-intro">
+          <span class="sdk-kicker">API Reference</span>
+          <h1>SDK</h1>
           <p>
-            This is the CTEM gateway HTTP API. It is not a language SDK. Paths below are the
-            routes in <code>apps/api-gateway</code> on this repo. Org comes from the bearer
-            token (JWT or PAT). The client does not send an org id. Unauthenticated calls are
-            401 when the route exists.
+            HTTP API, not a language SDK; private scanner SDK not documented here. Org comes from token.
+            Unauthenticated calls are 401 when route exists. Full schema at gateway /docs.
           </p>
-          <p>
-            Samples call <code>$CTEM_GATEWAY</code> with
-            <code>Authorization: Bearer $TOKEN</code>. Response bodies that are not confirmed
-            in the controller stay on the gateway’s <code>/docs</code>. No sample bodies here.
-          </p>
-          <p>
-            Health, OIDC, and login are not controllers under
-            <code>apps/api-gateway/src/routes/</code>, so they are not in this reference.
-            Scanners, connectors, and <code>/internal</code> paths are not listed.
-          </p>
-        </div>
-      </div>
-      <div class="ref">
-        <nav class="ref-nav" aria-label="API groups">
-          <p class="ref-group">Session</p>
-          <p class="ref-group-about">Echo of the principal this gateway minted for the bearer token. The client cannot supply an org id, and role and permissions for humans come from Membership.</p>
-          <a class="is-default" href="#get-session"><span class="verb get">GET</span> /v1/session</a>
-          <p class="ref-group">Scans</p>
-          <p class="ref-group-about">Create a scan and read scans back, including the id CI and deploy tooling poll. The gateway forwards these routes to the orchestrator.</p>
-          <a href="#get-scans"><span class="verb get">GET</span> /v1/scans</a>
-          <a href="#get-scan"><span class="verb get">GET</span> /v1/scans/:id</a>
-          <a href="#post-scans"><span class="verb post">POST</span> /v1/scans</a>
-          <a href="#post-scans-sbom"><span class="verb post">POST</span> /v1/scans/sbom</a>
-          <p class="ref-group">Assets</p>
-          <p class="ref-group-about">Assets are what findings hang off of, with criticality, owner, and exposure. The gateway forwards these routes to the asset service.</p>
-          <a href="#get-assets"><span class="verb get">GET</span> /v1/assets</a>
-          <a href="#get-asset"><span class="verb get">GET</span> /v1/assets/:id</a>
-          <a href="#get-asset-graph"><span class="verb get">GET</span> /v1/assets/:id/graph</a>
-          <a href="#post-assets-discover"><span class="verb post">POST</span> /v1/assets/discover</a>
-          <a href="#post-assets"><span class="verb post">POST</span> /v1/assets</a>
-          <p class="ref-group">Findings</p>
-          <p class="ref-group-about">Findings are the objects humans triage. List, get, and triage are forwarded to the findings service, and the risk read is forwarded to the risk service.</p>
-          <a href="#get-findings"><span class="verb get">GET</span> /v1/findings</a>
-          <a href="#get-finding"><span class="verb get">GET</span> /v1/findings/:id</a>
-          <a href="#get-finding-risk"><span class="verb get">GET</span> /v1/findings/:id/risk</a>
-          <a href="#patch-finding-triage"><span class="verb patch">PATCH</span> /v1/findings/:id/triage</a>
-          <p class="ref-group">Policies</p>
-          <p class="ref-group-about">Policies say what to block, how fast a matching finding must be fixed, and who may accept the risk. Org comes from the token, and these routes forward to the risk service.</p>
-          <a href="#get-policies"><span class="verb get">GET</span> /v1/policies</a>
-          <a href="#get-policy"><span class="verb get">GET</span> /v1/policies/:id</a>
-          <a href="#post-policies"><span class="verb post">POST</span> /v1/policies</a>
-          <a href="#patch-policy"><span class="verb patch">PATCH</span> /v1/policies/:id</a>
-          <p class="ref-group">Members</p>
-          <p class="ref-group-about">Members of the organization on the token. Invite, role change, and disable forward to the identity service and do not call the Keycloak Admin API.</p>
-          <a href="#get-members"><span class="verb get">GET</span> /v1/org/members</a>
-          <a href="#post-members"><span class="verb post">POST</span> /v1/org/members</a>
-          <a href="#patch-member-role"><span class="verb patch">PATCH</span> /v1/org/members/:userId/role</a>
-          <a href="#delete-member"><span class="verb delete">DELETE</span> /v1/org/members/:userId</a>
-          <p class="ref-group">Meters</p>
-          <p class="ref-group-about">Read durable scan.kick usage for the organization on the token. This proxy does not emit a meter row, and a query orgId is dropped.</p>
-          <a href="#get-scan-kicks"><span class="verb get">GET</span> /v1/meters/scan-kicks</a>
-        </nav>
-        <div class="ref-stage">
-          <section class="ref-row" id="get-session">
-            <div class="ref-main">
-              <h2><span class="verb get">GET</span> <code>/v1/session</code></h2>
-              <p class="ref-lead">Returns the principal the gateway minted for this token.</p>
-              <p>Tag <code>session</code>. Permission: bearer principal. No extra permission decorator on the controller.</p>
-              <h3>Response</h3>
-              <p>
-                Confirmed in the controller: <code>userId</code>, <code>orgId</code>,
-                <code>role</code>, <code>permissions</code>, <code>serviceAccount</code>.
-                Full schema: gateway <code>/docs</code>.
-              </p>
+        </header>
+        <div class="sdk-grid">
+          <aside class="sdk-side">
+            <div class="sdk-label">Core Endpoints</div>
+            <div class="sdk-groups">
+              <div class="sdk-group"><span>1. Session</span><span class="sdk-count">1 route</span></div>
+              <div>
+                <div class="sdk-group is-open">
+                  <span>2. Scans</span>
+                  <span class="sdk-count"><span class="pill-active">active</span>4 routes</span>
+                </div>
+                <nav class="sdk-routes" aria-label="Scans">
+                  <a href="#get-scans"><span class="verb">GET</span>/v1/scans</a>
+                  <a href="#get-scans-id"><span class="verb">GET</span>/v1/scans/:id</a>
+                  <a class="is-on" href="#post-scans"><span><span class="verb">POST</span>/v1/scans</span><span class="dot"></span></a>
+                  <a href="#post-scans-sbom"><span class="verb">POST</span>/v1/scans/sbom</a>
+                </nav>
+              </div>
+              <div class="sdk-group"><span>3. Assets</span><span class="sdk-count">5 routes</span></div>
+              <div class="sdk-group"><span>4. Findings</span><span class="sdk-count">4 routes</span></div>
+              <div class="sdk-group"><span>5. Policies</span><span class="sdk-count">4 routes</span></div>
+              <div class="sdk-group"><span>6. Members</span><span class="sdk-count">4 routes</span></div>
+              <div class="sdk-group"><span>7. Meters</span><span class="sdk-count">1 route</span></div>
             </div>
-            <aside class="ref-code">
-              <h3>curl</h3>
-              <pre><code>curl -sS "$CTEM_GATEWAY/v1/session" \
-  -H "Authorization: Bearer $TOKEN"</code></pre>
-            </aside>
+          </aside>
+          <section class="sdk-center">
+            <article class="sdk-card" id="post-scans">
+              <div class="endpoint">
+                <span class="verb-lg">POST</span>
+                <span class="path-lg">/v1/scans</span>
+              </div>
+              <p class="lead">
+                Creates a scan and forwards the body to the orchestrator. Requires scan:run. The gateway does not emit scan.kick.
+              </p>
+              <div class="block-label">Request Headers</div>
+              <div class="param">
+                <div class="param-top">
+                  <span><code>Idempotency-Key</code> <span class="kind">(string, optional)</span></span>
+                </div>
+                <p>Forwarded when present so the orchestrator can dedupe the accept.</p>
+              </div>
+              <div class="block-label">Request Body Parameters</div>
+              <div class="param">
+                <div class="param-top">
+                  <span><code>scannerType</code> <span class="kind">(string)</span></span>
+                  <span class="badge-req">required</span>
+                </div>
+                <p>Allowed values: "sca", "sast", "container", "iac", "secrets", "asm", "cloud_posture".</p>
+              </div>
+              <div class="param">
+                <div class="param-top">
+                  <span><code>assetSelector</code> <span class="kind">(object)</span></span>
+                  <span class="badge-opt">optional</span>
+                </div>
+                <p>Optional fields assetIds, kinds, and tags. An empty selector means everything in scope for this scanner.</p>
+              </div>
+              <div class="param">
+                <div class="param-top">
+                  <span><code>options</code> <span class="kind">(object)</span></span>
+                  <span class="badge-opt">optional</span>
+                </div>
+                <p>Optional record. Client conclusion keys are refused.</p>
+              </div>
+              <div class="callout">
+                <p>
+                  <strong>Note:</strong> conclusion (pending, passed, failed) and deployConclusion (pending, allowed, blocked) are read-only GET fields, never inputs. The client does not send them.
+                </p>
+              </div>
+            </article>
+            <article class="sdk-card">
+              <div class="sdk-label matrix-head">
+                <h2>Scope Architecture &amp; Allowed Routes</h2>
+                <span class="v1">v1 Matrix</span>
+              </div>
+              <div class="matrix-card">
+                <h3>Session</h3>
+                <p>GET /v1/session returns userId, orgId, role, permissions, and serviceAccount. The client cannot supply an org id. Role and permissions for humans come from Membership.</p>
+              </div>
+              <div class="matrix-card">
+                <span id="get-scans"></span>
+                <span id="get-scans-id"></span>
+                <span id="post-scans-sbom"></span>
+                <h3>Scans</h3>
+                <p>
+                  GET /v1/scans, GET /v1/scans/:id (conclusion and deployConclusion are read-only; conclusion comes from fail_build and deployConclusion from block_deploy), POST /v1/scans (scannerType sca|sast|container|iac|secrets|asm|cloud_posture, optional assetSelector and options; do not send conclusion or deployConclusion), POST /v1/scans/sbom (assetExternalKey, format cyclonedx-json|spdx-json|syft-json, exactly one of artifactKey or document; optional ref and commitSha).
+                </p>
+              </div>
+              <div class="matrix-card">
+                <h3>Assets</h3>
+                <p>GET /v1/assets, GET /v1/assets/:id, GET /v1/assets/:id/graph (depth defaults to 2), POST /v1/assets/discover (no body), POST /v1/assets (kind, externalKey, name, source). Response bodies are at gateway /docs.</p>
+              </div>
+              <div class="matrix-card">
+                <h3>Findings</h3>
+                <p>GET /v1/findings, GET /v1/findings/:id, GET /v1/findings/:id/risk (forwarded to the risk service), PATCH /v1/findings/:id/triage (state and reason; expiresAt is optional here and the policy service requires it for risk_accepted). Response bodies are at gateway /docs.</p>
+              </div>
+              <div class="matrix-card">
+                <h3>Policies</h3>
+                <p>GET /v1/policies, POST /v1/policies, GET /v1/policies/:id, PATCH /v1/policies/:id. Editor actions are notify, ticket, fail_build, and block_deploy. ignore is not an editor action. Org comes from the token.</p>
+              </div>
+              <div class="matrix-card">
+                <h3>Members</h3>
+                <p>GET /v1/org/members, POST /v1/org/members (email and role), PATCH /v1/org/members/:userId/role, DELETE /v1/org/members/:userId (disables the membership and does not call the Keycloak Admin API). Roles: owner, admin, security_analyst, developer, auditor.</p>
+              </div>
+              <div class="matrix-card">
+                <h3>Meters</h3>
+                <p>GET /v1/meters/scan-kicks. Params: from, to, source manual|api|webhook|ci|schedule, limit, cursor. limit defaults to 50 and is capped at 200. When neither from nor to is set, the window is the last 30×24h with no upper bound. A query orgId is dropped. This proxy does not emit a meter row. Full schema is gateway /docs.</p>
+              </div>
+            </article>
           </section>
-
-          <section class="ref-row" id="get-scans">
-            <div class="ref-main">
-              <h2><span class="verb get">GET</span> <code>/v1/scans</code></h2>
-              <p class="ref-lead">Lists scans and forwards the query string to the orchestrator as the client sent it.</p>
-              <p>Tag <code>scans</code>. Permission <code>scan:read</code>.</p>
-              <p>The controller forwards the query as sent. This reference does not name list filters.</p>
-              <h3>Response</h3>
-              <p>Proxied. Full schema: gateway <code>/docs</code>.</p>
-            </div>
-            <aside class="ref-code">
-              <h3>curl</h3>
-              <pre><code>curl -sS "$CTEM_GATEWAY/v1/scans" \
-  -H "Authorization: Bearer $TOKEN"</code></pre>
-            </aside>
-          </section>
-
-          <section class="ref-row" id="get-scan">
-            <div class="ref-main">
-              <h2><span class="verb get">GET</span> <code>/v1/scans/:id</code></h2>
-              <p class="ref-lead">Returns one scan for CI and deploy tooling to poll. <code>conclusion</code> is computed from matching <code>fail_build</code> rules and <code>deployConclusion</code> from matching <code>block_deploy</code> rules, and this proxy has no write for either field.</p>
-              <p>Tag <code>scans</code>. Permission <code>scan:read</code>. CI and deploy tooling poll this.</p>
-              <p>
-                <code>conclusion</code> is fail-build. <code>deployConclusion</code> is block-deploy.
-                The client cannot POST either field.
-              </p>
-              <h3>Response</h3>
-              <p>
-                Partial. Confirmed fields on a scan include status
-                (<code>queued</code>, <code>running</code>, <code>succeeded</code>,
-                <code>partial</code>, <code>failed</code>, <code>cancelled</code>),
-                <code>conclusion</code> (<code>pending</code>, <code>passed</code>, <code>failed</code>),
-                and <code>deployConclusion</code> (<code>pending</code>, <code>allowed</code>, <code>blocked</code>).
-                Full object: gateway <code>/docs</code>.
-              </p>
-            </div>
-            <aside class="ref-code">
-              <h3>curl</h3>
-              <pre><code>curl -sS "$CTEM_GATEWAY/v1/scans/SCAN_ID" \
-  -H "Authorization: Bearer $TOKEN"</code></pre>
-            </aside>
-          </section>
-
-          <section class="ref-row" id="post-scans">
-            <div class="ref-main">
-              <h2><span class="verb post">POST</span> <code>/v1/scans</code></h2>
-              <p class="ref-lead">Creates a scan. An optional Idempotency-Key is forwarded so the orchestrator can dedupe the accept, and the gateway does not emit the scan.kick row.</p>
-              <p>Tag <code>scans</code>. Permission <code>scan:run</code>.</p>
-              <p>
-                Optional <code>Idempotency-Key</code> is forwarded. The gateway does not emit the meter row.
-              </p>
-              <h3>Body</h3>
-              <ul>
-                <li><code>scannerType</code>: <code>sca</code>, <code>sast</code>, <code>container</code>, <code>iac</code>, <code>secrets</code>, <code>asm</code>, or <code>cloud_posture</code>.</li>
-                <li>Optional <code>assetSelector</code>: <code>assetIds</code> (uuids), <code>kinds</code>, <code>tags</code>.</li>
-                <li><code>options</code> object, default <code>{}</code>.</li>
-                <li>Optional <code>externalId</code>.</li>
-              </ul>
-              <p>Do not send <code>conclusion</code> or <code>deployConclusion</code>.</p>
-              <h3>Response</h3>
-              <p>Proxied scan. Confirmed fields are the partial set on <a href="#get-scan">GET /v1/scans/:id</a>. Full object: gateway <code>/docs</code>.</p>
-            </div>
-            <aside class="ref-code">
-              <h3>curl</h3>
-              <pre><code>curl -sS -X POST "$CTEM_GATEWAY/v1/scans" \
-  -H "Authorization: Bearer $TOKEN" \
+          <aside class="sdk-curl">
+            <div class="sdk-curl-card">
+              <div class="sdk-label curl-head">
+                <span>curl sample (POST /v1/scans)</span>
+                <button class="copy" id="copy-curl" type="button">Copy</button>
+              </div>
+              <p class="copy-feedback" id="copy-feedback" hidden>Copied to clipboard</p>
+              <pre class="curl-pre" id="curl-sample"><code>curl https://api.example.com/v1/scans \
+  -H "Authorization: Bearer &lt;token&gt;" \
   -H "Content-Type: application/json" \
   -d '{"scannerType":"sca","assetSelector":{}}'</code></pre>
-            </aside>
-          </section>
-
-          <section class="ref-row" id="post-scans-sbom">
-            <div class="ref-main">
-              <h2><span class="verb post">POST</span> <code>/v1/scans/sbom</code></h2>
-              <p class="ref-lead">Ingests an SBOM a CI system uploads instead of granting repository access. An optional Idempotency-Key is forwarded the same way as on scan create.</p>
-              <p>Tag <code>scans</code>. Permission <code>scan:run</code>.</p>
-              <p>
-                Optional <code>Idempotency-Key</code> is forwarded. The gateway does not emit the meter row.
-              </p>
-              <h3>Body</h3>
+              <div class="req-header">
+                <span>Required Header</span>
+                <code>Authorization: Bearer &lt;token&gt;</code>
+              </div>
+            </div>
+            <div class="sdk-curl-card proto">
+              <div class="sdk-label">Protocol Conventions</div>
               <ul>
-                <li><code>assetExternalKey</code>.</li>
-                <li><code>format</code>: <code>cyclonedx-json</code>, <code>spdx-json</code>, or <code>syft-json</code>.</li>
-                <li>Exactly one of <code>artifactKey</code> or <code>document</code>.</li>
-                <li>Optional <code>ref</code>, <code>commitSha</code>, and <code>externalId</code>.</li>
+                <li>401 Unauthorized is returned when the bearer token is missing or invalid and the route exists.</li>
+                <li>The organization comes from the bearer token. The client does not send an org id.</li>
               </ul>
-              <h3>Response</h3>
-              <p>Proxied. Full schema: gateway <code>/docs</code>.</p>
             </div>
-            <aside class="ref-code">
-              <h3>curl</h3>
-              <pre><code>curl -sS -X POST "$CTEM_GATEWAY/v1/scans/sbom" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"assetExternalKey":"example.com","format":"cyclonedx-json","artifactKey":"objects/sbom.json"}'</code></pre>
-            </aside>
-          </section>
-
-          <section class="ref-row" id="get-assets">
-            <div class="ref-main">
-              <h2><span class="verb get">GET</span> <code>/v1/assets</code></h2>
-              <p class="ref-lead">Lists assets and forwards the list query to the asset service.</p>
-              <p>Tag <code>assets</code>. Permission <code>asset:read</code>.</p>
-              <h3>Query</h3>
-              <p>
-                Optional <code>kind</code>, <code>exposure</code>, <code>criticality</code>,
-                <code>ownerTeam</code>, <code>q</code>, <code>cursor</code>, and
-                <code>limit</code> (default 50, max 200).
-              </p>
-              <h3>Response</h3>
-              <p>Proxied. Full schema: gateway <code>/docs</code>.</p>
-            </div>
-            <aside class="ref-code">
-              <h3>curl</h3>
-              <pre><code>curl -sS "$CTEM_GATEWAY/v1/assets?limit=50" \
-  -H "Authorization: Bearer $TOKEN"</code></pre>
-            </aside>
-          </section>
-
-          <section class="ref-row" id="get-asset">
-            <div class="ref-main">
-              <h2><span class="verb get">GET</span> <code>/v1/assets/:id</code></h2>
-              <p class="ref-lead">Returns one asset by id.</p>
-              <p>Tag <code>assets</code>. Permission <code>asset:read</code>.</p>
-              <h3>Response</h3>
-              <p>Returns the asset. Full schema: gateway <code>/docs</code>.</p>
-            </div>
-            <aside class="ref-code">
-              <h3>curl</h3>
-              <pre><code>curl -sS "$CTEM_GATEWAY/v1/assets/ASSET_ID" \
-  -H "Authorization: Bearer $TOKEN"</code></pre>
-            </aside>
-          </section>
-
-          <section class="ref-row" id="get-asset-graph">
-            <div class="ref-main">
-              <h2><span class="verb get">GET</span> <code>/v1/assets/:id/graph</code></h2>
-              <p class="ref-lead">Returns the graph for one asset. <code>depth</code> defaults to 2 on this controller.</p>
-              <p>Tag <code>assets</code>. Permission <code>asset:read</code>.</p>
-              <h3>Query</h3>
-              <p><code>depth</code>. Controller default <code>"2"</code>.</p>
-              <h3>Response</h3>
-              <p>Proxied. Full schema: gateway <code>/docs</code>.</p>
-            </div>
-            <aside class="ref-code">
-              <h3>curl</h3>
-              <pre><code>curl -sS "$CTEM_GATEWAY/v1/assets/ASSET_ID/graph?depth=2" \
-  -H "Authorization: Bearer $TOKEN"</code></pre>
-            </aside>
-          </section>
-
-          <section class="ref-row" id="post-assets-discover">
-            <div class="ref-main">
-              <h2><span class="verb post">POST</span> <code>/v1/assets/discover</code></h2>
-              <p class="ref-lead">Forwards a discovery request to the asset service. This controller defines no body.</p>
-              <p>Tag <code>assets</code>. Permission <code>integration:manage</code>.</p>
-              <p>No body in the controller.</p>
-              <h3>Response</h3>
-              <p>Proxied. Full schema: gateway <code>/docs</code>.</p>
-            </div>
-            <aside class="ref-code">
-              <h3>curl</h3>
-              <pre><code>curl -sS -X POST "$CTEM_GATEWAY/v1/assets/discover" \
-  -H "Authorization: Bearer $TOKEN"</code></pre>
-            </aside>
-          </section>
-
-          <section class="ref-row" id="post-assets">
-            <div class="ref-main">
-              <h2><span class="verb post">POST</span> <code>/v1/assets</code></h2>
-              <p class="ref-lead">Upserts an asset and forwards the body to the asset service.</p>
-              <p>Tag <code>assets</code>. Permission <code>asset:write</code>.</p>
-              <h3>Body</h3>
-              <ul>
-                <li><code>kind</code>, <code>externalKey</code>, <code>name</code>, <code>source</code>.</li>
-                <li>Optional exposure, criticality, data classes, owner, tags, attributes.</li>
-              </ul>
-              <p>
-                Kinds: <code>repository</code>, <code>package</code>, <code>container_image</code>,
-                <code>cloud_resource</code>, <code>kubernetes_workload</code>, <code>host</code>,
-                <code>domain</code>, <code>ip_range</code>, <code>web_application</code>,
-                <code>api_endpoint</code>, <code>saas_app</code>, <code>iac_stack</code>.
-              </p>
-              <h3>Response</h3>
-              <p>Unknown beyond “returns the asset”. Schema: gateway <code>/docs</code>.</p>
-            </div>
-            <aside class="ref-code">
-              <h3>curl</h3>
-              <pre><code>curl -sS -X POST "$CTEM_GATEWAY/v1/assets" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"kind":"domain","externalKey":"example.com","name":"example.com","source":"asm"}'</code></pre>
-            </aside>
-          </section>
-
-          <section class="ref-row" id="get-findings">
-            <div class="ref-main">
-              <h2><span class="verb get">GET</span> <code>/v1/findings</code></h2>
-              <p class="ref-lead">Lists findings and forwards the list query to the findings service.</p>
-              <p>Tag <code>findings</code>. Permission <code>finding:read</code>.</p>
-              <h3>Query</h3>
-              <p>
-                Optional <code>assetId</code>, <code>scannerType</code>, <code>severity</code>,
-                <code>state</code>, <code>validation</code>, <code>minRiskScore</code>,
-                <code>fixAvailable</code>, <code>slaBreached</code>, <code>q</code>,
-                <code>cursor</code>, and <code>limit</code> (default 50, max 200).
-              </p>
-              <h3>Response</h3>
-              <p>Proxied. Full schema: gateway <code>/docs</code>.</p>
-            </div>
-            <aside class="ref-code">
-              <h3>curl</h3>
-              <pre><code>curl -sS "$CTEM_GATEWAY/v1/findings?limit=50" \
-  -H "Authorization: Bearer $TOKEN"</code></pre>
-            </aside>
-          </section>
-
-          <section class="ref-row" id="get-finding">
-            <div class="ref-main">
-              <h2><span class="verb get">GET</span> <code>/v1/findings/:id</code></h2>
-              <p class="ref-lead">Returns one finding by id.</p>
-              <p>Tag <code>findings</code>. Permission <code>finding:read</code>.</p>
-              <h3>Response</h3>
-              <p>Unknown (proxied). Schema: gateway <code>/docs</code>.</p>
-            </div>
-            <aside class="ref-code">
-              <h3>curl</h3>
-              <pre><code>curl -sS "$CTEM_GATEWAY/v1/findings/FINDING_ID" \
-  -H "Authorization: Bearer $TOKEN"</code></pre>
-            </aside>
-          </section>
-
-          <section class="ref-row" id="get-finding-risk">
-            <div class="ref-main">
-              <h2><span class="verb get">GET</span> <code>/v1/findings/:id/risk</code></h2>
-              <p class="ref-lead">Returns why this finding’s risk score is what it is. The gateway forwards the read to the risk service.</p>
-              <p>Tag <code>findings</code>. Permission <code>finding:read</code>. Why the score is what it is.</p>
-              <h3>Response</h3>
-              <p>Unknown (proxied). Schema: gateway <code>/docs</code>.</p>
-            </div>
-            <aside class="ref-code">
-              <h3>curl</h3>
-              <pre><code>curl -sS "$CTEM_GATEWAY/v1/findings/FINDING_ID/risk" \
-  -H "Authorization: Bearer $TOKEN"</code></pre>
-            </aside>
-          </section>
-
-          <section class="ref-row" id="patch-finding-triage">
-            <div class="ref-main">
-              <h2><span class="verb patch">PATCH</span> <code>/v1/findings/:id/triage</code></h2>
-              <p class="ref-lead">Sets one finding’s triage state and reason. <code>expiresAt</code> is optional on this controller; the policy service requires it when the state is <code>risk_accepted</code>.</p>
-              <p>Tag <code>findings</code>. Permission <code>finding:triage</code>.</p>
-              <h3>Body</h3>
-              <ul>
-                <li>
-                  <code>state</code>: <code>open</code>, <code>triaged</code>, <code>in_progress</code>,
-                  <code>resolved</code>, <code>risk_accepted</code>, <code>false_positive</code>, or
-                  <code>suppressed</code>.
-                </li>
-                <li><code>reason</code>, 1–2000 characters.</li>
-                <li>
-                  Optional <code>expiresAt</code>. Required by the policy service when state is
-                  <code>risk_accepted</code>. That rule is enforced off this controller, not as a gateway check.
-                </li>
-              </ul>
-              <h3>Response</h3>
-              <p>Unknown (proxied). Schema: gateway <code>/docs</code>.</p>
-            </div>
-            <aside class="ref-code">
-              <h3>curl</h3>
-              <pre><code>curl -sS -X PATCH "$CTEM_GATEWAY/v1/findings/FINDING_ID/triage" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"state":"triaged","reason":"Owner assigned"}'</code></pre>
-            </aside>
-          </section>
-
-          <section class="ref-row" id="get-policies">
-            <div class="ref-main">
-              <h2><span class="verb get">GET</span> <code>/v1/policies</code></h2>
-              <p class="ref-lead">Lists policies for the token’s organization and forwards the read to the risk service.</p>
-              <p>Tag <code>policies</code>. Permission <code>policy:read</code>. Org comes from the token.</p>
-              <h3>Response</h3>
-              <p>Unknown (proxied). Schema: gateway <code>/docs</code>.</p>
-            </div>
-            <aside class="ref-code">
-              <h3>curl</h3>
-              <pre><code>curl -sS "$CTEM_GATEWAY/v1/policies" \
-  -H "Authorization: Bearer $TOKEN"</code></pre>
-            </aside>
-          </section>
-
-          <section class="ref-row" id="get-policy">
-            <div class="ref-main">
-              <h2><span class="verb get">GET</span> <code>/v1/policies/:id</code></h2>
-              <p class="ref-lead">Returns one policy. Org comes from the token, and the gateway forwards the read to the risk service.</p>
-              <p>Tag <code>policies</code>. Permission <code>policy:read</code>. Org comes from the token.</p>
-              <h3>Response</h3>
-              <p>Unknown (proxied). Schema: gateway <code>/docs</code>.</p>
-            </div>
-            <aside class="ref-code">
-              <h3>curl</h3>
-              <pre><code>curl -sS "$CTEM_GATEWAY/v1/policies/POLICY_ID" \
-  -H "Authorization: Bearer $TOKEN"</code></pre>
-            </aside>
-          </section>
-
-          <section class="ref-row" id="post-policies">
-            <div class="ref-main">
-              <h2><span class="verb post">POST</span> <code>/v1/policies</code></h2>
-              <p class="ref-lead">Creates a policy and forwards it to the risk service. Tenant webhook and Jira URL fields are refused.</p>
-              <p>Tag <code>policies</code>. Permission <code>policy:write</code>. Org comes from the token.</p>
-              <h3>Body</h3>
-              <ul>
-                <li><code>name</code>, <code>condition</code>, and <code>actions</code>.</li>
-                <li>
-                  <code>actions</code> is a non-empty subset of <code>notify</code>, <code>ticket</code>,
-                  <code>fail_build</code>, and <code>block_deploy</code>. <code>ignore</code> is not an editor action.
-                </li>
-                <li>Optional <code>description</code>, <code>enabled</code>, <code>priority</code>, and <code>slaHours</code>.</li>
-              </ul>
-              <p>Tenant webhook and Jira URL fields are refused.</p>
-              <h3>Response</h3>
-              <p>Unknown (proxied). Schema: gateway <code>/docs</code>.</p>
-            </div>
-            <aside class="ref-code">
-              <h3>curl</h3>
-              <pre><code>curl -sS -X POST "$CTEM_GATEWAY/v1/policies" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Block high risk deploys","condition":{"minRiskScore":70},"actions":["block_deploy"]}'</code></pre>
-            </aside>
-          </section>
-
-          <section class="ref-row" id="patch-policy">
-            <div class="ref-main">
-              <h2><span class="verb patch">PATCH</span> <code>/v1/policies/:id</code></h2>
-              <p class="ref-lead">Applies a partial update to one policy and forwards it to the risk service.</p>
-              <p>Tag <code>policies</code>. Permission <code>policy:write</code>. Org comes from the token.</p>
-              <p>Partial of the same body as <a href="#post-policies">POST /v1/policies</a>.</p>
-              <h3>Response</h3>
-              <p>Unknown (proxied). Schema: gateway <code>/docs</code>.</p>
-            </div>
-            <aside class="ref-code">
-              <h3>curl</h3>
-              <pre><code>curl -sS -X PATCH "$CTEM_GATEWAY/v1/policies/POLICY_ID" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"enabled":false}'</code></pre>
-            </aside>
-          </section>
-
-          <section class="ref-row" id="get-members">
-            <div class="ref-main">
-              <h2><span class="verb get">GET</span> <code>/v1/org/members</code></h2>
-              <p class="ref-lead">Lists members for the organization on the token.</p>
-              <p>Tag <code>members</code>. Permission <code>org:read</code>.</p>
-              <h3>Response</h3>
-              <p>Unknown (proxied). Schema: gateway <code>/docs</code>.</p>
-            </div>
-            <aside class="ref-code">
-              <h3>curl</h3>
-              <pre><code>curl -sS "$CTEM_GATEWAY/v1/org/members" \
-  -H "Authorization: Bearer $TOKEN"</code></pre>
-            </aside>
-          </section>
-
-          <section class="ref-row" id="post-members">
-            <div class="ref-main">
-              <h2><span class="verb post">POST</span> <code>/v1/org/members</code></h2>
-              <p class="ref-lead">Invites a member by email and role. Membership is created on first login when the email matches.</p>
-              <p>Tag <code>members</code>. Permission <code>member:manage</code>.</p>
-              <h3>Body</h3>
-              <p>
-                <code>email</code> and <code>role</code>. Role is <code>owner</code>, <code>admin</code>,
-                <code>security_analyst</code>, <code>developer</code>, or <code>auditor</code>.
-              </p>
-              <h3>Response</h3>
-              <p>Unknown (proxied). Schema: gateway <code>/docs</code>.</p>
-            </div>
-            <aside class="ref-code">
-              <h3>curl</h3>
-              <pre><code>curl -sS -X POST "$CTEM_GATEWAY/v1/org/members" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"email":"teammate@example.com","role":"developer"}'</code></pre>
-            </aside>
-          </section>
-
-          <section class="ref-row" id="patch-member-role">
-            <div class="ref-main">
-              <h2><span class="verb patch">PATCH</span> <code>/v1/org/members/:userId/role</code></h2>
-              <p class="ref-lead">Changes one member’s role.</p>
-              <p>Tag <code>members</code>. Permission <code>member:manage</code>.</p>
-              <h3>Body</h3>
-              <p><code>role</code>, same values as invite.</p>
-              <h3>Response</h3>
-              <p>Unknown (proxied). Schema: gateway <code>/docs</code>.</p>
-            </div>
-            <aside class="ref-code">
-              <h3>curl</h3>
-              <pre><code>curl -sS -X PATCH "$CTEM_GATEWAY/v1/org/members/USER_ID/role" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"role":"developer"}'</code></pre>
-            </aside>
-          </section>
-
-          <section class="ref-row" id="delete-member">
-            <div class="ref-main">
-              <h2><span class="verb delete">DELETE</span> <code>/v1/org/members/:userId</code></h2>
-              <p class="ref-lead">Disables one membership. This is not a Keycloak Admin call.</p>
-              <p>Tag <code>members</code>. Permission <code>member:manage</code>.</p>
-              <p>Disables membership. Not a Keycloak Admin call.</p>
-              <h3>Response</h3>
-              <p>Unknown (proxied). Schema: gateway <code>/docs</code>.</p>
-            </div>
-            <aside class="ref-code">
-              <h3>curl</h3>
-              <pre><code>curl -sS -X DELETE "$CTEM_GATEWAY/v1/org/members/USER_ID" \
-  -H "Authorization: Bearer $TOKEN"</code></pre>
-            </aside>
-          </section>
-
-          <section class="ref-row" id="get-scan-kicks">
-            <div class="ref-main">
-              <h2><span class="verb get">GET</span> <code>/v1/meters/scan-kicks</code></h2>
-              <p class="ref-lead">Lists durable scan.kick rows for the token’s organization and does not emit a meter row. When neither <code>from</code> nor <code>to</code> is set, the window is the last 30×24 hours with no upper bound; setting either bound disables that default.</p>
-              <p>Tag <code>meters</code>. Permission <code>scan:read</code>. Read-only.</p>
-              <p>Query <code>orgId</code> is dropped. This route does not emit a meter row.</p>
-              <h3>Query</h3>
-              <ul>
-                <li>Optional <code>from</code> and <code>to</code>, ISO-8601. <code>from</code> is inclusive. <code>to</code> is exclusive.</li>
-                <li><code>source</code>: <code>manual</code>, <code>api</code>, <code>webhook</code>, <code>ci</code>, or <code>schedule</code>.</li>
-                <li><code>limit</code> default 50, cap 200. Optional <code>cursor</code>.</li>
-              </ul>
-              <h3>Response</h3>
-              <p>
-                Unknown (list shape not read from the controller). Schema: gateway <code>/docs</code>.
-                Summary confirmed: scan.kick usage for the token’s organization.
-              </p>
-            </div>
-            <aside class="ref-code">
-              <h3>curl</h3>
-              <pre><code>curl -sS "$CTEM_GATEWAY/v1/meters/scan-kicks?source=ci&amp;limit=50" \
-  -H "Authorization: Bearer $TOKEN"</code></pre>
-            </aside>
-          </section>
+          </aside>
         </div>
       </div>
     </main>
-    <footer class="foot">
-      <div class="foot-bar">
-        <div class="foot-brand">
-          <span class="foot-name">CTEM Labs</span>
-          <span class="sys">Sys.spec</span>
+    <footer class="screen-foot">
+      <div class="screen-foot-bar">
+        <div class="screen-foot-left">
+          <span>CTEM Labs</span>
+          <span class="screen-foot-div" aria-hidden="true">/</span>
+          <a href="mailto:lonny.angell@gmail.com">lonny.angell@gmail.com</a>
         </div>
-        <a class="foot-mail" href="mailto:lonny.angell@gmail.com">lonny.angell@gmail.com</a>
-        <span class="foot-role">current contact</span>
         <nav aria-label="Legal">
           <a href="/privacy">Privacy</a>
-          <span class="sep" aria-hidden="true">·</span>
           <a href="/terms">Terms</a>
         </nav>
       </div>
     </footer>
+    <p class="dash-note"><a href="https://langell.github.io/ctem-platform/">agent-dora</a></p>
+    <script>
+      document.getElementById("copy-curl").addEventListener("click", function () {
+        var text = document.getElementById("curl-sample").innerText;
+        var note = document.getElementById("copy-feedback");
+        navigator.clipboard.writeText(text).then(function () {
+          note.hidden = false;
+          setTimeout(function () {
+            note.hidden = true;
+          }, 2000);
+        });
+      });
+    </script>
   </body>
 </html>

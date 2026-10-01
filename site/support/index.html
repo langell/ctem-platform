@@ -14,75 +14,74 @@
     <link rel="icon" href="/favicon-16.png" sizes="16x16" type="image/png" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
-  <body class="rail">
+  <body class="screen screen-support">
     <a class="skip" href="#content">Skip to content</a>
-    <header class="top">
-      <a class="brand" href="/"><svg class="mark" viewBox="0 0 31 26" aria-hidden="true" focusable="false"><rect width="3" height="26" rx="2" fill="#a7d0ff"/><rect x="7" width="3" height="26" rx="2" fill="#8a919c"/><rect x="14" width="3" height="26" rx="2" fill="#8a919c"/><rect x="21" width="3" height="26" rx="2" fill="#8a919c"/><rect x="28" width="3" height="26" rx="2" fill="#8a919c"/></svg>CTEM</a>
-      <nav class="nav" aria-label="Primary">
-        <a href="/">CTEM</a>
-        <a href="/sdk">SDK</a>
-        <a href="/contact">Contact</a>
-        <a href="/support" aria-current="page">Support</a>
-      </nav>
-      <div class="top-end">
-        <span class="api-pill">CTEM-API v2.4</span>
+    <header class="screen-top">
+      <div class="screen-top-inner">
+        <a class="screen-brand" href="/"><svg class="mark" viewBox="0 0 31 26" aria-hidden="true" focusable="false"><rect width="3" height="26" rx="2" fill="#a7d0ff"/><rect x="7" width="3" height="26" rx="2" fill="#8a919c"/><rect x="14" width="3" height="26" rx="2" fill="#8a919c"/><rect x="21" width="3" height="26" rx="2" fill="#8a919c"/><rect x="28" width="3" height="26" rx="2" fill="#8a919c"/></svg>CTEM</a>
+        <nav class="screen-nav" aria-label="Primary">
+          <a href="/">Home</a>
+          <a href="/sdk">SDK</a>
+          <a href="/contact">Contact</a>
+          <a href="/support" aria-current="page">Support</a>
+        </nav>
       </div>
     </header>
-    <main id="content" class="doc">
-      <h1>Support</h1>
-      <p class="company">CTEM Labs</p>
-      <p>Product help. This is not a status page.</p>
-      <p class="helper">
-        The message goes to
-        <a href="mailto:lonny.angell@gmail.com">lonny.angell@gmail.com</a>.
-      </p>
-      <form class="mail" id="support-mail" action="mailto:lonny.angell@gmail.com" method="post" enctype="text/plain">
-        <label>
-          Name
-          <input name="name" type="text" autocomplete="name" required />
-        </label>
-        <label>
-          Email
-          <input name="email" type="email" autocomplete="email" required />
-        </label>
-        <label>
-          Organization
-          <input name="organization" type="text" autocomplete="organization" required />
-        </label>
-        <label>
-          Scan id (optional)
-          <input name="scanId" type="text" />
-        </label>
-        <label>
-          What you expected
-          <textarea name="expected" required></textarea>
-        </label>
-        <label>
-          What happened
-          <textarea name="happened" required></textarea>
-        </label>
-        <button type="submit">Send</button>
-      </form>
-      <p>
-        API shape questions belong on the <a href="/sdk">SDK</a> page and the gateway’s
-        <code>/docs</code>, not a second docs site.
-      </p>
+    <main id="content" class="screen-main panel-wrap">
+      <div class="form-panel">
+        <h1>Support</h1>
+        <p class="form-sub">
+          Product help for CTEM. A scan id helps if you have one; API shape questions belong on the
+          <a href="/sdk">SDK</a> page.
+        </p>
+        <form class="mail-form" id="support-mail" action="mailto:lonny.angell@gmail.com" method="post" enctype="text/plain">
+          <div class="field-row">
+            <div class="field">
+              <label for="name">Name</label>
+              <input id="name" name="name" type="text" autocomplete="name" placeholder="Your name" required />
+            </div>
+            <div class="field">
+              <label for="email">Email</label>
+              <input id="email" name="email" type="email" autocomplete="email" placeholder="name@company.com" required />
+            </div>
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label for="organization">Organization</label>
+              <input id="organization" name="organization" type="text" autocomplete="organization" placeholder="Organization name" />
+            </div>
+            <div class="field">
+              <label for="scan-id">Scan ID <span class="opt">(optional)</span></label>
+              <input id="scan-id" name="scanId" type="text" placeholder="Scan id" />
+            </div>
+          </div>
+          <div class="field">
+            <label for="expected">What you expected</label>
+            <textarea id="expected" name="expected" required placeholder="Describe the expected evaluation, finding, or result..."></textarea>
+          </div>
+          <div class="field">
+            <label for="happened">What happened</label>
+            <textarea id="happened" name="happened" required placeholder="Describe the behavior encountered or scan status..."></textarea>
+          </div>
+          <button class="send" type="submit">Send</button>
+        </form>
+        <p class="send-note">Messages are delivered directly to lonny.angell@gmail.com</p>
+      </div>
     </main>
-    <footer class="foot">
-      <div class="foot-bar">
-        <div class="foot-brand">
-          <span class="foot-name">CTEM Labs</span>
-          <span class="sys">Sys.spec</span>
+    <footer class="screen-foot">
+      <div class="screen-foot-bar">
+        <div class="screen-foot-left">
+          <span>CTEM Labs</span>
+          <span class="screen-foot-div" aria-hidden="true">|</span>
+          <a href="mailto:lonny.angell@gmail.com">lonny.angell@gmail.com</a>
         </div>
-        <a class="foot-mail" href="mailto:lonny.angell@gmail.com">lonny.angell@gmail.com</a>
-        <span class="foot-role">current contact</span>
         <nav aria-label="Legal">
           <a href="/privacy">Privacy</a>
-          <span class="sep" aria-hidden="true">·</span>
           <a href="/terms">Terms</a>
         </nav>
       </div>
     </footer>
+    <p class="dash-note"><a href="https://langell.github.io/ctem-platform/">agent-dora</a></p>
     <script>
       document.getElementById("support-mail").addEventListener("submit", function (event) {
         event.preventDefault();
