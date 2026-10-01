@@ -57,40 +57,48 @@
       <div class="ref">
         <nav class="ref-nav" aria-label="API groups">
           <p class="ref-group">Session</p>
+          <p class="ref-group-about">Echo of the principal this gateway minted for the bearer token. The client cannot supply an org id, and role and permissions for humans come from Membership.</p>
           <a class="is-default" href="#get-session"><span class="verb get">GET</span> /v1/session</a>
           <p class="ref-group">Scans</p>
+          <p class="ref-group-about">Create a scan and read scans back, including the id CI and deploy tooling poll. The gateway forwards these routes to the orchestrator.</p>
           <a href="#get-scans"><span class="verb get">GET</span> /v1/scans</a>
           <a href="#get-scan"><span class="verb get">GET</span> /v1/scans/:id</a>
           <a href="#post-scans"><span class="verb post">POST</span> /v1/scans</a>
           <a href="#post-scans-sbom"><span class="verb post">POST</span> /v1/scans/sbom</a>
           <p class="ref-group">Assets</p>
+          <p class="ref-group-about">Assets are what findings hang off of, with criticality, owner, and exposure. The gateway forwards these routes to the asset service.</p>
           <a href="#get-assets"><span class="verb get">GET</span> /v1/assets</a>
           <a href="#get-asset"><span class="verb get">GET</span> /v1/assets/:id</a>
           <a href="#get-asset-graph"><span class="verb get">GET</span> /v1/assets/:id/graph</a>
           <a href="#post-assets-discover"><span class="verb post">POST</span> /v1/assets/discover</a>
           <a href="#post-assets"><span class="verb post">POST</span> /v1/assets</a>
           <p class="ref-group">Findings</p>
+          <p class="ref-group-about">Findings are the objects humans triage. List, get, and triage are forwarded to the findings service, and the risk read is forwarded to the risk service.</p>
           <a href="#get-findings"><span class="verb get">GET</span> /v1/findings</a>
           <a href="#get-finding"><span class="verb get">GET</span> /v1/findings/:id</a>
           <a href="#get-finding-risk"><span class="verb get">GET</span> /v1/findings/:id/risk</a>
           <a href="#patch-finding-triage"><span class="verb patch">PATCH</span> /v1/findings/:id/triage</a>
           <p class="ref-group">Policies</p>
+          <p class="ref-group-about">Policies say what to block, how fast a matching finding must be fixed, and who may accept the risk. Org comes from the token, and these routes forward to the risk service.</p>
           <a href="#get-policies"><span class="verb get">GET</span> /v1/policies</a>
           <a href="#get-policy"><span class="verb get">GET</span> /v1/policies/:id</a>
           <a href="#post-policies"><span class="verb post">POST</span> /v1/policies</a>
           <a href="#patch-policy"><span class="verb patch">PATCH</span> /v1/policies/:id</a>
           <p class="ref-group">Members</p>
+          <p class="ref-group-about">Members of the organization on the token. Invite, role change, and disable forward to the identity service and do not call the Keycloak Admin API.</p>
           <a href="#get-members"><span class="verb get">GET</span> /v1/org/members</a>
           <a href="#post-members"><span class="verb post">POST</span> /v1/org/members</a>
           <a href="#patch-member-role"><span class="verb patch">PATCH</span> /v1/org/members/:userId/role</a>
           <a href="#delete-member"><span class="verb delete">DELETE</span> /v1/org/members/:userId</a>
           <p class="ref-group">Meters</p>
+          <p class="ref-group-about">Read durable scan.kick usage for the organization on the token. This proxy does not emit a meter row, and a query orgId is dropped.</p>
           <a href="#get-scan-kicks"><span class="verb get">GET</span> /v1/meters/scan-kicks</a>
         </nav>
         <div class="ref-stage">
           <section class="ref-row" id="get-session">
             <div class="ref-main">
               <h2><span class="verb get">GET</span> <code>/v1/session</code></h2>
+              <p class="ref-lead">Returns the principal the gateway minted for this token.</p>
               <p>Tag <code>session</code>. Permission: bearer principal. No extra permission decorator on the controller.</p>
               <h3>Response</h3>
               <p>
@@ -109,6 +117,7 @@
           <section class="ref-row" id="get-scans">
             <div class="ref-main">
               <h2><span class="verb get">GET</span> <code>/v1/scans</code></h2>
+              <p class="ref-lead">Lists scans and forwards the query string to the orchestrator as the client sent it.</p>
               <p>Tag <code>scans</code>. Permission <code>scan:read</code>.</p>
               <p>The controller forwards the query as sent. This reference does not name list filters.</p>
               <h3>Response</h3>
@@ -124,6 +133,7 @@
           <section class="ref-row" id="get-scan">
             <div class="ref-main">
               <h2><span class="verb get">GET</span> <code>/v1/scans/:id</code></h2>
+              <p class="ref-lead">Returns one scan for CI and deploy tooling to poll. <code>conclusion</code> is computed from matching <code>fail_build</code> rules and <code>deployConclusion</code> from matching <code>block_deploy</code> rules, and this proxy has no write for either field.</p>
               <p>Tag <code>scans</code>. Permission <code>scan:read</code>. CI and deploy tooling poll this.</p>
               <p>
                 <code>conclusion</code> is fail-build. <code>deployConclusion</code> is block-deploy.
@@ -149,6 +159,7 @@
           <section class="ref-row" id="post-scans">
             <div class="ref-main">
               <h2><span class="verb post">POST</span> <code>/v1/scans</code></h2>
+              <p class="ref-lead">Creates a scan. An optional Idempotency-Key is forwarded so the orchestrator can dedupe the accept, and the gateway does not emit the scan.kick row.</p>
               <p>Tag <code>scans</code>. Permission <code>scan:run</code>.</p>
               <p>
                 Optional <code>Idempotency-Key</code> is forwarded. The gateway does not emit the meter row.
@@ -176,6 +187,7 @@
           <section class="ref-row" id="post-scans-sbom">
             <div class="ref-main">
               <h2><span class="verb post">POST</span> <code>/v1/scans/sbom</code></h2>
+              <p class="ref-lead">Ingests an SBOM a CI system uploads instead of granting repository access. An optional Idempotency-Key is forwarded the same way as on scan create.</p>
               <p>Tag <code>scans</code>. Permission <code>scan:run</code>.</p>
               <p>
                 Optional <code>Idempotency-Key</code> is forwarded. The gateway does not emit the meter row.
@@ -202,6 +214,7 @@
           <section class="ref-row" id="get-assets">
             <div class="ref-main">
               <h2><span class="verb get">GET</span> <code>/v1/assets</code></h2>
+              <p class="ref-lead">Lists assets and forwards the list query to the asset service.</p>
               <p>Tag <code>assets</code>. Permission <code>asset:read</code>.</p>
               <h3>Query</h3>
               <p>
@@ -222,6 +235,7 @@
           <section class="ref-row" id="get-asset">
             <div class="ref-main">
               <h2><span class="verb get">GET</span> <code>/v1/assets/:id</code></h2>
+              <p class="ref-lead">Returns one asset by id.</p>
               <p>Tag <code>assets</code>. Permission <code>asset:read</code>.</p>
               <h3>Response</h3>
               <p>Returns the asset. Full schema: gateway <code>/docs</code>.</p>
@@ -236,6 +250,7 @@
           <section class="ref-row" id="get-asset-graph">
             <div class="ref-main">
               <h2><span class="verb get">GET</span> <code>/v1/assets/:id/graph</code></h2>
+              <p class="ref-lead">Returns the graph for one asset. <code>depth</code> defaults to 2 on this controller.</p>
               <p>Tag <code>assets</code>. Permission <code>asset:read</code>.</p>
               <h3>Query</h3>
               <p><code>depth</code>. Controller default <code>"2"</code>.</p>
@@ -252,6 +267,7 @@
           <section class="ref-row" id="post-assets-discover">
             <div class="ref-main">
               <h2><span class="verb post">POST</span> <code>/v1/assets/discover</code></h2>
+              <p class="ref-lead">Forwards a discovery request to the asset service. This controller defines no body.</p>
               <p>Tag <code>assets</code>. Permission <code>integration:manage</code>.</p>
               <p>No body in the controller.</p>
               <h3>Response</h3>
@@ -267,6 +283,7 @@
           <section class="ref-row" id="post-assets">
             <div class="ref-main">
               <h2><span class="verb post">POST</span> <code>/v1/assets</code></h2>
+              <p class="ref-lead">Upserts an asset and forwards the body to the asset service.</p>
               <p>Tag <code>assets</code>. Permission <code>asset:write</code>.</p>
               <h3>Body</h3>
               <ul>
@@ -294,6 +311,7 @@
           <section class="ref-row" id="get-findings">
             <div class="ref-main">
               <h2><span class="verb get">GET</span> <code>/v1/findings</code></h2>
+              <p class="ref-lead">Lists findings and forwards the list query to the findings service.</p>
               <p>Tag <code>findings</code>. Permission <code>finding:read</code>.</p>
               <h3>Query</h3>
               <p>
@@ -315,6 +333,7 @@
           <section class="ref-row" id="get-finding">
             <div class="ref-main">
               <h2><span class="verb get">GET</span> <code>/v1/findings/:id</code></h2>
+              <p class="ref-lead">Returns one finding by id.</p>
               <p>Tag <code>findings</code>. Permission <code>finding:read</code>.</p>
               <h3>Response</h3>
               <p>Unknown (proxied). Schema: gateway <code>/docs</code>.</p>
@@ -329,6 +348,7 @@
           <section class="ref-row" id="get-finding-risk">
             <div class="ref-main">
               <h2><span class="verb get">GET</span> <code>/v1/findings/:id/risk</code></h2>
+              <p class="ref-lead">Returns why this finding’s risk score is what it is. The gateway forwards the read to the risk service.</p>
               <p>Tag <code>findings</code>. Permission <code>finding:read</code>. Why the score is what it is.</p>
               <h3>Response</h3>
               <p>Unknown (proxied). Schema: gateway <code>/docs</code>.</p>
@@ -343,6 +363,7 @@
           <section class="ref-row" id="patch-finding-triage">
             <div class="ref-main">
               <h2><span class="verb patch">PATCH</span> <code>/v1/findings/:id/triage</code></h2>
+              <p class="ref-lead">Sets one finding’s triage state and reason. <code>expiresAt</code> is optional on this controller; the policy service requires it when the state is <code>risk_accepted</code>.</p>
               <p>Tag <code>findings</code>. Permission <code>finding:triage</code>.</p>
               <h3>Body</h3>
               <ul>
@@ -372,6 +393,7 @@
           <section class="ref-row" id="get-policies">
             <div class="ref-main">
               <h2><span class="verb get">GET</span> <code>/v1/policies</code></h2>
+              <p class="ref-lead">Lists policies for the token’s organization and forwards the read to the risk service.</p>
               <p>Tag <code>policies</code>. Permission <code>policy:read</code>. Org comes from the token.</p>
               <h3>Response</h3>
               <p>Unknown (proxied). Schema: gateway <code>/docs</code>.</p>
@@ -386,6 +408,7 @@
           <section class="ref-row" id="get-policy">
             <div class="ref-main">
               <h2><span class="verb get">GET</span> <code>/v1/policies/:id</code></h2>
+              <p class="ref-lead">Returns one policy. Org comes from the token, and the gateway forwards the read to the risk service.</p>
               <p>Tag <code>policies</code>. Permission <code>policy:read</code>. Org comes from the token.</p>
               <h3>Response</h3>
               <p>Unknown (proxied). Schema: gateway <code>/docs</code>.</p>
@@ -400,6 +423,7 @@
           <section class="ref-row" id="post-policies">
             <div class="ref-main">
               <h2><span class="verb post">POST</span> <code>/v1/policies</code></h2>
+              <p class="ref-lead">Creates a policy and forwards it to the risk service. Tenant webhook and Jira URL fields are refused.</p>
               <p>Tag <code>policies</code>. Permission <code>policy:write</code>. Org comes from the token.</p>
               <h3>Body</h3>
               <ul>
@@ -426,6 +450,7 @@
           <section class="ref-row" id="patch-policy">
             <div class="ref-main">
               <h2><span class="verb patch">PATCH</span> <code>/v1/policies/:id</code></h2>
+              <p class="ref-lead">Applies a partial update to one policy and forwards it to the risk service.</p>
               <p>Tag <code>policies</code>. Permission <code>policy:write</code>. Org comes from the token.</p>
               <p>Partial of the same body as <a href="#post-policies">POST /v1/policies</a>.</p>
               <h3>Response</h3>
@@ -443,6 +468,7 @@
           <section class="ref-row" id="get-members">
             <div class="ref-main">
               <h2><span class="verb get">GET</span> <code>/v1/org/members</code></h2>
+              <p class="ref-lead">Lists members for the organization on the token.</p>
               <p>Tag <code>members</code>. Permission <code>org:read</code>.</p>
               <h3>Response</h3>
               <p>Unknown (proxied). Schema: gateway <code>/docs</code>.</p>
@@ -457,6 +483,7 @@
           <section class="ref-row" id="post-members">
             <div class="ref-main">
               <h2><span class="verb post">POST</span> <code>/v1/org/members</code></h2>
+              <p class="ref-lead">Invites a member by email and role. Membership is created on first login when the email matches.</p>
               <p>Tag <code>members</code>. Permission <code>member:manage</code>.</p>
               <h3>Body</h3>
               <p>
@@ -478,6 +505,7 @@
           <section class="ref-row" id="patch-member-role">
             <div class="ref-main">
               <h2><span class="verb patch">PATCH</span> <code>/v1/org/members/:userId/role</code></h2>
+              <p class="ref-lead">Changes one member’s role.</p>
               <p>Tag <code>members</code>. Permission <code>member:manage</code>.</p>
               <h3>Body</h3>
               <p><code>role</code>, same values as invite.</p>
@@ -496,6 +524,7 @@
           <section class="ref-row" id="delete-member">
             <div class="ref-main">
               <h2><span class="verb delete">DELETE</span> <code>/v1/org/members/:userId</code></h2>
+              <p class="ref-lead">Disables one membership. This is not a Keycloak Admin call.</p>
               <p>Tag <code>members</code>. Permission <code>member:manage</code>.</p>
               <p>Disables membership. Not a Keycloak Admin call.</p>
               <h3>Response</h3>
@@ -511,6 +540,7 @@
           <section class="ref-row" id="get-scan-kicks">
             <div class="ref-main">
               <h2><span class="verb get">GET</span> <code>/v1/meters/scan-kicks</code></h2>
+              <p class="ref-lead">Lists durable scan.kick rows for the token’s organization and does not emit a meter row. When neither <code>from</code> nor <code>to</code> is set, the window is the last 30×24 hours with no upper bound; setting either bound disables that default.</p>
               <p>Tag <code>meters</code>. Permission <code>scan:read</code>. Read-only.</p>
               <p>Query <code>orgId</code> is dropped. This route does not emit a meter row.</p>
               <h3>Query</h3>

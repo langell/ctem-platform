@@ -822,6 +822,19 @@ pre .k {
   font-weight: 600;
 }
 
+.ref-group-about {
+  margin: 0 16px 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.45;
+}
+
+.ref-lead {
+  margin-top: 0;
+  color: var(--text);
+}
+
 .ref-nav a {
   display: flex;
   gap: 8px;
