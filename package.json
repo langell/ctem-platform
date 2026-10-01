@@ -26,7 +26,8 @@
     "graph": "nx graph",
     "test:int": "vitest run --config vitest.int.config.ts",
     "e2e": "tsx tools/e2e/smoke.ts",
-    "test:ui": "pnpm --filter @ctem/web-e2e test:playwright"
+    "test:ui": "pnpm --filter @ctem/web-e2e test:playwright",
+    "check:brochure": "node tools/check-brochure.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.18.0",

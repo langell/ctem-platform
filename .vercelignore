@@ -1,0 +1,10 @@
+node_modules
+.git
+.nx
+dist
+apps
+libs
+tools
+deploy
+docs
+.agent-dora

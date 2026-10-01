@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SDK · CTEM</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600;700&amp;display=swap"
+      rel="stylesheet"
+    />
+    <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
+    <link rel="icon" href="/favicon-16.png" sizes="16x16" type="image/png" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="screen screen-sdk">
+    <a class="skip" href="#content">Skip to content</a>
+    <header class="screen-top">
+      <div class="screen-top-inner">
+        <a class="screen-brand" href="/"><svg class="mark" viewBox="0 0 31 26" aria-hidden="true" focusable="false"><rect width="3" height="26" rx="2" fill="#a7d0ff"/><rect x="7" width="3" height="26" rx="2" fill="#8a919c"/><rect x="14" width="3" height="26" rx="2" fill="#8a919c"/><rect x="21" width="3" height="26" rx="2" fill="#8a919c"/><rect x="28" width="3" height="26" rx="2" fill="#8a919c"/></svg>CTEM</a>
+        <nav class="screen-nav" aria-label="Primary">
+          <a href="/">Home</a>
+          <a href="/sdk" aria-current="page">SDK</a>
+          <a href="/contact">Contact</a>
+          <a href="/support">Support</a>
+        </nav>
+      </div>
+    </header>
+    <main id="content" class="screen-main">
+      <div class="sdk-wrap">
+        <header class="sdk-intro">
+          <span class="sdk-kicker">API Reference</span>
+          <h1>SDK</h1>
+          <p>
+            HTTP API, not a language SDK; private scanner SDK not documented here. Org comes from token.
+            Unauthenticated calls are 401 when route exists. Full schema at gateway /docs.
+          </p>
+        </header>
+        <div class="sdk-grid">
+          <aside class="sdk-side">
+            <div class="sdk-label">Core Endpoints</div>
+            <div class="sdk-groups">
+              <div class="sdk-group"><span>1. Session</span><span class="sdk-count">1 route</span></div>
+              <div>
+                <div class="sdk-group is-open">
+                  <span>2. Scans</span>
+                  <span class="sdk-count"><span class="pill-active">active</span>4 routes</span>
+                </div>
+                <nav class="sdk-routes" aria-label="Scans">
+                  <a href="#get-scans"><span class="verb">GET</span>/v1/scans</a>
+                  <a href="#get-scans-id"><span class="verb">GET</span>/v1/scans/:id</a>
+                  <a class="is-on" href="#post-scans"><span><span class="verb">POST</span>/v1/scans</span><span class="dot"></span></a>
+                  <a href="#post-scans-sbom"><span class="verb">POST</span>/v1/scans/sbom</a>
+                </nav>
+              </div>
+              <div class="sdk-group"><span>3. Assets</span><span class="sdk-count">5 routes</span></div>
+              <div class="sdk-group"><span>4. Findings</span><span class="sdk-count">4 routes</span></div>
+              <div class="sdk-group"><span>5. Policies</span><span class="sdk-count">4 routes</span></div>
+              <div class="sdk-group"><span>6. Members</span><span class="sdk-count">4 routes</span></div>
+              <div class="sdk-group"><span>7. Meters</span><span class="sdk-count">1 route</span></div>
+            </div>
+          </aside>
+          <section class="sdk-center">
+            <article class="sdk-card" id="post-scans">
+              <div class="endpoint">
+                <span class="verb-lg">POST</span>
+                <span class="path-lg">/v1/scans</span>
+              </div>
+              <p class="lead">
+                Creates a scan and forwards the body to the orchestrator. Requires scan:run. The gateway does not emit scan.kick.
+              </p>
+              <div class="block-label">Request Headers</div>
+              <div class="param">
+                <div class="param-top">
+                  <span><code>Idempotency-Key</code> <span class="kind">(string, optional)</span></span>
+                </div>
+                <p>Forwarded when present so the orchestrator can dedupe the accept.</p>
+              </div>
+              <div class="block-label">Request Body Parameters</div>
+              <div class="param">
+                <div class="param-top">
+                  <span><code>scannerType</code> <span class="kind">(string)</span></span>
+                  <span class="badge-req">required</span>
+                </div>
+                <p>Allowed values: "sca", "sast", "container", "iac", "secrets", "asm", "cloud_posture".</p>
+              </div>
+              <div class="param">
+                <div class="param-top">
+                  <span><code>assetSelector</code> <span class="kind">(object)</span></span>
+                  <span class="badge-opt">optional</span>
+                </div>
+                <p>Optional fields assetIds, kinds, and tags. An empty selector means everything in scope for this scanner.</p>
+              </div>
+              <div class="param">
+                <div class="param-top">
+                  <span><code>options</code> <span class="kind">(object)</span></span>
+                  <span class="badge-opt">optional</span>
+                </div>
+                <p>Optional record. Client conclusion keys are refused.</p>
+              </div>
+              <div class="callout">
+                <p>
+                  <strong>Note:</strong> conclusion (pending, passed, failed) and deployConclusion (pending, allowed, blocked) are read-only GET fields, never inputs. The client does not send them.
+                </p>
+              </div>
+            </article>
+            <article class="sdk-card">
+              <div class="sdk-label matrix-head">
+                <h2>Scope Architecture &amp; Allowed Routes</h2>
+                <span class="v1">v1 Matrix</span>
+              </div>
+              <div class="matrix-card">
+                <h3>Session</h3>
+                <p>GET /v1/session returns userId, orgId, role, permissions, and serviceAccount. The client cannot supply an org id. Role and permissions for humans come from Membership.</p>
+              </div>
+              <div class="matrix-card">
+                <span id="get-scans"></span>
+                <span id="get-scans-id"></span>
+                <span id="post-scans-sbom"></span>
+                <h3>Scans</h3>
+                <p>
+                  GET /v1/scans, GET /v1/scans/:id (conclusion and deployConclusion are read-only; conclusion comes from fail_build and deployConclusion from block_deploy), POST /v1/scans (scannerType sca|sast|container|iac|secrets|asm|cloud_posture, optional assetSelector and options; do not send conclusion or deployConclusion), POST /v1/scans/sbom (assetExternalKey, format cyclonedx-json|spdx-json|syft-json, exactly one of artifactKey or document; optional ref and commitSha).
+                </p>
+              </div>
+              <div class="matrix-card">
+                <h3>Assets</h3>
+                <p>GET /v1/assets, GET /v1/assets/:id, GET /v1/assets/:id/graph (depth defaults to 2), POST /v1/assets/discover (no body), POST /v1/assets (kind, externalKey, name, source). Response bodies are at gateway /docs.</p>
+              </div>
+              <div class="matrix-card">
+                <h3>Findings</h3>
+                <p>GET /v1/findings, GET /v1/findings/:id, GET /v1/findings/:id/risk (forwarded to the risk service), PATCH /v1/findings/:id/triage (state and reason; expiresAt is optional here and the policy service requires it for risk_accepted). Response bodies are at gateway /docs.</p>
+              </div>
+              <div class="matrix-card">
+                <h3>Policies</h3>
+                <p>GET /v1/policies, POST /v1/policies, GET /v1/policies/:id, PATCH /v1/policies/:id. Editor actions are notify, ticket, fail_build, and block_deploy. ignore is not an editor action. Org comes from the token.</p>
+              </div>
+              <div class="matrix-card">
+                <h3>Members</h3>
+                <p>GET /v1/org/members, POST /v1/org/members (email and role), PATCH /v1/org/members/:userId/role, DELETE /v1/org/members/:userId (disables the membership and does not call the Keycloak Admin API). Roles: owner, admin, security_analyst, developer, auditor.</p>
+              </div>
+              <div class="matrix-card">
+                <h3>Meters</h3>
+                <p>GET /v1/meters/scan-kicks. Params: from, to, source manual|api|webhook|ci|schedule, limit, cursor. limit defaults to 50 and is capped at 200. When neither from nor to is set, the window is the last 30×24h with no upper bound. A query orgId is dropped. This proxy does not emit a meter row. Full schema is gateway /docs.</p>
+              </div>
+            </article>
+          </section>
+          <aside class="sdk-curl">
+            <div class="sdk-curl-card">
+              <div class="sdk-label curl-head">
+                <span>curl sample (POST /v1/scans)</span>
+                <button class="copy" id="copy-curl" type="button">Copy</button>
+              </div>
+              <p class="copy-feedback" id="copy-feedback" hidden>Copied to clipboard</p>
+              <pre class="curl-pre" id="curl-sample"><code>curl https://api.example.com/v1/scans \
+  -H "Authorization: Bearer &lt;token&gt;" \
+  -H "Content-Type: application/json" \
+  -d '{"scannerType":"sca","assetSelector":{}}'</code></pre>
+              <div class="req-header">
+                <span>Required Header</span>
+                <code>Authorization: Bearer &lt;token&gt;</code>
+              </div>
+            </div>
+            <div class="sdk-curl-card proto">
+              <div class="sdk-label">Protocol Conventions</div>
+              <ul>
+                <li>401 Unauthorized is returned when the bearer token is missing or invalid and the route exists.</li>
+                <li>The organization comes from the bearer token. The client does not send an org id.</li>
+              </ul>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </main>
+    <footer class="screen-foot">
+      <div class="screen-foot-bar">
+        <div class="screen-foot-left">
+          <span>CTEM Labs</span>
+          <span class="screen-foot-div" aria-hidden="true">/</span>
+          <a href="mailto:lonny.angell@gmail.com">lonny.angell@gmail.com</a>
+        </div>
+        <nav aria-label="Legal">
+          <a href="/privacy">Privacy</a>
+          <a href="/terms">Terms</a>
+        </nav>
+      </div>
+    </footer>
+    <p class="dash-note"><a href="https://langell.github.io/ctem-platform/">agent-dora</a></p>
+    <script>
+      document.getElementById("copy-curl").addEventListener("click", function () {
+        var text = document.getElementById("curl-sample").innerText;
+        var note = document.getElementById("copy-feedback");
+        navigator.clipboard.writeText(text).then(function () {
+          note.hidden = false;
+          setTimeout(function () {
+            note.hidden = true;
+          }, 2000);
+        });
+      });
+    </script>
+  </body>
+</html>

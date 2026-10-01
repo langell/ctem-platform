@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Support · CTEM</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600;700&amp;display=swap"
+      rel="stylesheet"
+    />
+    <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
+    <link rel="icon" href="/favicon-16.png" sizes="16x16" type="image/png" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="screen screen-support">
+    <a class="skip" href="#content">Skip to content</a>
+    <header class="screen-top">
+      <div class="screen-top-inner">
+        <a class="screen-brand" href="/"><svg class="mark" viewBox="0 0 31 26" aria-hidden="true" focusable="false"><rect width="3" height="26" rx="2" fill="#a7d0ff"/><rect x="7" width="3" height="26" rx="2" fill="#8a919c"/><rect x="14" width="3" height="26" rx="2" fill="#8a919c"/><rect x="21" width="3" height="26" rx="2" fill="#8a919c"/><rect x="28" width="3" height="26" rx="2" fill="#8a919c"/></svg>CTEM</a>
+        <nav class="screen-nav" aria-label="Primary">
+          <a href="/">Home</a>
+          <a href="/sdk">SDK</a>
+          <a href="/contact">Contact</a>
+          <a href="/support" aria-current="page">Support</a>
+        </nav>
+      </div>
+    </header>
+    <main id="content" class="screen-main panel-wrap">
+      <div class="form-panel">
+        <h1>Support</h1>
+        <p class="form-sub">
+          Product help for CTEM. A scan id helps if you have one; API shape questions belong on the
+          <a href="/sdk">SDK</a> page.
+        </p>
+        <form class="mail-form" id="support-mail" action="mailto:lonny.angell@gmail.com" method="post" enctype="text/plain">
+          <div class="field-row">
+            <div class="field">
+              <label for="name">Name</label>
+              <input id="name" name="name" type="text" autocomplete="name" placeholder="Your name" required />
+            </div>
+            <div class="field">
+              <label for="email">Email</label>
+              <input id="email" name="email" type="email" autocomplete="email" placeholder="name@company.com" required />
+            </div>
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label for="organization">Organization</label>
+              <input id="organization" name="organization" type="text" autocomplete="organization" placeholder="Organization name" />
+            </div>
+            <div class="field">
+              <label for="scan-id">Scan ID <span class="opt">(optional)</span></label>
+              <input id="scan-id" name="scanId" type="text" placeholder="Scan id" />
+            </div>
+          </div>
+          <div class="field">
+            <label for="expected">What you expected</label>
+            <textarea id="expected" name="expected" required placeholder="Describe the expected evaluation, finding, or result..."></textarea>
+          </div>
+          <div class="field">
+            <label for="happened">What happened</label>
+            <textarea id="happened" name="happened" required placeholder="Describe the behavior encountered or scan status..."></textarea>
+          </div>
+          <button class="send" type="submit">Send</button>
+        </form>
+        <p class="send-note">Messages are delivered directly to lonny.angell@gmail.com</p>
+      </div>
+    </main>
+    <footer class="screen-foot">
+      <div class="screen-foot-bar">
+        <div class="screen-foot-left">
+          <span>CTEM Labs</span>
+          <span class="screen-foot-div" aria-hidden="true">|</span>
+          <a href="mailto:lonny.angell@gmail.com">lonny.angell@gmail.com</a>
+        </div>
+        <nav aria-label="Legal">
+          <a href="/privacy">Privacy</a>
+          <a href="/terms">Terms</a>
+        </nav>
+      </div>
+    </footer>
+    <p class="dash-note"><a href="https://langell.github.io/ctem-platform/">agent-dora</a></p>
+    <script>
+      document.getElementById("support-mail").addEventListener("submit", function (event) {
+        event.preventDefault();
+        var data = new FormData(event.currentTarget);
+        var body = [
+          "Name: " + data.get("name"),
+          "Email: " + data.get("email"),
+          "Organization: " + data.get("organization"),
+          "Scan id: " + data.get("scanId"),
+          "What you expected: " + data.get("expected"),
+          "What happened: " + data.get("happened"),
+        ].join("\n");
+        window.location.href =
+          "mailto:lonny.angell@gmail.com?subject=" +
+          encodeURIComponent("CTEM Labs support") +
+          "&body=" +
+          encodeURIComponent(body);
+      });
+    </script>
+  </body>
+</html>
