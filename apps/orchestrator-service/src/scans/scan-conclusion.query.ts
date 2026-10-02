@@ -8,14 +8,15 @@ import {
 import type { PrismaTransaction } from '@ctem/db';
 
 /**
- * Shared loaders for CI GET, GitHub Checks, GitLab Commit Statuses, GitHub
- * Deployment statuses, and GitLab Deployment updates. Inputs must stay
- * identical so a Check or GitLab commit status cannot drift from GET
- * `conclusion` and a Deployment status cannot drift from GET
- * `deployConclusion`. Checks and GitLab Commit Statuses map `concludeScan` /
- * fail_build only; GitHub and GitLab Deployment publishers map
- * `concludeDeploy` / block_deploy only. GitLab Commit Statuses are not mapped
- * from block_deploy.
+ * Shared loaders for CI GET, GitHub Checks, GitLab Commit Statuses, Bitbucket
+ * Cloud build statuses, GitHub Deployment statuses, and GitLab Deployment
+ * updates. Inputs must stay identical so a Check, GitLab commit status, or
+ * Bitbucket build status cannot drift from GET `conclusion` and a Deployment
+ * status cannot drift from GET `deployConclusion`. Checks, GitLab Commit
+ * Statuses, and Bitbucket build statuses map `concludeScan` / fail_build
+ * only; GitHub and GitLab Deployment publishers map `concludeDeploy` /
+ * block_deploy only. GitLab Commit Statuses and Bitbucket build statuses are
+ * not mapped from block_deploy.
  */
 
 export interface ScanConclusionRow {
@@ -113,7 +114,7 @@ export async function scanGatesForScan(
   };
 }
 
-/** Shared `concludeScan` loader for CI GET, GitHub Checks, and GitLab Commit Statuses. */
+/** Shared `concludeScan` loader for CI GET, GitHub Checks, GitLab Commit Statuses, and Bitbucket build statuses. */
 export async function conclusionForScan(
   tx: PrismaTransaction,
   scan: ScanConclusionRow,
@@ -133,6 +134,15 @@ export function checkConclusionFromScan(conclusion: ScanConclusion): 'success' |
 export function gitlabCommitStatusFromScan(conclusion: ScanConclusion): 'success' | 'failed' | null {
   if (conclusion === 'passed') return 'success';
   if (conclusion === 'failed') return 'failed';
+  return null;
+}
+
+/** Terminal GET `passed`/`failed` → Bitbucket Cloud build status `state`. `pending` is not published. */
+export function bitbucketBuildStateFromScan(
+  conclusion: ScanConclusion,
+): 'SUCCESSFUL' | 'FAILED' | null {
+  if (conclusion === 'passed') return 'SUCCESSFUL';
+  if (conclusion === 'failed') return 'FAILED';
   return null;
 }
 

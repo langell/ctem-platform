@@ -3,15 +3,19 @@ import { InternalHttpPolicy } from '@ctem/resilience';
 
 /**
  * Orchestrator → third-party publisher HTTP (GitHub Checks, GitHub
- * Deployments, GitLab Commit Statuses, GitLab Deployments).
+ * Deployments, GitLab Commit Statuses, GitLab Deployments, Bitbucket Cloud
+ * build statuses).
  *
  * Reuses {@link InternalHttpPolicy} from `@ctem/resilience` — the same policy
  * type as api-gateway `ServiceProxy`, not a second breaker. One in-process
- * policy, two circuit names (per allowlisted origin family, not per scan or
+ * policy, three circuit names (per allowlisted origin family, not per scan or
  * org):
  *
  * - `egress:github-api` — Checks and Deployment statuses (`api.github.com`)
  * - `egress:gitlab-api` — Commit Statuses and Deployment updates
+ * - `egress:bitbucket-api` — Bitbucket Cloud build statuses (`api.bitbucket.org`).
+ *   Same family name as asset-service inventory; this process keeps its own
+ *   breaker. An open circuit soft-fails the publish (it does not nak the scan).
  *
  * Timeouts and 502/503/504 retries use the platform `CTEM_CB_*` budget (same
  * defaults as the gateway). 4xx is not retried. An open circuit throws
@@ -25,8 +29,10 @@ import { InternalHttpPolicy } from '@ctem/resilience';
 
 export const EGRESS_GITHUB_API = 'egress:github-api';
 export const EGRESS_GITLAB_API = 'egress:gitlab-api';
+export const EGRESS_BITBUCKET_API = 'egress:bitbucket-api';
 
-export type PublisherEgressCircuit = typeof EGRESS_GITHUB_API | typeof EGRESS_GITLAB_API;
+export type PublisherEgressCircuit =
+  typeof EGRESS_GITHUB_API | typeof EGRESS_GITLAB_API | typeof EGRESS_BITBUCKET_API;
 
 const log = rootLogger.child({ component: 'publisher-egress' });
 
@@ -45,7 +51,9 @@ export function usePublisherEgressPolicy(next: InternalHttpPolicy): void {
  * Rebuild from allowlisted `CTEM_CB_*`. Unknown or invalid values throw
  * (fail closed) and leave the previous policy in place.
  */
-export function resetPublisherEgressPolicy(source: NodeJS.ProcessEnv = process.env): InternalHttpPolicy {
+export function resetPublisherEgressPolicy(
+  source: NodeJS.ProcessEnv = process.env,
+): InternalHttpPolicy {
   const next = InternalHttpPolicy.fromEnv(log, source);
   policy = next;
   return next;
