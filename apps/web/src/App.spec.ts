@@ -8,6 +8,7 @@ describe('existing routes only', () => {
   it('does not add asset detail, scan history, dashboards, or filters', () => {
     expect(app).toMatch(/path="\/login"/);
     expect(app).toMatch(/path="\/login\/callback"/);
+    expect(app).toMatch(/path="\/create-org"/);
     expect(app).toMatch(/path="\/assets"/);
     expect(app).toMatch(/path="\/findings"/);
     expect(app).toMatch(/path="\/findings\/:id"/);
@@ -20,11 +21,12 @@ describe('existing routes only', () => {
     expect(app).not.toMatch(/dashboard/i);
     expect(app).not.toMatch(/history/i);
     expect(app).not.toMatch(/filter/i);
-    expect(app.match(/path="/g)?.length).toBe(10);
+    expect(app.match(/path="/g)?.length).toBe(11);
   });
 
   it('keeps login outside Layout so the login route has no dock', () => {
     expect(app.indexOf('path="/login"')).toBeLessThan(app.indexOf('<Layout'));
     expect(app.indexOf('path="/login/callback"')).toBeLessThan(app.indexOf('<Layout'));
+    expect(app.indexOf('path="/create-org"')).toBeLessThan(app.indexOf('<Layout'));
   });
 });

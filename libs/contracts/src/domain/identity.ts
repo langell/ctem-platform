@@ -41,7 +41,15 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     'exception:approve',
     'report:read',
   ],
-  developer: ['org:read', 'asset:read', 'scan:read', 'scan:run', 'finding:read', 'finding:triage', 'report:read'],
+  developer: [
+    'org:read',
+    'asset:read',
+    'scan:read',
+    'scan:run',
+    'finding:read',
+    'finding:triage',
+    'report:read',
+  ],
   auditor: ['org:read', 'asset:read', 'scan:read', 'finding:read', 'policy:read', 'report:read'],
 };
 
@@ -89,6 +97,39 @@ export const SetMemberRoleRequest = z.object({
 });
 export type SetMemberRoleRequest = z.infer<typeof SetMemberRoleRequest>;
 
+/** Public create-org body. Owner, role, plan, and org id come from the server. */
+export const OrgSlug = z.string().regex(/^[a-z0-9-]{3,40}$/);
+export const OrgName = z.string().trim().min(1).max(80);
+
+export const CreateOrgRequest = z
+  .object({
+    name: OrgName,
+    slug: OrgSlug,
+  })
+  .strict();
+export type CreateOrgRequest = z.infer<typeof CreateOrgRequest>;
+
+export const CreateOrgResponse = z.object({
+  id: OrgId,
+  name: z.string().min(1),
+  slug: OrgSlug,
+  plan: z.enum(['trial', 'team', 'enterprise']),
+});
+export type CreateOrgResponse = z.infer<typeof CreateOrgResponse>;
+
+/**
+ * Gateway → identity create. `sub` is the verified JWT subject, not a client field.
+ * No org id, role, plan, or user id — those are decided in identity.
+ */
+export const InternalCreateOrgRequest = z
+  .object({
+    name: OrgName,
+    slug: OrgSlug,
+    sub: z.string().min(1),
+  })
+  .strict();
+export type InternalCreateOrgRequest = z.infer<typeof InternalCreateOrgRequest>;
+
 /** Gateway → identity after JWT verify. Role claims are intentionally absent. */
 export const ResolveJwtRequest = z.object({
   sub: z.string().min(1),
@@ -97,6 +138,30 @@ export const ResolveJwtRequest = z.object({
   name: z.string().min(1).optional(),
 });
 export type ResolveJwtRequest = z.infer<typeof ResolveJwtRequest>;
+
+/**
+ * Gateway → identity when the JWT has no `org_id`. Returns only this subject's
+ * active memberships. Disabled rows are omitted by the service.
+ */
+export const ResolveMembershipsRequest = z
+  .object({
+    sub: z.string().min(1),
+    email: z.string().email().optional(),
+    name: z.string().min(1).optional(),
+  })
+  .strict();
+export type ResolveMembershipsRequest = z.infer<typeof ResolveMembershipsRequest>;
+
+export const ResolveMembershipsResponse = z.object({
+  userId: UserId,
+  memberships: z.array(
+    z.object({
+      orgId: OrgId,
+      role: Role,
+    }),
+  ),
+});
+export type ResolveMembershipsResponse = z.infer<typeof ResolveMembershipsResponse>;
 
 export const ResolveJwtResponse = z.object({
   userId: UserId,

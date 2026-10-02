@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { Layout } from './ui/Layout';
 import { LoginPage } from './pages/LoginPage';
 import { CallbackPage } from './pages/CallbackPage';
+import { CreateOrgPage } from './pages/CreateOrgPage';
 import { AssetsPage } from './pages/AssetsPage';
 import { FindingsPage } from './pages/FindingsPage';
 import { FindingDetailPage } from './pages/FindingDetailPage';
@@ -22,6 +23,7 @@ export function App() {
       {/* Login is a centered card outside Layout — no Owner Dock on this route. */}
       <Route path="/login" element={<LoginPage />} />
       <Route path="/login/callback" element={<CallbackPage />} />
+      <Route path="/create-org" element={<CreateOrgPage />} />
       <Route
         element={
           <RequireToken>
