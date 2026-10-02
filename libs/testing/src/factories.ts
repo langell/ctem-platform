@@ -117,9 +117,10 @@ export async function deleteOrgCascade(
 }
 
 /**
- * Stable demo tenant. Compose Keycloak hard-codes this org_id on the access
- * token so browser OIDC and `make demo-token` issue the same org after JWKS
- * verify, without a client-supplied org id.
+ * Stable demo tenant. The demo user's Keycloak `org_id` attribute is mapped
+ * onto the access token so browser OIDC and `make demo-token` issue this org
+ * after JWKS verify, without a client-supplied org id. Users without the
+ * attribute get no `org_id` claim.
  * Must stay in lockstep with deploy/keycloak/ctem-realm.json.
  */
 export const DEMO_ORG_ID = 'c7e00000-0000-4000-8000-000000000001';

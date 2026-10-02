@@ -11,9 +11,13 @@ import {
   ScanKickMeterUsage,
   UpdatePolicyRequest,
   EVENT_SCHEMAS,
+  CreateOrgRequest,
+  InternalCreateOrgRequest,
   InviteMemberRequest,
   ResolveJwtRequest,
   ResolveJwtResponse,
+  ResolveMembershipsRequest,
+  ResolveMembershipsResponse,
   ROLE_PERMISSIONS,
   SUBJECTS,
   STREAMS,
@@ -37,7 +41,9 @@ describe('event catalog', () => {
   it('routes every subject to exactly one stream', () => {
     for (const subject of Object.values(SUBJECTS)) {
       const matches = Object.values(STREAMS).filter((s) =>
-        s.subjects.some((p) => (p.endsWith('>') ? subject.startsWith(p.slice(0, -1)) : subject === p)),
+        s.subjects.some((p) =>
+          p.endsWith('>') ? subject.startsWith(p.slice(0, -1)) : subject === p,
+        ),
       );
       expect(matches, `${subject} matched ${matches.length} streams`).toHaveLength(1);
     }
@@ -74,12 +80,12 @@ describe('rbac', () => {
   });
 
   it('rejects invalid member admin payloads as 4xx-shaped zod errors, not 500', () => {
-    expect(InviteMemberRequest.safeParse({ email: 'not-an-email', role: 'developer' }).success).toBe(
-      false,
-    );
-    expect(InviteMemberRequest.safeParse({ email: 'ok@test.local', role: 'superuser' }).success).toBe(
-      false,
-    );
+    expect(
+      InviteMemberRequest.safeParse({ email: 'not-an-email', role: 'developer' }).success,
+    ).toBe(false);
+    expect(
+      InviteMemberRequest.safeParse({ email: 'ok@test.local', role: 'superuser' }).success,
+    ).toBe(false);
     expect(SetMemberRoleRequest.safeParse({ role: 'superuser' }).success).toBe(false);
     expect(SetMemberRoleRequest.safeParse({}).success).toBe(false);
     expect(ResolveJwtRequest.safeParse({ sub: 'idp|alice', orgId: 'not-a-uuid' }).success).toBe(
@@ -92,6 +98,45 @@ describe('rbac', () => {
         role: 'owner',
       }).success,
     ).toBe(false);
+    expect(CreateOrgRequest.safeParse({ name: '  Acme  ', slug: 'acme' }).success).toBe(true);
+    expect(CreateOrgRequest.parse({ name: '  Acme  ', slug: 'acme' }).name).toBe('Acme');
+    expect(CreateOrgRequest.safeParse({ name: ' ', slug: 'acme' }).success).toBe(false);
+    expect(CreateOrgRequest.safeParse({ name: 'A', slug: 'ab' }).success).toBe(false);
+    expect(CreateOrgRequest.safeParse({ name: 'A', slug: 'AB' }).success).toBe(false);
+    expect(CreateOrgRequest.safeParse({ name: 'A', slug: 'has_underscore' }).success).toBe(false);
+    expect(CreateOrgRequest.safeParse({ name: 'x'.repeat(81), slug: 'acme' }).success).toBe(false);
+    expect(
+      CreateOrgRequest.safeParse({
+        name: 'Acme',
+        slug: 'acme',
+        orgId: 'c7e00000-0000-4000-8000-000000000001',
+        role: 'owner',
+        plan: 'enterprise',
+        email: 'a@b.co',
+        userId: '00000000-0000-4000-8000-000000000002',
+      }).success,
+    ).toBe(false);
+    expect(
+      InternalCreateOrgRequest.safeParse({ name: 'Acme', slug: 'acme', sub: 'idp|alice' }).success,
+    ).toBe(true);
+    expect(
+      InternalCreateOrgRequest.safeParse({
+        name: 'Acme',
+        slug: 'acme',
+        sub: 'idp|alice',
+        userId: '00000000-0000-4000-8000-000000000002',
+        role: 'owner',
+      }).success,
+    ).toBe(false);
+    expect(ResolveMembershipsRequest.safeParse({ sub: 'idp|alice', orgId: 'nope' }).success).toBe(
+      false,
+    );
+    expect(
+      ResolveMembershipsResponse.safeParse({
+        userId: '00000000-0000-4000-8000-000000000002',
+        memberships: [{ orgId: 'c7e00000-0000-4000-8000-000000000001', role: 'owner' }],
+      }).success,
+    ).toBe(true);
   });
 });
 
@@ -133,7 +178,9 @@ describe('policy editor writes', () => {
     ).toMatchObject({ actions: ['notify', 'ticket', 'fail_build', 'block_deploy'] });
     expect(UpdatePolicyRequest.parse({ priority: 5 })).toEqual({ priority: 5 });
     expect(UpdatePolicyRequest.parse({ actions: ['ticket'] })).toEqual({ actions: ['ticket'] });
-    expect(UpdatePolicyRequest.parse({ actions: ['fail_build'] })).toEqual({ actions: ['fail_build'] });
+    expect(UpdatePolicyRequest.parse({ actions: ['fail_build'] })).toEqual({
+      actions: ['fail_build'],
+    });
     expect(UpdatePolicyRequest.parse({ actions: ['block_deploy'] })).toEqual({
       actions: ['block_deploy'],
     });
@@ -152,9 +199,9 @@ describe('policy editor writes', () => {
     expect(findTenantWebhookKeys({ ...notifyRule, webhookUrl: 'https://evil.test/hook' })).toEqual([
       'webhookUrl',
     ]);
-    expect(
-      findTenantWebhookKeys({ condition: { webhookUrl: 'https://attacker.test/x' } }),
-    ).toEqual(['condition.webhookUrl']);
+    expect(findTenantWebhookKeys({ condition: { webhookUrl: 'https://attacker.test/x' } })).toEqual(
+      ['condition.webhookUrl'],
+    );
     expect(() =>
       CreatePolicyRequest.parse({ ...notifyRule, webhookUrl: 'https://evil.test/hook' }),
     ).toThrow();
@@ -373,9 +420,7 @@ describe('client cannot write scan conclusion', () => {
     expect(
       findClientConclusionKeys({ scannerType: 'sca', options: { conclusion: 'failed' } }),
     ).toEqual(['options.conclusion']);
-    expect(() =>
-      CreateScanRequest.parse({ scannerType: 'sca', conclusion: 'failed' }),
-    ).toThrow();
+    expect(() => CreateScanRequest.parse({ scannerType: 'sca', conclusion: 'failed' })).toThrow();
     expect(() =>
       CreateScanRequest.parse({ scannerType: 'sca', options: { conclusion: 'failed' } }),
     ).toThrow(/not client-writable/);
@@ -385,9 +430,9 @@ describe('client cannot write scan conclusion', () => {
   });
 
   it('refuses client-written deployConclusion on create and nested under options', () => {
-    expect(
-      findClientConclusionKeys({ scannerType: 'sca', deployConclusion: 'blocked' }),
-    ).toEqual(['deployConclusion']);
+    expect(findClientConclusionKeys({ scannerType: 'sca', deployConclusion: 'blocked' })).toEqual([
+      'deployConclusion',
+    ]);
     expect(
       findClientConclusionKeys({ scannerType: 'sca', options: { deployConclusion: 'blocked' } }),
     ).toEqual(['options.deployConclusion']);
@@ -413,7 +458,9 @@ describe('client cannot write scan conclusion', () => {
       createdAt: new Date(),
       updatedAt: new Date(),
     };
-    expect(Scan.parse({ ...base, conclusion: 'failed', deployConclusion: 'blocked' })).toMatchObject({
+    expect(
+      Scan.parse({ ...base, conclusion: 'failed', deployConclusion: 'blocked' }),
+    ).toMatchObject({
       conclusion: 'failed',
       deployConclusion: 'blocked',
     });
@@ -508,10 +555,26 @@ describe('promoteScaValidation', () => {
 
   it('never returns not_exploitable or compensating_control', () => {
     const verdicts = [
-      promoteScaValidation({ scannerType: 'sca', evidence: { reachability: 'reachable' }, kev: true }),
-      promoteScaValidation({ scannerType: 'sca', evidence: { reachability: 'reachable' }, kev: false }),
-      promoteScaValidation({ scannerType: 'sca', evidence: { reachability: 'not_reachable' }, kev: false }),
-      promoteScaValidation({ scannerType: 'sca', evidence: { reachability: 'unknown' }, kev: false }),
+      promoteScaValidation({
+        scannerType: 'sca',
+        evidence: { reachability: 'reachable' },
+        kev: true,
+      }),
+      promoteScaValidation({
+        scannerType: 'sca',
+        evidence: { reachability: 'reachable' },
+        kev: false,
+      }),
+      promoteScaValidation({
+        scannerType: 'sca',
+        evidence: { reachability: 'not_reachable' },
+        kev: false,
+      }),
+      promoteScaValidation({
+        scannerType: 'sca',
+        evidence: { reachability: 'unknown' },
+        kev: false,
+      }),
     ];
     expect(verdicts).not.toContain('not_exploitable');
     expect(verdicts).not.toContain('compensating_control');
@@ -538,9 +601,12 @@ describe('scan.kick meter record', () => {
     });
     expect(usage.total).toBe(1);
     expect(
-      ScanKickMeterUsage.safeParse({ ...usage, price: 1, currency: 'usd', remainingCredits: 3 }).success,
+      ScanKickMeterUsage.safeParse({ ...usage, price: 1, currency: 'usd', remainingCredits: 3 })
+        .success,
     ).toBe(false);
-    expect(CreateScanRequest.parse({ scannerType: 'sca', external_id: 'build-7' }).externalId).toBe('build-7');
+    expect(CreateScanRequest.parse({ scannerType: 'sca', external_id: 'build-7' }).externalId).toBe(
+      'build-7',
+    );
     expect(
       IngestSbomRequest.parse({
         assetExternalKey: 'github:acme/api',

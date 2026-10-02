@@ -1,5 +1,6 @@
 import {
   CanActivate,
+  ConflictException,
   ExecutionContext,
   ForbiddenException,
   Injectable,
@@ -20,10 +21,34 @@ import {
   Permission,
   ResolveJwtRequest,
   ResolveJwtResponse,
+  ResolveMembershipsRequest,
+  ResolveMembershipsResponse,
 } from '@ctem/contracts';
 import { currentTraceId, getContext, rootLogger } from '@ctem/observability';
 
 const PAT_PREFIX = 'ctem_pat_';
+
+interface GatewayRequest {
+  headers: { authorization?: string };
+  method?: string;
+  path?: string;
+  originalUrl?: string;
+  url?: string;
+  principal?: Principal;
+  principalHeaders?: { value: string; signature: string };
+  /** Verified JWT `sub`. Set only after the signature check. Never taken from the body. */
+  verifiedSub?: string;
+}
+
+/** The one route a zero-membership human may call. Not a general optional-org flag. */
+function isCreateOrgRequest(req: GatewayRequest): boolean {
+  if ((req.method ?? '').toUpperCase() !== 'POST') return false;
+  return [req.path, req.originalUrl, req.url].some((value) => {
+    if (!value) return false;
+    const path = value.split('?')[0]?.replace(/\/+$/, '') || '/';
+    return path === '/v1/orgs';
+  });
+}
 
 /**
  * The only place a user-facing token is verified. Everything downstream trusts
@@ -50,18 +75,23 @@ export class GatewayAuthGuard implements CanActivate {
     ]);
     if (isPublic) return true;
 
-    const req = context.switchToHttp().getRequest();
+    const req = context.switchToHttp().getRequest<GatewayRequest>();
     const header = req.headers.authorization;
     if (!header?.startsWith('Bearer ')) throw new UnauthorizedException('Missing bearer token');
 
     const token = header.slice('Bearer '.length);
+    const createOrg = isCreateOrgRequest(req);
 
     let principal: Principal;
 
     if (token.startsWith(PAT_PREFIX)) {
+      // A machine token has no human subject to own a new org.
+      if (createOrg) throw new UnauthorizedException('Invalid token');
       principal = await this.verifyPat(token);
     } else {
-      principal = await this.verifyJwt(token);
+      const resolved = await this.verifyJwt(token, req);
+      if (resolved === 'signup') return true;
+      principal = resolved;
     }
 
     const required =
@@ -70,7 +100,8 @@ export class GatewayAuthGuard implements CanActivate {
         context.getClass(),
       ]) ?? [];
     const missing = required.filter((p) => !principal.permissions.includes(p));
-    if (missing.length) throw new ForbiddenException(`Missing permission(s): ${missing.join(', ')}`);
+    if (missing.length)
+      throw new ForbiddenException(`Missing permission(s): ${missing.join(', ')}`);
 
     req.principal = principal;
     req.principalHeaders = encodePrincipal(principal);
@@ -87,7 +118,7 @@ export class GatewayAuthGuard implements CanActivate {
   // JWT path (human users via OIDC)
   // ---------------------------------------------------------------------------
 
-  private async verifyJwt(token: string): Promise<Principal> {
+  private async verifyJwt(token: string, req: GatewayRequest): Promise<Principal | 'signup'> {
     let claims;
     try {
       claims = await this.jwt.verify(token);
@@ -95,19 +126,43 @@ export class GatewayAuthGuard implements CanActivate {
       throw new UnauthorizedException('Invalid token');
     }
 
-    // Tenant is taken from the verified JWT only. A client-supplied org id
-    // (x-ctem-org, query, body) must never select the organization — that is
-    // how findings leak across tenants.
-    const orgId = claims.org_id;
-    if (!orgId) throw new ForbiddenException('No organization selected');
+    req.verifiedSub = claims.sub;
 
-    const membership = await this.resolveMembership(claims.sub, orgId, claims.email, claims.name);
+    // A present org_id stays authoritative, including when it is not a valid
+    // OrgId. Do not fall through to signup or to the single-membership lookup.
+    if (claims.org_id != null) {
+      const membership = await this.resolveMembership(
+        claims.sub,
+        claims.org_id,
+        claims.email,
+        claims.name,
+      );
+      return this.principalFromMembership(membership.userId, claims.org_id, membership.role);
+    }
 
+    const resolved = await this.resolveActiveMemberships(claims.sub, claims.email, claims.name);
+    if (resolved.memberships.length > 1) {
+      throw new ConflictException('multiple organizations');
+    }
+    if (resolved.memberships.length === 1) {
+      const membership = resolved.memberships[0]!;
+      return this.principalFromMembership(resolved.userId, membership.orgId, membership.role);
+    }
+
+    if (isCreateOrgRequest(req)) return 'signup';
+    throw new ForbiddenException('No organization');
+  }
+
+  private principalFromMembership(
+    userId: string,
+    orgId: string,
+    role: Principal['role'],
+  ): Principal {
     return {
-      userId: membership.userId,
+      userId,
       orgId,
-      role: membership.role,
-      permissions: permissionsForRole(membership.role) as Permission[],
+      role,
+      permissions: permissionsForRole(role) as Permission[],
       serviceAccount: null,
       traceId: currentTraceId(),
     };
@@ -171,6 +226,61 @@ export class GatewayAuthGuard implements CanActivate {
     const parsed = ResolveJwtResponse.safeParse(json);
     if (!parsed.success) throw new UnauthorizedException('Token verification failed');
     if (parsed.data.orgId !== orgId) throw new UnauthorizedException('Token verification failed');
+    return parsed.data;
+  }
+
+  /**
+   * No org_id on the token. Identity returns this user's active memberships.
+   * Unreachable identity is 401 — never an anonymous org.
+   */
+  private async resolveActiveMemberships(
+    sub: string,
+    email: string | undefined,
+    name: string | undefined,
+  ): Promise<ResolveMembershipsResponse> {
+    const emailParsed =
+      typeof email === 'string'
+        ? ResolveMembershipsRequest.shape.email.safeParse(email)
+        : undefined;
+    const nameParsed =
+      typeof name === 'string' && name.trim()
+        ? ResolveMembershipsRequest.shape.name.safeParse(name.trim())
+        : undefined;
+
+    const body: ResolveMembershipsRequest = {
+      sub,
+      ...(emailParsed?.success ? { email: emailParsed.data } : {}),
+      ...(nameParsed?.success ? { name: nameParsed.data } : {}),
+    };
+
+    const env = loadEnv();
+    const url = `${env.IDENTITY_SERVICE_URL}/internal/auth/memberships`;
+
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(5_000),
+      });
+    } catch (err) {
+      this.log.error({ err }, 'identity-service unreachable for membership lookup');
+      throw new UnauthorizedException('Token verification failed');
+    }
+
+    if (res.status === 403) throw new ForbiddenException('No organization membership');
+    if (!res.ok) throw new UnauthorizedException('Token verification failed');
+
+    let json: unknown;
+    try {
+      json = await res.json();
+    } catch {
+      throw new UnauthorizedException('Token verification failed');
+    }
+
+    const parsed = ResolveMembershipsResponse.safeParse(json);
+    if (!parsed.success) throw new UnauthorizedException('Token verification failed');
     return parsed.data;
   }
 

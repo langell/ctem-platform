@@ -30,6 +30,15 @@ export function isForbiddenOrgKey(key: string): boolean {
   return FORBIDDEN_ORG_KEYS.includes(key.toLowerCase());
 }
 
+/** Exact gateway title when a valid JWT has no org claim and no membership. */
+export const NO_ORGANIZATION_MESSAGE = 'No organization';
+
+export function isNoOrganizationError(err: unknown): boolean {
+  return (
+    err instanceof GatewayError && err.status === 403 && err.message === NO_ORGANIZATION_MESSAGE
+  );
+}
+
 export class GatewayError extends Error {
   constructor(
     public readonly status: number,

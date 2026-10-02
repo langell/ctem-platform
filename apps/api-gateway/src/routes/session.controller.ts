@@ -4,8 +4,8 @@ import { CurrentUser } from '@ctem/auth';
 import type { Principal } from '@ctem/contracts';
 
 /**
- * Thin echo of the gateway-minted principal. Org is whatever the JWT (humans:
- * token `org_id` + Membership) or PAT record already carried — the client
+ * Thin echo of the gateway-minted principal. Org is the JWT `org_id` when that
+ * claim is present, otherwise the caller's single active membership. The client
  * cannot supply one. Role/permissions for humans come from Membership.
  */
 @ApiTags('session')

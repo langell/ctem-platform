@@ -15,7 +15,7 @@ export function LoginPage() {
     setBusy(true);
     try {
       // Redirect to compose Keycloak. This client has no password field and
-      // never sends an org id — the issued JWT carries org_id.
+      // never sends an org id. A demo token may carry org_id; a new user does not.
       await beginAuthorization({
         origin: window.location.origin,
         assign: (url) => {
