@@ -74,4 +74,35 @@ describe('GITHUB_API_URL production gate', () => {
       }),
     ).toThrow(/api\.github\.com/);
   });
+
+  it('uses CTEM_GITHUB_API_URL outside production even when GITHUB_API_URL is the public API', () => {
+    const parsed = EnvSchema.safeParse({
+      NODE_ENV: 'development',
+      GITHUB_API_URL: GITHUB_API_PRODUCTION_URL,
+      CTEM_GITHUB_API_URL: STUB_URL,
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.GITHUB_API_URL).toBe(STUB_URL);
+  });
+
+  it('ignores CTEM_GITHUB_API_URL in production', () => {
+    const parsed = EnvSchema.safeParse({
+      NODE_ENV: 'production',
+      GITHUB_API_URL: GITHUB_API_PRODUCTION_URL,
+      CTEM_GITHUB_API_URL: STUB_URL,
+      CREDENTIAL_ENCRYPTION_KEY: DEV_KEY,
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.GITHUB_API_URL).toBe(GITHUB_API_PRODUCTION_URL);
+  });
+
+  it('does not let CTEM_GITHUB_API_URL satisfy the production URL gate', () => {
+    const parsed = EnvSchema.safeParse({
+      NODE_ENV: 'production',
+      GITHUB_API_URL: STUB_URL,
+      CTEM_GITHUB_API_URL: GITHUB_API_PRODUCTION_URL,
+      CREDENTIAL_ENCRYPTION_KEY: DEV_KEY,
+    });
+    expect(parsed.success).toBe(false);
+  });
 });

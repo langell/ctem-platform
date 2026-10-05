@@ -4,7 +4,7 @@
  *   pnpm nx run @ctem/github-stub:serve
  *   docker compose --profile e2e up -d github-stub
  *
- * Point a non-production GITHUB_API_URL at http://127.0.0.1:4019.
+ * Point a non-production CTEM_GITHUB_API_URL at http://127.0.0.1:4019.
  * Does not log Authorization headers or token values.
  */
 import { createServer } from 'node:http';

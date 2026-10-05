@@ -24,7 +24,24 @@ export function decodeCredentialEncryptionKey(value: string | undefined): Buffer
 /**
  * Non-production GITHUB_API_URL may be the public API or a local stub.
  * Production is an exact string match — the stub host is not special-cased here.
+ *
+ * `CTEM_GITHUB_API_URL` is a non-production override. Nx will not replace an
+ * already-set `GITHUB_API_URL` (the platform default is https://api.github.com),
+ * so UI smoke and local QA set this second variable. It is ignored when
+ * NODE_ENV=production and cannot move production egress off the public API.
  */
+export function effectiveGithubApiUrl(input: {
+  NODE_ENV: string;
+  GITHUB_API_URL: string;
+  CTEM_GITHUB_API_URL?: string;
+}): string {
+  if (input.NODE_ENV !== 'production') {
+    const override = input.CTEM_GITHUB_API_URL?.trim();
+    if (override) return override;
+  }
+  return input.GITHUB_API_URL;
+}
+
 export function githubApiUrlIssue(url: string, nodeEnv: string): string | null {
   if (nodeEnv === 'production') {
     if (url !== GITHUB_API_PRODUCTION_URL) {
@@ -98,6 +115,11 @@ export const EnvSchema = z
      */
     GITHUB_API_URL: z.string().default(GITHUB_API_PRODUCTION_URL),
     /**
+     * Non-production override of GITHUB_API_URL (local GitHub stub). Ignored
+     * when NODE_ENV=production.
+     */
+    CTEM_GITHUB_API_URL: z.string().optional(),
+    /**
      * AES-256-GCM key for per-tenant integration secrets (32 bytes, base64).
      * Required in production. Intentionally not an env: connector name.
      */
@@ -121,9 +143,14 @@ export const EnvSchema = z
       .default(15 * 60 * 1000),
   })
   .superRefine((env, ctx) => {
-    const urlIssue = githubApiUrlIssue(env.GITHUB_API_URL, env.NODE_ENV);
+    const githubApiUrl = effectiveGithubApiUrl(env);
+    const urlIssue = githubApiUrlIssue(githubApiUrl, env.NODE_ENV);
     if (urlIssue) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['GITHUB_API_URL'], message: urlIssue });
+      const path =
+        env.NODE_ENV !== 'production' && env.CTEM_GITHUB_API_URL?.trim()
+          ? 'CTEM_GITHUB_API_URL'
+          : 'GITHUB_API_URL';
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: [path], message: urlIssue });
     }
     const key = decodeCredentialEncryptionKey(env.CREDENTIAL_ENCRYPTION_KEY);
     if (env.NODE_ENV === 'production' && !key) {
@@ -139,7 +166,11 @@ export const EnvSchema = z
         message: 'must be 32 bytes, base64',
       });
     }
-  });
+  })
+  .transform((env) => ({
+    ...env,
+    GITHUB_API_URL: effectiveGithubApiUrl(env),
+  }));
 
 export type Env = z.infer<typeof EnvSchema>;
 

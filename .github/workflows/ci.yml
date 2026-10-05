@@ -156,21 +156,26 @@ jobs:
 
       - name: Point the UI stack at the GitHub stub
         run: |
-          # e2e stack only. Production compose hardcodes https://api.github.com.
-          if grep -q '^GITHUB_API_URL=' .env; then
-            sed -i 's|^GITHUB_API_URL=.*|GITHUB_API_URL=http://127.0.0.1:4019|' .env
+          # e2e stack only. Leave GITHUB_API_URL at https://api.github.com.
+          # Nx will not override that variable once it is set, so the stub
+          # goes in CTEM_GITHUB_API_URL. The config schema applies it only
+          # when NODE_ENV is not production. Production compose hardcodes
+          # https://api.github.com and does not set the override.
+          if grep -q '^CTEM_GITHUB_API_URL=' .env; then
+            sed -i 's|^CTEM_GITHUB_API_URL=.*|CTEM_GITHUB_API_URL=http://127.0.0.1:4019|' .env
           else
-            echo 'GITHUB_API_URL=http://127.0.0.1:4019' >> .env
+            echo 'CTEM_GITHUB_API_URL=http://127.0.0.1:4019' >> .env
           fi
+          grep '^CTEM_GITHUB_API_URL=' .env
           grep '^GITHUB_API_URL=' .env
           grep '^NODE_ENV=' .env
 
       - name: Start services
         env:
-          # Reaches the nx task even when .env keys are unloaded. There is no
-          # EGRESS_GITHUB_API env var — egress uses the schema-validated
-          # GITHUB_API_URL origin, which asset-service logs at boot.
-          GITHUB_API_URL: http://127.0.0.1:4019
+          # Not a .env key Nx can clobber with the public API default. The
+          # schema copies this onto GITHUB_API_URL only outside production.
+          # There is no EGRESS_GITHUB_API env var.
+          CTEM_GITHUB_API_URL: http://127.0.0.1:4019
           NODE_ENV: development
           NX_LOAD_DOT_ENV_FILES: 'true'
         run: |

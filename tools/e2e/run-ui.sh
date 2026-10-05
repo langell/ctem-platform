@@ -24,7 +24,7 @@ restore_env() {
 trap restore_env EXIT
 
 if ! curl -sf -m 2 "${STUB_URL}/health" >/dev/null 2>&1; then
-  echo "==> GitHub stub (local GITHUB_API_URL target)"
+  echo "==> GitHub stub (local CTEM_GITHUB_API_URL target)"
   node apps/github-stub/server.mjs > /tmp/ctem-github-stub.log 2>&1 &
   echo $! > /tmp/ctem-github-stub.pid
   stub_ok=0
@@ -42,14 +42,15 @@ if ! curl -sf -m 2 "${STUB_URL}/health" >/dev/null 2>&1; then
   fi
 fi
 
-if grep -q '^GITHUB_API_URL=' .env; then
+if grep -q '^CTEM_GITHUB_API_URL=' .env; then
   tmp_env="$(mktemp)"
-  sed "s|^GITHUB_API_URL=.*|GITHUB_API_URL=${STUB_URL}|" .env > "$tmp_env"
+  sed "s|^CTEM_GITHUB_API_URL=.*|CTEM_GITHUB_API_URL=${STUB_URL}|" .env > "$tmp_env"
   mv "$tmp_env" .env
 else
-  printf '\nGITHUB_API_URL=%s\n' "$STUB_URL" >> .env
+  printf '\nCTEM_GITHUB_API_URL=%s\n' "$STUB_URL" >> .env
 fi
-export GITHUB_API_URL="$STUB_URL"
+export CTEM_GITHUB_API_URL="$STUB_URL"
+export NX_LOAD_DOT_ENV_FILES=true
 if ! grep -q '^CREDENTIAL_ENCRYPTION_KEY=.\+' .env; then
   printf '\nCREDENTIAL_ENCRYPTION_KEY=%s\n' 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=' >> .env
 fi
@@ -96,7 +97,7 @@ gateway_up() {
 }
 
 if ! gateway_up; then
-  echo "==> start control plane + scanners (GITHUB_API_URL=${STUB_URL})"
+  echo "==> start control plane + scanners (CTEM_GITHUB_API_URL=${STUB_URL})"
   pnpm nx run-many -t dev --parallel=16 --exclude=@ctem/web --exclude=@ctem/web-e2e \
     > /tmp/ctem-ui-stack.log 2>&1 &
   echo $! > /tmp/ctem-ui-stack.pid
@@ -117,8 +118,21 @@ if ! gateway_up; then
     tail -150 /tmp/ctem-ui-stack.log >&2 || true
     exit 1
   fi
+  origin_ok=0
+  for _ in $(seq 1 20); do
+    if grep -q '"githubApiOrigin":"http://127.0.0.1:4019"' /tmp/ctem-ui-stack.log; then
+      origin_ok=1
+      break
+    fi
+    sleep 0.25
+  done
+  if [[ "$origin_ok" != "1" ]]; then
+    echo "asset-service did not boot against the GitHub stub (refusing to call api.github.com)" >&2
+    grep githubApiOrigin /tmp/ctem-ui-stack.log >&2 || true
+    exit 1
+  fi
 else
-  echo "gateway already up; this Playwright run expects asset-service GITHUB_API_URL=${STUB_URL}" >&2
+  echo "gateway already up; this Playwright run expects asset-service CTEM_GITHUB_API_URL=${STUB_URL}" >&2
 fi
 
 if ! curl -sf -m 2 "http://localhost:3000/" >/dev/null; then

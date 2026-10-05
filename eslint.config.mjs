@@ -56,12 +56,4 @@ export default [
       globals: globals.node,
     },
   },
-  {
-    files: ['apps/asset-service/preload-env.cjs'],
-    languageOptions: {
-      ecmaVersion: 2023,
-      sourceType: 'commonjs',
-      globals: globals.node,
-    },
-  },
 ];
