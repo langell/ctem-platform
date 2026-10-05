@@ -6,7 +6,7 @@ const TOKEN = 'ghs_e2e_stub_token_do_not_leak';
 test.describe('connect github', () => {
   test.describe.configure({ timeout: 180_000 });
 
-  test('a new owner connects GitHub and sees that org repositories', async ({ page }) => {
+  test('a new owner connects GitHub and sees that org repositories', async ({ page, request }) => {
     await signUpFreshOwner(page);
 
     await expect(page.getByRole('link', { name: 'Integrations' })).toBeVisible();
@@ -35,6 +35,18 @@ test.describe('connect github', () => {
     expect(body.lastSyncError).toBeNull();
     expect(body).not.toHaveProperty('credentialRef');
     expect(body).not.toHaveProperty('token');
+
+    const seen = await request.get('http://127.0.0.1:4019/__requests');
+    expect(seen.ok()).toBeTruthy();
+    const recorded = (await seen.json()) as {
+      requests: { method: string; path: string; status: number }[];
+    };
+    expect(JSON.stringify(recorded)).not.toContain(TOKEN);
+    expect(recorded.requests).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ method: 'GET', path: '/user', status: 200 }),
+      ]),
+    );
 
     await expect(page.getByText('github:acme')).toBeVisible();
     await expect(page.getByText('Synced', { exact: true })).toBeVisible();

@@ -27,6 +27,14 @@ make deploy-seed                    # demo org that matches the Keycloak analyst
 make deploy-ps                      # everything should report healthy
 ```
 
+`CREDENTIAL_ENCRYPTION_KEY` is required in production. Every service loads the
+shared config schema at boot and will not start when `NODE_ENV=production`
+and the key is missing or is not 32 bytes of base64. Generate it with
+`openssl rand -base64 32` and put that single line in `.env.prod` (the same
+format `.env.example` uses). Prod compose references it as
+`${CREDENTIAL_ENCRYPTION_KEY:?}`, so an empty value fails before the
+containers start.
+
 Then open `https://$CTEM_DOMAIN`, log in as `analyst` with `DEMO_PASSWORD`.
 
 For curl: `OIDC_ISSUER=https://$AUTH_DOMAIN/realms/ctem OIDC_CLIENT_SECRET=$OIDC_API_CLIENT_SECRET DEMO_PASSWORD=... ./tools/demo-token.sh`.

@@ -59,6 +59,8 @@ jobs:
           docker compose exec -T postgres psql -U ctem -d ctem \
             -f /dev/stdin < libs/db/prisma/manual/000_rls.sql
 
+      # Runs only after Lint above succeeds. Postgres is the compose service
+      # started in the previous step (not a GitHub Actions service container).
       - name: Integration tests
         run: pnpm test:int
 
@@ -164,25 +166,54 @@ jobs:
           grep '^NODE_ENV=' .env
 
       - name: Start services
+        env:
+          # Reaches the nx task even when .env keys are unloaded. There is no
+          # EGRESS_GITHUB_API env var — egress uses the schema-validated
+          # GITHUB_API_URL origin, which asset-service logs at boot.
+          GITHUB_API_URL: http://127.0.0.1:4019
+          NODE_ENV: development
+          NX_LOAD_DOT_ENV_FILES: 'true'
         run: |
+          pnpm nx reset >/dev/null 2>&1 || true
           pnpm nx run-many -t dev --parallel=16 --exclude=@ctem/web --exclude=@ctem/web-e2e > /tmp/stack.log 2>&1 &
           for i in $(seq 1 90); do
             ok=1
             for port in 3000 3001 3002 3003 3004 3005 3006 3007; do
               curl -sf -m 2 "http://localhost:$port/health/live" >/dev/null 2>&1 || { ok=0; break; }
             done
-            if [ "$ok" = "1" ]; then echo "all services healthy"; exit 0; fi
+            if [ "$ok" = "1" ]; then echo "all services healthy"; break; fi
             sleep 2
           done
-          echo "::error::services failed to become healthy"
-          tail -150 /tmp/stack.log
-          exit 1
+          if ! curl -sf -m 2 http://localhost:3002/health/live >/dev/null 2>&1; then
+            echo "::error::services failed to become healthy"
+            tail -150 /tmp/stack.log
+            exit 1
+          fi
+          origin_ok=0
+          for i in $(seq 1 20); do
+            if grep -q '"githubApiOrigin":"http://127.0.0.1:4019"' /tmp/stack.log; then
+              origin_ok=1
+              break
+            fi
+            sleep 0.25
+          done
+          if [ "$origin_ok" != "1" ]; then
+            echo "::error::asset-service did not boot against the GitHub stub (refusing to call api.github.com)"
+            grep githubApiOrigin /tmp/stack.log || true
+            tail -80 /tmp/stack.log
+            exit 1
+          fi
+          echo "asset-service github api origin is the stub"
 
       - name: Install Playwright Chromium
         run: pnpm --filter @ctem/web-e2e exec playwright install --with-deps chromium
 
       - name: Playwright UI smoke
-        run: pnpm test:ui
+        run: |
+          pnpm test:ui
+          echo "---- github stub ----"
+          cat /tmp/github-stub.log
+          grep -E '^GET /user 200$' /tmp/github-stub.log
 
       - name: Playwright artifacts
         if: failure()
@@ -196,7 +227,11 @@ jobs:
 
       - name: Service logs on failure
         if: failure()
-        run: tail -300 /tmp/stack.log 2>/dev/null || true
+        run: |
+          echo "---- github stub ----"
+          cat /tmp/github-stub.log 2>/dev/null || true
+          echo "---- stack ----"
+          tail -300 /tmp/stack.log 2>/dev/null || true
 
   brochure:
     name: Brochure links

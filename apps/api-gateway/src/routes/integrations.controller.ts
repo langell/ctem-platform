@@ -31,6 +31,11 @@ export class IntegrationsProxyController {
   @HttpCode(204)
   @RequirePermissions('integration:manage')
   remove(@Req() req: never, @Param('id') id: string) {
-    return this.proxy.forward('asset', 'DELETE', `/internal/integrations/${id}`, req);
+    return this.proxy.forward(
+      'asset',
+      'DELETE',
+      `/internal/integrations/${encodeURIComponent(id)}`,
+      req,
+    );
   }
 }

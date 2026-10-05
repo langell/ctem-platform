@@ -7,6 +7,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { PrismaService } from '@ctem/db';
+import { loadEnv } from '@ctem/config';
 import { ConnectGitHubRequest, IntegrationView } from '@ctem/contracts';
 import { rootLogger } from '@ctem/observability';
 import { CircuitOpenError } from '@ctem/resilience';
@@ -20,6 +21,10 @@ import { toIntegrationView } from './integration-view';
 const INVALID_TOKEN = 'Invalid GitHub token';
 const OWNER_NOT_FOUND = 'GitHub owner not found';
 const GITHUB_UNAVAILABLE = 'GitHub unavailable';
+const NOT_FOUND = 'Integration not found';
+
+/** Rows this slice created: a pasted GitHub token, not an env: platform credential. */
+const PASTED_GITHUB = { provider: 'github', credentialRef: { startsWith: 'secret:' } } as const;
 
 @Injectable()
 export class IntegrationsService {
@@ -32,22 +37,28 @@ export class IntegrationsService {
 
   async list(orgId: string): Promise<IntegrationView[]> {
     const rows = await this.prisma.withOrg(orgId, (tx) =>
-      tx.integration.findMany({ include: { secret: true }, orderBy: { createdAt: 'desc' } }),
+      tx.integration.findMany({
+        where: PASTED_GITHUB,
+        include: { secret: true },
+        orderBy: { createdAt: 'desc' },
+      }),
     );
     return rows.map((row) => toIntegrationView(row));
   }
 
   async remove(orgId: string, id: string): Promise<void> {
     if (!z.string().uuid().safeParse(id).success) {
-      throw new NotFoundException({ title: 'Integration not found', status: 404 });
+      throw new NotFoundException({ title: NOT_FOUND, status: 404 });
     }
-    const existing = await this.prisma.withOrg(orgId, (tx) =>
-      tx.integration.findUnique({ where: { id } }),
-    );
-    if (!existing) {
-      throw new NotFoundException({ title: 'Integration not found', status: 404 });
-    }
-    await this.prisma.withOrg(orgId, (tx) => tx.integration.delete({ where: { id } }));
+    await this.prisma.withOrg(orgId, async (tx) => {
+      await tx.integrationSecret.deleteMany({ where: { integrationId: id, orgId } });
+      const deleted = await tx.integration.deleteMany({
+        where: { id, orgId, ...PASTED_GITHUB },
+      });
+      if (deleted.count === 0) {
+        throw new NotFoundException({ title: NOT_FOUND, status: 404 });
+      }
+    });
     this.log.info({ orgId, integrationId: id }, 'integration deleted');
   }
 
@@ -56,6 +67,10 @@ export class IntegrationsService {
       body.owner.includes(body.token) ||
       (body.displayName !== undefined && body.displayName.includes(body.token))
     ) {
+      this.log.warn(
+        { reason: 'credential appeared in a non-secret field' },
+        'github token validation rejected',
+      );
       throw new BadRequestException({ title: INVALID_TOKEN, status: 400 });
     }
 
@@ -152,15 +167,32 @@ export class IntegrationsService {
   }
 
   private assertStatus(status: number, phase: 'token' | 'owner'): void {
+    const githubApiOrigin = githubOrigin();
     if (status === 401 || status === 403) {
+      this.log.warn(
+        { phase, upstreamStatus: status, githubApiOrigin },
+        'github token validation rejected',
+      );
       throw new BadRequestException({ title: INVALID_TOKEN, status: 400 });
     }
     if (phase === 'owner' && status === 404) {
+      this.log.warn(
+        { phase, upstreamStatus: status, githubApiOrigin },
+        'github owner validation rejected',
+      );
       throw new BadRequestException({ title: OWNER_NOT_FOUND, status: 400 });
     }
     if (status < 200 || status >= 300) {
       throw new ServiceUnavailableException({ title: GITHUB_UNAVAILABLE, status: 503 });
     }
+  }
+}
+
+function githubOrigin(): string {
+  try {
+    return new URL(loadEnv().GITHUB_API_URL).origin;
+  } catch {
+    return 'invalid';
   }
 }
 

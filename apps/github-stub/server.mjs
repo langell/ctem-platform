@@ -36,7 +36,14 @@ const repos = [
   },
 ];
 
-function send(res, status, body) {
+const seen = [];
+
+function send(req, res, status, body) {
+  const url = new URL(req.url ?? '/', `http://127.0.0.1:${port}`);
+  const method = req.method ?? 'GET';
+  seen.push({ method, path: url.pathname, status });
+  if (seen.length > 500) seen.shift();
+  process.stdout.write(`${method} ${url.pathname} ${status}\n`);
   const payload = typeof body === 'string' ? body : JSON.stringify(body);
   res.writeHead(status, {
     'content-type': 'application/json; charset=utf-8',
@@ -55,32 +62,36 @@ function authed(req) {
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? '/', `http://127.0.0.1:${port}`);
   if (req.method === 'GET' && url.pathname === '/health') {
-    send(res, 200, { ok: true });
+    send(req, res, 200, { ok: true });
+    return;
+  }
+  if (req.method === 'GET' && url.pathname === '/__requests') {
+    send(req, res, 200, { requests: seen.slice() });
     return;
   }
   if (req.method !== 'GET') {
-    send(res, 404, { message: 'Not Found' });
+    send(req, res, 404, { message: 'Not Found' });
     return;
   }
   if (url.pathname === '/user') {
     if (!authed(req)) {
-      send(res, 401, { message: 'Bad credentials' });
+      send(req, res, 401, { message: 'Bad credentials' });
       return;
     }
-    send(res, 200, { login: 'acme' });
+    send(req, res, 200, { login: 'acme' });
     return;
   }
   const org = url.pathname.match(/^\/orgs\/([^/]+)$/);
   if (org) {
     if (!authed(req)) {
-      send(res, 401, { message: 'Bad credentials' });
+      send(req, res, 401, { message: 'Bad credentials' });
       return;
     }
     if (decodeURIComponent(org[1]) !== 'acme') {
-      send(res, 404, { message: 'Not Found' });
+      send(req, res, 404, { message: 'Not Found' });
       return;
     }
-    send(res, 200, { login: 'acme' });
+    send(req, res, 200, { login: 'acme' });
     return;
   }
   if (
@@ -89,13 +100,13 @@ const server = createServer((req, res) => {
     url.pathname === '/users/acme/repos'
   ) {
     if (url.pathname !== '/users/acme/repos' && !authed(req)) {
-      send(res, 401, { message: 'Bad credentials' });
+      send(req, res, 401, { message: 'Bad credentials' });
       return;
     }
-    send(res, 200, repos);
+    send(req, res, 200, repos);
     return;
   }
-  send(res, 404, { message: 'Not Found' });
+  send(req, res, 404, { message: 'Not Found' });
 });
 
 server.listen(port, '0.0.0.0', () => {
