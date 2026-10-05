@@ -7,5 +7,6 @@ import { requireInfra } from '@ctem/testing';
 
 process.env.DATABASE_URL ??= 'postgresql://ctem:ctem@localhost:5432/ctem?schema=public';
 process.env.DATABASE_APP_URL ??= 'postgresql://ctem_app:ctem_app@localhost:5432/ctem?schema=public';
+process.env.CREDENTIAL_ENCRYPTION_KEY ??= 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=';
 
 await requireInfra();

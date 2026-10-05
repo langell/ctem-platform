@@ -10,14 +10,27 @@ import { createPrivateKey } from 'node:crypto';
  *                tenant-supplied credentialRef cannot read DATABASE_URL, PATH,
  *                INTERNAL_TOKEN_SECRET, or other replica secrets. Every
  *                integration that points at the same env name shares that
- *                replica-global value until a real per-tenant store (vault:,
- *                aws-sm:) exists.
+ *                replica-global value. Per-tenant GitHub tokens use secret:.
  *
  * Connectors stay oblivious to the scheme.
+ *
+ *   secret:<integrationId> — per-tenant ciphertext in integration_secrets.
+ *                Resolved by the discovery scheduler inside withOrg, not here.
+ *                CREDENTIAL_ENCRYPTION_KEY is intentionally outside ENV_ALLOWLIST
+ *                so env: cannot read the key that wraps those rows.
  */
 
 /** Platform-controlled names only — not an open read of process.env. */
 const ENV_ALLOWLIST = /^(GITHUB|GITLAB|BITBUCKET|AWS|GCP|AZURE|QUAY|DOCKERHUB)_[A-Z0-9_]+$/;
+
+const SECRET_REF = /^secret:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+
+/** Integration id carried by a secret: ref, or null when the ref is not that scheme. */
+export function parseSecretCredentialRef(ref: string | null | undefined): string | null {
+  if (!ref) return null;
+  const match = SECRET_REF.exec(ref);
+  return match?.[1] ?? null;
+}
 
 export function resolveCredential(ref: string | null): string | undefined {
   if (!ref) return undefined;
@@ -366,9 +379,7 @@ function assertUsableDockerhubUsername(value: string): string {
  * token must not list public repositories and report empty success (that
  * would archiveStale unseen digests).
  */
-export function requireDockerhubCredentials(
-  credentialRef: string | null,
-): DockerhubCredentials {
+export function requireDockerhubCredentials(credentialRef: string | null): DockerhubCredentials {
   if (!credentialRef) {
     throw new Error(
       'Docker Hub discovery requires a usable credentialRef (env:DOCKERHUB_*) — refusing unauthenticated listing',

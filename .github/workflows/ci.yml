@@ -138,6 +138,31 @@ jobs:
             -f /dev/stdin < libs/db/prisma/manual/000_rls.sql
           pnpm db:seed
 
+      - name: Start GitHub stub
+        run: |
+          node apps/github-stub/server.mjs > /tmp/github-stub.log 2>&1 &
+          for i in $(seq 1 50); do
+            if curl -sf -m 2 http://127.0.0.1:4019/health >/dev/null; then
+              echo "github stub ready"
+              exit 0
+            fi
+            sleep 0.2
+          done
+          echo "::error::GitHub stub did not become ready"
+          cat /tmp/github-stub.log
+          exit 1
+
+      - name: Point the UI stack at the GitHub stub
+        run: |
+          # e2e stack only. Production compose hardcodes https://api.github.com.
+          if grep -q '^GITHUB_API_URL=' .env; then
+            sed -i 's|^GITHUB_API_URL=.*|GITHUB_API_URL=http://127.0.0.1:4019|' .env
+          else
+            echo 'GITHUB_API_URL=http://127.0.0.1:4019' >> .env
+          fi
+          grep '^GITHUB_API_URL=' .env
+          grep '^NODE_ENV=' .env
+
       - name: Start services
         run: |
           pnpm nx run-many -t dev --parallel=16 --exclude=@ctem/web --exclude=@ctem/web-e2e > /tmp/stack.log 2>&1 &

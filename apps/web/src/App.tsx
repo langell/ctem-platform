@@ -5,6 +5,7 @@ import { LoginPage } from './pages/LoginPage';
 import { CallbackPage } from './pages/CallbackPage';
 import { CreateOrgPage } from './pages/CreateOrgPage';
 import { AssetsPage } from './pages/AssetsPage';
+import { IntegrationsPage } from './pages/IntegrationsPage';
 import { FindingsPage } from './pages/FindingsPage';
 import { FindingDetailPage } from './pages/FindingDetailPage';
 import { ScanPage } from './pages/ScanPage';
@@ -32,6 +33,7 @@ export function App() {
         }
       >
         <Route path="/assets" element={<AssetsPage />} />
+        <Route path="/integrations" element={<IntegrationsPage />} />
         <Route path="/findings" element={<FindingsPage />} />
         <Route path="/findings/:id" element={<FindingDetailPage />} />
         <Route path="/scans" element={<ScanPage />} />

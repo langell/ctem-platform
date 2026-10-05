@@ -13,6 +13,47 @@ fi
 
 cp -n .env.example .env || true
 
+STUB_URL="http://127.0.0.1:4019"
+ENV_BACKUP="$(mktemp)"
+cp .env "$ENV_BACKUP"
+restore_env() {
+  if [[ -f "${ENV_BACKUP:-}" ]]; then
+    mv "$ENV_BACKUP" .env
+  fi
+}
+trap restore_env EXIT
+
+if ! curl -sf -m 2 "${STUB_URL}/health" >/dev/null 2>&1; then
+  echo "==> GitHub stub (local GITHUB_API_URL target)"
+  node apps/github-stub/server.mjs > /tmp/ctem-github-stub.log 2>&1 &
+  echo $! > /tmp/ctem-github-stub.pid
+  stub_ok=0
+  for _ in $(seq 1 50); do
+    if curl -sf -m 2 "${STUB_URL}/health" >/dev/null 2>&1; then
+      stub_ok=1
+      break
+    fi
+    sleep 0.2
+  done
+  if [[ "$stub_ok" != "1" ]]; then
+    echo "GitHub stub did not become ready at ${STUB_URL}" >&2
+    cat /tmp/ctem-github-stub.log >&2 || true
+    exit 1
+  fi
+fi
+
+if grep -q '^GITHUB_API_URL=' .env; then
+  tmp_env="$(mktemp)"
+  sed "s|^GITHUB_API_URL=.*|GITHUB_API_URL=${STUB_URL}|" .env > "$tmp_env"
+  mv "$tmp_env" .env
+else
+  printf '\nGITHUB_API_URL=%s\n' "$STUB_URL" >> .env
+fi
+export GITHUB_API_URL="$STUB_URL"
+if ! grep -q '^CREDENTIAL_ENCRYPTION_KEY=.\+' .env; then
+  printf '\nCREDENTIAL_ENCRYPTION_KEY=%s\n' 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=' >> .env
+fi
+
 echo "==> infra (Postgres, Redis, NATS, MinIO, Keycloak)"
 docker compose up -d
 
@@ -55,7 +96,7 @@ gateway_up() {
 }
 
 if ! gateway_up; then
-  echo "==> start control plane + scanners"
+  echo "==> start control plane + scanners (GITHUB_API_URL=${STUB_URL})"
   pnpm nx run-many -t dev --parallel=16 --exclude=@ctem/web --exclude=@ctem/web-e2e \
     > /tmp/ctem-ui-stack.log 2>&1 &
   echo $! > /tmp/ctem-ui-stack.pid
@@ -76,6 +117,8 @@ if ! gateway_up; then
     tail -150 /tmp/ctem-ui-stack.log >&2 || true
     exit 1
   fi
+else
+  echo "gateway already up; this Playwright run expects asset-service GITHUB_API_URL=${STUB_URL}" >&2
 fi
 
 if ! curl -sf -m 2 "http://localhost:3000/" >/dev/null; then

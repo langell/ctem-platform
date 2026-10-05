@@ -76,7 +76,10 @@ describe('GitHubConnector.discover', () => {
   it('uses the authenticated listing when a credential resolves, filtered to the owner', async () => {
     process.env.GITHUB_TEST_TOKEN = 'gh-token';
     const fetchFn = stubPages([
-      [repo(), repo({ name: 'other', full_name: 'someoneelse/other', owner: { login: 'someoneelse' } })],
+      [
+        repo(),
+        repo({ name: 'other', full_name: 'someoneelse/other', owner: { login: 'someoneelse' } }),
+      ],
     ]);
 
     const assets = await collect(
@@ -109,9 +112,7 @@ describe('GitHubConnector.discover', () => {
 
   it('encodes owner in the listing path', async () => {
     const fetchFn = stubPages([[]]);
-    await collect(
-      new GitHubConnector().discover(ctx({ owner: 'acme?evil=1', ownerType: 'user' })),
-    );
+    await collect(new GitHubConnector().discover(ctx({ owner: 'acme?evil=1', ownerType: 'user' })));
     const url = String(fetchFn.mock.calls[0][0]);
     expect(url).toContain('/users/acme%3Fevil%3D1/repos');
     expect(url).not.toContain('/users/acme?evil=1');
@@ -171,7 +172,10 @@ describe('GitHubConnector.discover', () => {
   });
 
   it('surfaces API failures so the scheduler records them on the integration', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('rate limited', { status: 403 })));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('rate limited', { status: 403 })),
+    );
     await expect(collect(new GitHubConnector().discover(ctx(userCfg())))).rejects.toThrow(/403/);
   });
 
@@ -179,5 +183,31 @@ describe('GitHubConnector.discover', () => {
     await expect(
       collect(new GitHubConnector().discover(ctx(userCfg(), 'vault:gh'))),
     ).rejects.toThrow(/Unsupported credentialRef scheme/);
+  });
+
+  it('does not fall back to a public listing for a secret ref', async () => {
+    const fetchFn = stubPages([[repo()]]);
+    await expect(
+      collect(
+        new GitHubConnector().discover(
+          ctx(userCfg(), 'secret:00000000-0000-4000-8000-000000000001'),
+        ),
+      ),
+    ).rejects.toThrow(/could not be decrypted/);
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it('uses a resolved secret token for that run only', async () => {
+    const fetchFn = stubPages([[repo()]]);
+    await collect(
+      new GitHubConnector().discover({
+        ...ctx(userCfg(), 'secret:00000000-0000-4000-8000-000000000001'),
+        resolvedCredential: 'ghp_resolved_for_run',
+      }),
+    );
+    expect(String(fetchFn.mock.calls[0][0])).toContain('/user/repos');
+    expect((fetchFn.mock.calls[0][1] as RequestInit).headers).toMatchObject({
+      authorization: 'Bearer ghp_resolved_for_run',
+    });
   });
 });

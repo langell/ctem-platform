@@ -15,7 +15,8 @@ export default defineConfig({
   workers: 1,
   timeout: 60_000,
   expect: { timeout: 15_000 },
-  reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : [['list']],
+  // list is always on so test titles show in the CI log (#87 retro).
+  reporter: process.env.CI ? [['list'], ['github'], ['html', { open: 'never' }]] : [['list']],
   outputDir: 'test-results',
   use: {
     baseURL,

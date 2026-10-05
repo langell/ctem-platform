@@ -43,6 +43,8 @@ x-app-env: &app-env
   RISK_SERVICE_URL: http://risk-service:3005
   REPORTING_SERVICE_URL: http://reporting-service:3006
   NOTIFICATION_SERVICE_URL: http://notification-service:3007
+  GITHUB_API_URL: https://api.github.com
+  CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:?}
   GITHUB_TOKEN: ${GITHUB_TOKEN:-}
   GITLAB_TOKEN: ${GITLAB_TOKEN:-}
   AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}

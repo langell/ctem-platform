@@ -25,6 +25,7 @@ describe('assets human path', () => {
     expect(assets).toMatch(/<SkeletonRows columns=\{6\} \/>/);
     expect(assets).toMatch(/className="empty-title">No assets in this organization/);
     expect(assets).toMatch(/Discovery connectors fill this list\./);
+    expect(assets).toMatch(/<Link to="\/integrations">Connect GitHub<\/Link>/);
     expect(assets).toMatch(/className="banner error"/);
     expect(assets).toMatch(/GatewayError \? err\.message/);
     expect(assets).toMatch(/!loading && !error && items\.length === 0/);

@@ -32,6 +32,8 @@ export function Layout() {
     };
   }, [navigate]);
 
+  const canManageIntegrations = session?.permissions.includes('integration:manage') ?? false;
+
   const logout = () => {
     tokenStore().clear();
     navigate('/login', { replace: true });
@@ -47,6 +49,7 @@ export function Layout() {
               Ops
             </div>
             <NavLink to="/assets">Assets</NavLink>
+            {canManageIntegrations ? <NavLink to="/integrations">Integrations</NavLink> : null}
             <NavLink to="/findings">Findings</NavLink>
             <NavLink to="/scans">Scan</NavLink>
           </div>

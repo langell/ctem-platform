@@ -1,4 +1,10 @@
-import { Inject, Injectable, OnApplicationBootstrap, OnModuleDestroy, Optional } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  OnApplicationBootstrap,
+  OnModuleDestroy,
+  Optional,
+} from '@nestjs/common';
 import { PrismaService } from '@ctem/db';
 import { rootLogger } from '@ctem/observability';
 import {
@@ -10,6 +16,8 @@ import {
   type LeaseStore,
 } from '@ctem/coordination';
 import { AssetsService } from '../assets/assets.service';
+import { loadSecretCredential } from '../secrets/secret-credential';
+import { scrubSyncError } from '../secrets/scrub';
 import { ConnectorRegistry } from './connector.registry';
 
 /** The shape syncIntegration needs — a structural subset of the Prisma row. */
@@ -54,7 +62,10 @@ export class DiscoverySchedulerService implements OnApplicationBootstrap, OnModu
     private readonly assets: AssetsService,
     @Optional() @Inject(RedisClient) store?: LeaseStore,
   ) {
-    this.lease = new LeaderLease(store ?? new UnavailableLeaseStore(), DISCOVERY_SCHEDULE_LEASE_KEY);
+    this.lease = new LeaderLease(
+      store ?? new UnavailableLeaseStore(),
+      DISCOVERY_SCHEDULE_LEASE_KEY,
+    );
   }
 
   onApplicationBootstrap(): void {
@@ -104,13 +115,18 @@ export class DiscoverySchedulerService implements OnApplicationBootstrap, OnModu
     }
 
     const syncStartedAt = new Date();
+    let resolvedCredential: string | undefined;
     try {
+      if (integration.credentialRef?.startsWith('secret:')) {
+        resolvedCredential = await loadSecretCredential(this.prisma, integration);
+      }
       let upserted = 0;
       for await (const asset of connector.discover({
         orgId: integration.orgId,
         integrationId: integration.id,
         config: integration.config as Record<string, unknown>,
         credentialRef: integration.credentialRef,
+        resolvedCredential,
         since: integration.lastSyncAt,
       })) {
         await this.assets.upsert(integration.orgId, asset, integration.id);
@@ -131,8 +147,8 @@ export class DiscoverySchedulerService implements OnApplicationBootstrap, OnModu
       );
       return { ...base, upserted, archived, error: null };
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.log.error({ err, integrationId: integration.id }, 'discovery sync failed');
+      const message = scrubSyncError(err, resolvedCredential);
+      this.log.error({ integrationId: integration.id, err: message }, 'discovery sync failed');
       await this.prisma.withOrg(integration.orgId, (tx) =>
         tx.integration.update({
           where: { id: integration.id },

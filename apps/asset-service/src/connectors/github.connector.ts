@@ -1,10 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { z } from 'zod';
-import { loadEnv } from '@ctem/config';
 import { rootLogger } from '@ctem/observability';
 import type { UpsertAssetRequest } from '@ctem/contracts';
 import type { AssetConnector, DiscoveryContext } from './connector.registry';
 import { resolveCredential } from './credentials';
+import { githubApiUrl } from './github-api';
 import { EGRESS_GITHUB_API, inventoryEgressFetch } from './inventory-egress';
 
 export interface GitHubRepo {
@@ -78,7 +78,7 @@ export class GitHubConnector implements AssetConnector {
   async *discover(ctx: DiscoveryContext): AsyncIterable<UpsertAssetRequest> {
     const config = GitHubConnectorConfig.parse(ctx.config);
 
-    const token = resolveCredential(ctx.credentialRef);
+    const token = tokenFor(ctx);
     if (!token) {
       this.log.warn(
         { integrationId: ctx.integrationId, owner: config.owner },
@@ -102,7 +102,6 @@ export class GitHubConnector implements AssetConnector {
     config: GitHubConnectorConfig,
     token: string | undefined,
   ): AsyncIterable<GitHubRepo> {
-    const base = loadEnv().GITHUB_API_URL;
     const owner = encodeURIComponent(config.owner);
     const path =
       config.ownerType === 'org'
@@ -117,8 +116,9 @@ export class GitHubConnector implements AssetConnector {
       const sep = path.includes('?') ? '&' : '?';
       const res = await inventoryEgressFetch(
         EGRESS_GITHUB_API,
-        `${base}${path}${sep}per_page=${GITHUB_PER_PAGE}&page=${page}`,
+        githubApiUrl(`${path}${sep}per_page=${GITHUB_PER_PAGE}&page=${page}`),
         {
+          redirect: 'error',
           headers: {
             accept: 'application/vnd.github+json',
             'x-github-api-version': '2022-11-28',
@@ -149,4 +149,19 @@ export class GitHubConnector implements AssetConnector {
       }
     }
   }
+}
+
+/**
+ * secret: refs must already be decrypted by the scheduler. A missing plaintext
+ * is a sync error — never an unauthenticated public listing.
+ */
+function tokenFor(ctx: DiscoveryContext): string | undefined {
+  if (ctx.credentialRef?.startsWith('secret:')) {
+    const token = ctx.resolvedCredential?.trim();
+    if (!token) {
+      throw new Error('GitHub credential could not be decrypted');
+    }
+    return token;
+  }
+  return resolveCredential(ctx.credentialRef);
 }

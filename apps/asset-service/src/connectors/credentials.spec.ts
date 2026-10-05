@@ -8,6 +8,7 @@ import {
   requireGcpCredentials,
   requireGithubToken,
   requireQuayToken,
+  parseSecretCredentialRef,
   resolveCredential,
 } from './credentials';
 
@@ -37,6 +38,7 @@ afterEach(() => {
   delete process.env.DOCKERHUB_USERNAME;
   delete process.env.DOCKERHUB_TOKEN;
   delete process.env.DOCKERHUB_TEST_TOKEN;
+  delete process.env.CREDENTIAL_ENCRYPTION_KEY;
 });
 
 describe('resolveCredential', () => {
@@ -66,7 +68,9 @@ describe('resolveCredential', () => {
 
   it('reads an allowlisted GCP_* env var', () => {
     process.env.GCP_CLIENT_EMAIL = 'ctem@acme-prod.iam.gserviceaccount.com';
-    expect(resolveCredential('env:GCP_CLIENT_EMAIL')).toBe('ctem@acme-prod.iam.gserviceaccount.com');
+    expect(resolveCredential('env:GCP_CLIENT_EMAIL')).toBe(
+      'ctem@acme-prod.iam.gserviceaccount.com',
+    );
   });
 
   it('reads an allowlisted AZURE_* env var', () => {
@@ -104,6 +108,24 @@ describe('resolveCredential', () => {
 
   it('rejects an unsupported scheme', () => {
     expect(() => resolveCredential('vault:gh')).toThrow(/Unsupported credentialRef scheme/);
+  });
+
+  it('does not let env: read CREDENTIAL_ENCRYPTION_KEY', () => {
+    process.env.CREDENTIAL_ENCRYPTION_KEY = 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=';
+    expect(() => resolveCredential('env:CREDENTIAL_ENCRYPTION_KEY')).toThrow(/not allowlisted/);
+    try {
+      resolveCredential('env:CREDENTIAL_ENCRYPTION_KEY');
+    } catch (err) {
+      expect(String(err)).not.toContain('MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=');
+    }
+  });
+
+  it('parses a secret ref without reading the ciphertext', () => {
+    expect(parseSecretCredentialRef('secret:00000000-0000-4000-8000-000000000001')).toBe(
+      '00000000-0000-4000-8000-000000000001',
+    );
+    expect(parseSecretCredentialRef('env:GITHUB_TOKEN')).toBeNull();
+    expect(parseSecretCredentialRef('secret:not-a-uuid')).toBeNull();
   });
 });
 
