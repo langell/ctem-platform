@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { DEMO_IDP_SUBJECT, DEMO_ORG_ID, DEMO_USER_EMAIL } from './factories';
 
-type RealmUser = { id?: string; email?: string };
+type RealmUser = { id?: string; email?: string; attributes?: Record<string, string[]> };
 type ProtocolMapper = { name?: string; protocolMapper?: string; config?: Record<string, string> };
 type RealmClient = {
   clientId?: string;
@@ -28,6 +28,9 @@ function mapperClaims(client: RealmClient | undefined) {
 describe('compose Keycloak ctem realm', () => {
   const realm = JSON.parse(readFileSync(resolve('deploy/keycloak/ctem-realm.json'), 'utf8')) as {
     realm: string;
+    registrationAllowed?: boolean;
+    verifyEmail?: boolean;
+    identityProviders?: unknown[];
     clients: RealmClient[];
     users: RealmUser[];
   };
@@ -36,22 +39,35 @@ describe('compose Keycloak ctem realm', () => {
     expect(realm.realm).toBe('ctem');
     const user = realm.users.find((u) => u.email === DEMO_USER_EMAIL);
     expect(user?.id).toBe(DEMO_IDP_SUBJECT);
+    expect(user?.attributes?.org_id).toEqual([DEMO_ORG_ID]);
     expect(DEMO_IDP_SUBJECT).toBe('demo|analyst');
     const seed = readFileSync(resolve('libs/testing/src/factories.ts'), 'utf8');
     expect(seed).toMatch(/idpSubject: DEMO_IDP_SUBJECT/);
     expect(seed).toMatch(/role: 'owner', disabledAt: null/);
   });
 
-  it('issues org_id, audience and sub the gateway JWT path accepts (roles claim is not AuthZ)', () => {
+  it('maps the demo user org_id attribute and does not hardcode org, role, or sub', () => {
+    expect(realm.registrationAllowed).toBe(true);
+    expect(realm.verifyEmail).not.toBe(true);
+    expect(realm.identityProviders).toBeUndefined();
     const api = realm.clients.find((c) => c.clientId === 'ctem-api');
     const web = realm.clients.find((c) => c.clientId === 'ctem-web');
     expect(api).toBeDefined();
     expect(web).toBeDefined();
     for (const client of [api, web]) {
       const byName = mapperClaims(client);
-      expect(byName.org_id?.config?.['claim.value']).toBe(DEMO_ORG_ID);
-      expect(byName.roles?.config?.['claim.value']).toBe('["owner"]');
-      expect(byName.sub?.config?.['claim.value']).toBe(DEMO_IDP_SUBJECT);
+      expect(byName.org_id?.protocolMapper).toBe('oidc-usermodel-attribute-mapper');
+      expect(byName.org_id?.config?.['user.attribute']).toBe('org_id');
+      expect(byName.org_id?.config?.['claim.name']).toBe('org_id');
+      expect(byName.org_id?.config?.['access.token.claim']).toBe('true');
+      expect(byName.org_id?.config?.['claim.value']).toBeUndefined();
+      expect(byName.roles).toBeUndefined();
+      expect(byName.sub).toBeUndefined();
+      expect(byName.email?.config?.['claim.name']).toBe('email');
+      expect(byName.email?.config?.['access.token.claim']).toBe('true');
+      expect(
+        client?.protocolMappers?.some((m) => m.protocolMapper === 'oidc-hardcoded-claim-mapper'),
+      ).toBe(false);
       expect(byName['audience-ctem-api']?.protocolMapper).toBe('oidc-audience-mapper');
       expect(byName['audience-ctem-api']?.config?.['included.custom.audience']).toBe('ctem-api');
     }

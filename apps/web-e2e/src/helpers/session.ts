@@ -4,7 +4,7 @@ import { expect, type Page } from '@playwright/test';
 export const TOKEN_STORAGE_KEY = 'ctem.gateway.token';
 const PAT_PREFIX = 'ctem_pat_';
 
-/** Compose Keycloak hard-codes this org_id on the demo analyst access token. */
+/** Demo analyst access token carries this org_id via the Keycloak user-attribute mapper. */
 export const DEMO_ORG_ID = 'c7e00000-0000-4000-8000-000000000001';
 
 export function isJwtAccessToken(token: string): boolean {

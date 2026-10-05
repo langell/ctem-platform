@@ -8,6 +8,7 @@ import {
 import { PrismaService, type PrismaClient } from '@ctem/db';
 import { ROLE_PERMISSIONS, UserId, type Principal, type Role } from '@ctem/contracts';
 import {
+  appClient,
   createOrg,
   createUserWithMembership,
   deleteOrgCascade,
@@ -50,6 +51,7 @@ describe('OrgService members + JWT resolve (integration)', () => {
   afterAll(async () => {
     await deleteOrgCascade(owner, orgId, userIds);
     await deleteOrgCascade(owner, orgBId);
+    await service.onModuleDestroy();
     await Promise.all([owner.$disconnect(), prisma.$disconnect()]);
   });
 
@@ -86,9 +88,9 @@ describe('OrgService members + JWT resolve (integration)', () => {
   it('JIT upserts User by idpSubject then 403s when Membership is missing', async () => {
     const sub = `idp|${uniqueSlug('stranger')}`;
     const email = `${uniqueSlug('stranger')}@test.local`;
-    await expect(service.resolveJwt({ sub, orgId, email, name: 'Stranger' })).rejects.toBeInstanceOf(
-      ForbiddenException,
-    );
+    await expect(
+      service.resolveJwt({ sub, orgId, email, name: 'Stranger' }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
 
     const created = await owner.user.findUnique({ where: { idpSubject: sub } });
     expect(created).not.toBeNull();
@@ -240,6 +242,118 @@ describe('OrgService members + JWT resolve (integration)', () => {
       where: { orgId_userId: { orgId, userId: target.id } },
     });
     expect(row?.disabledAt).not.toBeNull();
+  });
+
+  it('creates one org for a subject with no membership and then resolves that org', async () => {
+    const sub = `idp|${uniqueSlug('signup')}`;
+    const email = `${uniqueSlug('signup')}@test.local`;
+    const resolved = await service.resolveActiveMemberships({ sub, email, name: 'New Owner' });
+    expect(resolved.memberships).toEqual([]);
+    expect(resolved.userId).not.toBe(sub);
+    userIds.push(resolved.userId);
+
+    const app = appClient();
+    try {
+      expect(await app.membership.count({ where: { userId: resolved.userId } })).toBe(0);
+    } finally {
+      await app.$disconnect();
+    }
+
+    const slug = uniqueSlug('signup');
+    const org = await service.createOrgForSubject(sub, '  Signup Org  ', slug);
+    expect(org.plan).toBe('trial');
+    expect(org.name).toBe('Signup Org');
+    expect(org.slug).toBe(slug);
+
+    const again = await service.resolveActiveMemberships({ sub, email });
+    expect(again.userId).toBe(resolved.userId);
+    expect(again.memberships).toEqual([{ orgId: org.id, role: 'owner' }]);
+
+    const membership = await owner.membership.findUnique({
+      where: { orgId_userId: { orgId: org.id, userId: resolved.userId } },
+    });
+    expect(membership?.role).toBe('owner');
+    expect(membership?.disabledAt).toBeNull();
+    const policies = await owner.policy.findMany({ where: { orgId: org.id } });
+    expect(policies).toHaveLength(3);
+
+    await expect(
+      service.createOrgForSubject(sub, 'Second', uniqueSlug('second')),
+    ).rejects.toBeInstanceOf(ConflictException);
+    await deleteOrgCascade(owner, org.id);
+  });
+
+  it('does not return another user membership and ignores disabled rows', async () => {
+    const sub = `idp|${uniqueSlug('solo')}`;
+    const email = `${uniqueSlug('solo')}@test.local`;
+    const mine = await service.resolveActiveMemberships({ sub, email, name: 'Solo' });
+    userIds.push(mine.userId);
+    const slug = uniqueSlug('solo');
+    const org = await service.createOrgForSubject(sub, 'Solo', slug);
+
+    const other = await createUserWithMembership(owner, orgBId, 'owner', {
+      email: `${uniqueSlug('other')}@test.local`,
+      idpSubject: `idp|${uniqueSlug('other')}`,
+    });
+    userIds.push(other.id);
+
+    const visible = await service.resolveActiveMemberships({ sub, email });
+    expect(visible.memberships.map((m) => m.orgId)).toEqual([org.id]);
+    expect(visible.memberships.some((m) => m.orgId === orgBId)).toBe(false);
+
+    await owner.membership.update({
+      where: { orgId_userId: { orgId: org.id, userId: mine.userId } },
+      data: { disabledAt: new Date() },
+    });
+    const afterDisable = await service.resolveActiveMemberships({ sub, email });
+    expect(afterDisable.memberships).toEqual([]);
+
+    const replacement = await service.createOrgForSubject(sub, 'Replacement', uniqueSlug('repl'));
+    expect(replacement.id).not.toBe(org.id);
+    await deleteOrgCascade(owner, org.id);
+    await deleteOrgCascade(owner, replacement.id);
+  });
+
+  it('rejects an invalid org payload and a taken slug without a 500', async () => {
+    const sub = `idp|${uniqueSlug('invalid')}`;
+    const email = `${uniqueSlug('invalid')}@test.local`;
+    const user = await service.resolveActiveMemberships({ sub, email, name: 'Invalid' });
+    userIds.push(user.userId);
+
+    await expect(service.createOrgForSubject(sub, ' ', 'abc')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    await expect(service.createOrgForSubject(sub, 'Ok', 'ab')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    await expect(service.createOrgForSubject(sub, 'Ok', 'NOPE')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+
+    const slug = uniqueSlug('taken');
+    const org = await service.createOrgForSubject(sub, 'Taken', slug);
+    const otherSub = `idp|${uniqueSlug('taken2')}`;
+    const other = await service.resolveActiveMemberships({
+      sub: otherSub,
+      email: `${uniqueSlug('taken2')}@test.local`,
+      name: 'Other',
+    });
+    userIds.push(other.userId);
+    await expect(service.createOrgForSubject(otherSub, 'Taken 2', slug)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    await deleteOrgCascade(owner, org.id);
+  });
+
+  it('resolves the demo analyst membership when the token has no separate org lookup key', async () => {
+    await seedDemoOrg(owner);
+    const resolved = await service.resolveActiveMemberships({
+      sub: DEMO_IDP_SUBJECT,
+      email: DEMO_USER_EMAIL,
+      name: 'Demo Analyst',
+    });
+    expect(resolved.memberships).toEqual([{ orgId: DEMO_ORG_ID, role: 'owner' }]);
+    expect(resolved.userId).not.toBe(DEMO_IDP_SUBJECT);
   });
 
   it('conflicts when inviting an email that already has an active membership', async () => {

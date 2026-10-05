@@ -4,12 +4,18 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  type OnModuleDestroy,
 } from '@nestjs/common';
-import { createHash, randomBytes } from 'node:crypto';
-import { PrismaService, type PrismaTransaction } from '@ctem/db';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { loadEnv } from '@ctem/config';
+import { PrismaClient, PrismaService, type PrismaTransaction } from '@ctem/db';
 import {
+  CreateOrgRequest,
+  CreateOrgResponse,
   InviteMemberRequest,
+  OrgId,
   ResolveJwtRequest,
+  ResolveMembershipsRequest,
   Role,
   UserId,
   type Principal,
@@ -24,49 +30,152 @@ const INVITE_PREFIX = 'ctem_inv_';
  * becomes a Membership on first login when `claims.email` matches a pending invite.
  */
 @Injectable()
-export class OrgService {
+export class OrgService implements OnModuleDestroy {
+  private ownerDb?: PrismaClient;
+
   constructor(private readonly prisma: PrismaService) {}
+
+  async onModuleDestroy(): Promise<void> {
+    await this.ownerDb?.$disconnect();
+  }
+
+  /**
+   * Membership is RLS-scoped and fails closed when no org GUC is set. A JWT
+   * with no org_id cannot name the tenant, so this read uses the platform
+   * owner role (the same role that owns `verify_api_token`) and always filters
+   * by this user's id.
+   */
+  private platformOwner(): PrismaClient {
+    if (!this.ownerDb) {
+      this.ownerDb = new PrismaClient({
+        datasources: { db: { url: loadEnv().DATABASE_URL } },
+      });
+    }
+    return this.ownerDb;
+  }
 
   /** Org creation is the one legitimately cross-tenant write in the system. */
   async createOrg(name: string, slug: string, ownerUserId: string) {
+    const id = randomUUID();
     return this.prisma.unsafeCrossTenant('org bootstrap has no tenant context yet', async (db) =>
-      db.organization.create({
-        data: {
-          name,
-          slug,
-          memberships: { create: { userId: ownerUserId, role: 'owner' } },
-          policies: {
-            // Sensible defaults so a new org is not staring at an empty policy list.
-            create: [
-              {
-                name: 'Internet-facing critical',
-                description: 'Anything critical and reachable from the internet is a page.',
-                priority: 10,
-                condition: { severityAtLeast: 'critical', exposure: ['internet_facing'] },
-                actions: ['notify', 'ticket', 'block_deploy'],
-                slaHours: 24,
-              },
-              {
-                name: 'Known exploited vulnerabilities',
-                description: 'On the CISA KEV list — fix within a week regardless of CVSS.',
-                priority: 20,
-                condition: { kevOnly: true },
-                actions: ['notify', 'ticket'],
-                slaHours: 168,
-              },
-              {
-                name: 'High severity with a fix',
-                description: 'Fail the build only when the team can actually act.',
-                priority: 50,
-                condition: { severityAtLeast: 'high', requireFixAvailable: true },
-                actions: ['ticket', 'fail_build'],
-                slaHours: 336,
-              },
-            ],
+      db.$transaction(async (tx) => {
+        // RLS WITH CHECK requires the GUC to equal the new org id. The id is
+        // generated here; the client never supplies it.
+        await tx.$executeRawUnsafe(`SELECT set_config('app.current_org_id', $1, true)`, id);
+        return tx.organization.create({
+          data: {
+            id,
+            name,
+            slug,
+            memberships: { create: { userId: ownerUserId, role: 'owner' } },
+            policies: {
+              // Sensible defaults so a new org is not staring at an empty policy list.
+              create: [
+                {
+                  name: 'Internet-facing critical',
+                  description: 'Anything critical and reachable from the internet is a page.',
+                  priority: 10,
+                  condition: { severityAtLeast: 'critical', exposure: ['internet_facing'] },
+                  actions: ['notify', 'ticket', 'block_deploy'],
+                  slaHours: 24,
+                },
+                {
+                  name: 'Known exploited vulnerabilities',
+                  description: 'On the CISA KEV list — fix within a week regardless of CVSS.',
+                  priority: 20,
+                  condition: { kevOnly: true },
+                  actions: ['notify', 'ticket'],
+                  slaHours: 168,
+                },
+                {
+                  name: 'High severity with a fix',
+                  description: 'Fail the build only when the team can actually act.',
+                  priority: 50,
+                  condition: { severityAtLeast: 'high', requireFixAvailable: true },
+                  actions: ['ticket', 'fail_build'],
+                  slaHours: 336,
+                },
+              ],
+            },
           },
-        },
+        });
       }),
     );
+  }
+
+  /**
+   * JWT with no org_id. JIT-upserts the user, then returns only that user's
+   * active membership org ids and roles. Disabled memberships do not count.
+   */
+  async resolveActiveMemberships(input: ResolveMembershipsRequest) {
+    const user = await this.upsertUserFromClaims(this.prisma, input);
+    if (user.disabledAt) {
+      throw new ForbiddenException('No organization membership');
+    }
+    const memberships = await this.prisma.unsafeCrossTenant(
+      'resolve single membership when JWT has no org_id',
+      async () => this.readActiveMemberships(this.platformOwner(), user.id),
+    );
+    return { userId: user.id, memberships };
+  }
+
+  /**
+   * First org for a user who already exists (JIT from the verified `sub`).
+   * Rejects a second active membership and turns a slug collision into 409.
+   */
+  async createOrgForSubject(sub: string, name: string, slug: string) {
+    const parsed = CreateOrgRequest.safeParse({ name, slug });
+    if (!parsed.success) throw new BadRequestException('Validation failed');
+
+    const user = await this.prisma.user.findUnique({ where: { idpSubject: sub } });
+    if (!user || user.disabledAt) throw new ForbiddenException('No organization');
+
+    try {
+      return await this.prisma.unsafeCrossTenant(
+        'resolve single membership when JWT has no org_id',
+        () =>
+          this.platformOwner().$transaction(async (tx) => {
+            await tx.$executeRawUnsafe(
+              `SELECT pg_advisory_xact_lock(hashtext($1)::bigint)`,
+              `ctem-create-org:${user.id}`,
+            );
+            const active = await this.readActiveMemberships(tx, user.id);
+            if (active.length > 0) {
+              throw new ConflictException('User already belongs to an organization');
+            }
+            const org = await this.createOrg(parsed.data.name, parsed.data.slug, user.id);
+            return CreateOrgResponse.parse({
+              id: org.id,
+              name: org.name,
+              slug: org.slug,
+              plan: org.plan,
+            });
+          }),
+      );
+    } catch (err) {
+      if (err instanceof ConflictException || err instanceof ForbiddenException) throw err;
+      if (isUniqueViolation(err)) throw new ConflictException('Organization slug is already taken');
+      throw err;
+    }
+  }
+
+  private async readActiveMemberships(
+    db: PrismaClient | PrismaTransaction,
+    userId: string,
+  ): Promise<Array<{ orgId: string; role: Role }>> {
+    if (!UserId.safeParse(userId).success) return [];
+    const rows = await db.membership.findMany({
+      where: { userId, disabledAt: null },
+      select: { orgId: true, role: true },
+    });
+    const memberships: Array<{ orgId: string; role: Role }> = [];
+    for (const row of rows) {
+      const orgId = OrgId.safeParse(row.orgId);
+      const role = Role.safeParse(row.role);
+      if (!orgId.success || !role.success) continue;
+      memberships.push({ orgId: orgId.data, role: role.data });
+    }
+    return memberships;
   }
 
   async members(orgId: string) {
@@ -204,7 +313,7 @@ export class OrgService {
 
   private async upsertUserFromClaims(
     db: { user: PrismaService['user'] },
-    input: ResolveJwtRequest,
+    input: { sub: string; email?: string; name?: string },
   ) {
     const email = input.email?.trim().toLowerCase();
     const name = input.name?.trim();
@@ -315,4 +424,13 @@ export class OrgService {
   private hash(token: string): string {
     return createHash('sha256').update(token).digest('hex');
   }
+}
+
+function isUniqueViolation(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'code' in err &&
+    (err as { code: unknown }).code === 'P2002'
+  );
 }

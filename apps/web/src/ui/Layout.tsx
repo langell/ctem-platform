@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { gatewayFetch, GatewayError, tokenStore } from '../api/client';
+import { gatewayFetch, GatewayError, isNoOrganizationError, tokenStore } from '../api/client';
 import type { Session } from '../api/types';
 
 export function Layout() {
@@ -16,6 +16,10 @@ export function Layout() {
       })
       .catch((err: unknown) => {
         if (cancelled) return;
+        if (isNoOrganizationError(err)) {
+          navigate('/create-org', { replace: true });
+          return;
+        }
         if (err instanceof GatewayError && (err.status === 401 || err.status === 403)) {
           tokenStore().clear();
           navigate('/login', { replace: true });

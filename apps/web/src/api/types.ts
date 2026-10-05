@@ -1,5 +1,12 @@
 /** Shapes the UI reads from the gateway. No derived scoring or tenancy logic. */
 
+export interface CreatedOrg {
+  id: string;
+  name: string;
+  slug: string;
+  plan: string;
+}
+
 export interface Session {
   userId: string;
   orgId: string;

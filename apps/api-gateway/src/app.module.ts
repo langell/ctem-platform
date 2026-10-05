@@ -13,6 +13,7 @@ import { ScansProxyController } from './routes/scans.controller';
 import { MetersProxyController } from './routes/meters.controller';
 import { FindingsProxyController } from './routes/findings.controller';
 import { OrgMembersProxyController } from './routes/org-members.controller';
+import { OrgsProxyController } from './routes/orgs.controller';
 import { PoliciesProxyController } from './routes/policies.controller';
 import { SessionController } from './routes/session.controller';
 import { RateLimitMiddleware } from './rate-limit.middleware';
@@ -33,8 +34,13 @@ import { RateLimitMiddleware } from './rate-limit.middleware';
     FindingsProxyController,
     PoliciesProxyController,
     OrgMembersProxyController,
+    OrgsProxyController,
   ],
-  providers: [ServiceProxy, RateLimitMiddleware, { provide: APP_GUARD, useClass: GatewayAuthGuard }],
+  providers: [
+    ServiceProxy,
+    RateLimitMiddleware,
+    { provide: APP_GUARD, useClass: GatewayAuthGuard },
+  ],
 })
 export class AppModule {
   configure(consumer: MiddlewareConsumer): void {

@@ -17,6 +17,7 @@ import { APP_GUARD, Reflector } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { AuthModule, CurrentUser, JwtVerifier, RequirePermissions } from '@ctem/auth';
 import { findClientConclusionKeys, type Principal } from '@ctem/contracts';
+import { ProblemDetailsFilter } from '@ctem/service-kit';
 import { TestIdp, applyTestEnv, stubUserIdFromSubject } from '@ctem/testing';
 import { GatewayAuthGuard } from './gateway-auth.guard';
 import { SessionController } from '../routes/session.controller';
@@ -149,6 +150,25 @@ describe('JWT org scoping and findings tenancy (integration)', () => {
             return {} as { token?: string; sub?: string; orgId?: string };
           }
         })();
+        if (req.url === '/internal/auth/memberships') {
+          const sub = json.sub ?? '';
+          if (sub === 'idp|single') {
+            res.end(
+              JSON.stringify({
+                userId: stubUserIdFromSubject(sub),
+                memberships: [{ orgId: ORG_A, role: 'security_analyst' }],
+              }),
+            );
+            return;
+          }
+          res.end(
+            JSON.stringify({
+              userId: stubUserIdFromSubject(sub || 'test|user'),
+              memberships: [],
+            }),
+          );
+          return;
+        }
         if (req.url === '/internal/auth/resolve' && json.orgId && json.sub) {
           res.end(
             JSON.stringify({
@@ -194,7 +214,12 @@ describe('JWT org scoping and findings tenancy (integration)', () => {
 
     const moduleRef = await Test.createTestingModule({
       imports: [AuthModule],
-      controllers: [SessionController, FindingsProbeController, PoliciesProbeController, ScansProbeController],
+      controllers: [
+        SessionController,
+        FindingsProbeController,
+        PoliciesProbeController,
+        ScansProbeController,
+      ],
       providers: [
         {
           provide: APP_GUARD,
@@ -206,6 +231,7 @@ describe('JWT org scoping and findings tenancy (integration)', () => {
     }).compile();
 
     app = moduleRef.createNestApplication({ logger: false });
+    app.useGlobalFilters(new ProblemDetailsFilter());
     await app.listen(0);
     base = `http://127.0.0.1:${(app.getHttpServer().address() as AddressInfo).port}`;
   });
@@ -233,7 +259,11 @@ describe('JWT org scoping and findings tenancy (integration)', () => {
   }
 
   it('session.orgId comes from the JWT, not x-ctem-org or ?orgId=', async () => {
-    const jwt = await idp.issueToken({ sub: 'idp|alice', orgId: ORG_A, roles: ['security_analyst'] });
+    const jwt = await idp.issueToken({
+      sub: 'idp|alice',
+      orgId: ORG_A,
+      roles: ['security_analyst'],
+    });
     const res = await call(`/v1/session?orgId=${ORG_B}`, jwt, {
       headers: { 'x-ctem-org': ORG_B, 'x-org-id': ORG_B },
     });
@@ -248,6 +278,23 @@ describe('JWT org scoping and findings tenancy (integration)', () => {
     const jwt = await idp.issueToken({ orgId: null, roles: ['owner'] });
     const res = await call('/v1/session', jwt, { headers: { 'x-ctem-org': ORG_A } });
     expect(res.status).toBe(403);
+    expect((await res.json()).title).toBe('No organization');
+  });
+
+  it('a JWT with no org_id uses the single membership, not the client org', async () => {
+    const jwt = await idp.issueToken({
+      sub: 'idp|single',
+      orgId: null,
+      roles: ['owner'],
+      email: 'single@test.local',
+    });
+    const res = await call(`/v1/session?orgId=${ORG_B}`, jwt, { headers: { 'x-ctem-org': ORG_B } });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { orgId: string; role: string; userId: string };
+    expect(body.orgId).toBe(ORG_A);
+    expect(body.role).toBe('security_analyst');
+    expect(body.userId).toBe(stubUserIdFromSubject('idp|single'));
+    expect(body.userId).not.toBe('idp|single');
   });
 
   it('lists only findings for the JWT org when the client sends another org', async () => {
@@ -256,7 +303,9 @@ describe('JWT org scoping and findings tenancy (integration)', () => {
       headers: { 'x-ctem-org': ORG_B },
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { items: Array<{ id: string; orgId: string; title: string }> };
+    const body = (await res.json()) as {
+      items: Array<{ id: string; orgId: string; title: string }>;
+    };
     expect(body.items).toHaveLength(1);
     expect(body.items[0]?.orgId).toBe(ORG_A);
     expect(body.items[0]?.id).toBe(FINDING_A);
@@ -343,7 +392,11 @@ describe('JWT org scoping and findings tenancy (integration)', () => {
       headers: { 'x-ctem-org': ORG_B, 'x-org-id': ORG_B },
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { orgId: string; userId: string; serviceAccount: string | null };
+    const body = (await res.json()) as {
+      orgId: string;
+      userId: string;
+      serviceAccount: string | null;
+    };
     expect(body.orgId).toBe(ORG_A);
     expect(body.userId).toBe('tok-a');
     expect(body.serviceAccount).toBe('ci-a');
