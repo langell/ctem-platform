@@ -47,60 +47,62 @@ export class OrgService implements OnModuleDestroy {
    */
   private platformOwner(): PrismaClient {
     if (!this.ownerDb) {
+      const env = loadEnv();
       this.ownerDb = new PrismaClient({
-        datasources: { db: { url: loadEnv().DATABASE_URL } },
+        datasources: { db: { url: env.DATABASE_URL } },
+        log: env.NODE_ENV === 'development' ? ['warn', 'error'] : ['error'],
       });
     }
     return this.ownerDb;
   }
 
-  /** Org creation is the one legitimately cross-tenant write in the system. */
-  async createOrg(name: string, slug: string, ownerUserId: string) {
+  /**
+   * Writes the org, its owner membership, and the default policies on the
+   * caller's transaction. Does not open a client or a transaction.
+   * `viaSignup: true` is set only here, and only `createOrgForSubject` calls this.
+   */
+  private async createOrg(tx: PrismaTransaction, name: string, slug: string, ownerUserId: string) {
     const id = randomUUID();
-    return this.prisma.unsafeCrossTenant('org bootstrap has no tenant context yet', async (db) =>
-      db.$transaction(async (tx) => {
-        // RLS WITH CHECK requires the GUC to equal the new org id. The id is
-        // generated here; the client never supplies it.
-        await tx.$executeRawUnsafe(`SELECT set_config('app.current_org_id', $1, true)`, id);
-        return tx.organization.create({
-          data: {
-            id,
-            name,
-            slug,
-            memberships: { create: { userId: ownerUserId, role: 'owner' } },
-            policies: {
-              // Sensible defaults so a new org is not staring at an empty policy list.
-              create: [
-                {
-                  name: 'Internet-facing critical',
-                  description: 'Anything critical and reachable from the internet is a page.',
-                  priority: 10,
-                  condition: { severityAtLeast: 'critical', exposure: ['internet_facing'] },
-                  actions: ['notify', 'ticket', 'block_deploy'],
-                  slaHours: 24,
-                },
-                {
-                  name: 'Known exploited vulnerabilities',
-                  description: 'On the CISA KEV list — fix within a week regardless of CVSS.',
-                  priority: 20,
-                  condition: { kevOnly: true },
-                  actions: ['notify', 'ticket'],
-                  slaHours: 168,
-                },
-                {
-                  name: 'High severity with a fix',
-                  description: 'Fail the build only when the team can actually act.',
-                  priority: 50,
-                  condition: { severityAtLeast: 'high', requireFixAvailable: true },
-                  actions: ['ticket', 'fail_build'],
-                  slaHours: 336,
-                },
-              ],
+    // RLS WITH CHECK requires the GUC to equal the new org id. The id is
+    // generated here; the client never supplies it.
+    await tx.$executeRawUnsafe(`SELECT set_config('app.current_org_id', $1, true)`, id);
+    return tx.organization.create({
+      data: {
+        id,
+        name,
+        slug,
+        memberships: { create: { userId: ownerUserId, role: 'owner', viaSignup: true } },
+        policies: {
+          // Sensible defaults so a new org is not staring at an empty policy list.
+          create: [
+            {
+              name: 'Internet-facing critical',
+              description: 'Anything critical and reachable from the internet is a page.',
+              priority: 10,
+              condition: { severityAtLeast: 'critical', exposure: ['internet_facing'] },
+              actions: ['notify', 'ticket', 'block_deploy'],
+              slaHours: 24,
             },
-          },
-        });
-      }),
-    );
+            {
+              name: 'Known exploited vulnerabilities',
+              description: 'On the CISA KEV list — fix within a week regardless of CVSS.',
+              priority: 20,
+              condition: { kevOnly: true },
+              actions: ['notify', 'ticket'],
+              slaHours: 168,
+            },
+            {
+              name: 'High severity with a fix',
+              description: 'Fail the build only when the team can actually act.',
+              priority: 50,
+              condition: { severityAtLeast: 'high', requireFixAvailable: true },
+              actions: ['ticket', 'fail_build'],
+              slaHours: 336,
+            },
+          ],
+        },
+      },
+    });
   }
 
   /**
@@ -131,30 +133,31 @@ export class OrgService implements OnModuleDestroy {
     if (!user || user.disabledAt) throw new ForbiddenException('No organization');
 
     try {
-      return await this.prisma.unsafeCrossTenant(
-        'resolve single membership when JWT has no org_id',
-        () =>
-          this.platformOwner().$transaction(async (tx) => {
-            await tx.$executeRawUnsafe(
-              `SELECT pg_advisory_xact_lock(hashtext($1)::bigint)`,
-              `ctem-create-org:${user.id}`,
-            );
-            const active = await this.readActiveMemberships(tx, user.id);
-            if (active.length > 0) {
-              throw new ConflictException('User already belongs to an organization');
-            }
-            const org = await this.createOrg(parsed.data.name, parsed.data.slug, user.id);
-            return CreateOrgResponse.parse({
-              id: org.id,
-              name: org.name,
-              slug: org.slug,
-              plan: org.plan,
-            });
-          }),
+      return await this.prisma.unsafeCrossTenant('org bootstrap has no tenant context yet', () =>
+        this.platformOwner().$transaction(async (tx) => {
+          await tx.$executeRawUnsafe(
+            `SELECT pg_advisory_xact_lock(hashtext('ctem-create-org:' || $1)::bigint)`,
+            user.id,
+          );
+          const active = await this.readActiveMemberships(tx, user.id);
+          if (active.length > 0) {
+            throw new ConflictException('User already belongs to an organization');
+          }
+          const org = await this.createOrg(tx, parsed.data.name, parsed.data.slug, user.id);
+          return CreateOrgResponse.parse({
+            id: org.id,
+            name: org.name,
+            slug: org.slug,
+            plan: org.plan,
+          });
+        }),
       );
     } catch (err) {
       if (err instanceof ConflictException || err instanceof ForbiddenException) throw err;
-      if (isUniqueViolation(err)) throw new ConflictException('Organization slug is already taken');
+      // Postgres aborts the transaction on a unique violation. Map it here,
+      // outside the interactive transaction — never retry inside it.
+      const conflict = mapCreateOrgUniqueViolation(err);
+      if (conflict) throw conflict;
       throw err;
     }
   }
@@ -356,6 +359,7 @@ export class OrgService implements OnModuleDestroy {
       role: string;
       disabledAt: Date | null;
       createdAt: Date;
+      viaSignup: boolean;
     } | null,
   ) {
     const invite = await tx.membershipInvite.findFirst({
@@ -426,11 +430,60 @@ export class OrgService implements OnModuleDestroy {
   }
 }
 
-function isUniqueViolation(err: unknown): boolean {
+/** Partial unique index. Prisma cannot model it; it lives only in the signup migration. */
+export const SIGNUP_MEMBERSHIP_INDEX = 'memberships_userId_signup_active_key';
+
+const SLUG_TAKEN = 'Organization slug is already taken';
+const ALREADY_IN_ORG = 'User already belongs to an organization';
+
+interface UniqueViolationMeta {
+  target?: unknown;
+  modelName?: unknown;
+  constraint?: unknown;
+}
+
+function isUniqueViolation(err: unknown): err is { code: 'P2002'; meta?: UniqueViolationMeta } {
   return (
     typeof err === 'object' &&
     err !== null &&
     'code' in err &&
     (err as { code: unknown }).code === 'P2002'
   );
+}
+
+function targetParts(value: unknown): string[] {
+  if (typeof value === 'string') return [value];
+  if (!Array.isArray(value)) return [];
+  return value.filter((part): part is string => typeof part === 'string');
+}
+
+function namesToken(names: string[], token: string): boolean {
+  return names.some((name) => name === token || name.split(/[^A-Za-z0-9]+/).includes(token));
+}
+
+function namesSignupMembership(meta: UniqueViolationMeta | undefined, names: string[]): boolean {
+  if (
+    names.some((name) => name === SIGNUP_MEMBERSHIP_INDEX || name.includes(SIGNUP_MEMBERSHIP_INDEX))
+  ) {
+    return true;
+  }
+  if (names.includes('memberships.userId')) return true;
+  const model = typeof meta?.modelName === 'string' ? meta.modelName : '';
+  const target = targetParts(meta?.target);
+  const membershipModel = model === 'Membership' || model === 'memberships';
+  return membershipModel && target.length === 1 && target[0] === 'userId';
+}
+
+/**
+ * Create-org P2002 → 409. Exact targets only, never a 500:
+ * slug → slug taken; the signup index (or `memberships.userId`) → already in an org;
+ * any other unique target → generic Conflict.
+ * Returns null when `err` is not a P2002.
+ */
+export function mapCreateOrgUniqueViolation(err: unknown): ConflictException | null {
+  if (!isUniqueViolation(err)) return null;
+  const names = [...targetParts(err.meta?.target), ...targetParts(err.meta?.constraint)];
+  if (namesToken(names, 'slug')) return new ConflictException(SLUG_TAKEN);
+  if (namesSignupMembership(err.meta, names)) return new ConflictException(ALREADY_IN_ORG);
+  return new ConflictException('Conflict');
 }

@@ -8,11 +8,19 @@ export interface FreshOwner {
   slug: string;
 }
 
+/** Registered IdP user sitting on /create-org, before the org is submitted. */
+export interface RegisteredOwner {
+  orgName: string;
+  slug: string;
+  email: string;
+  token: string;
+}
+
 /**
- * #87 signup path: a new IdP user creates one org and lands as owner.
- * Shared by the signup spec and the GitHub connect spec.
+ * Keycloak registration through the "No organization" session check.
+ * Stops on /create-org with the access token stored.
  */
-export async function signUpFreshOwner(page: Page): Promise<FreshOwner> {
+export async function registerFreshOwnerOnCreateOrg(page: Page): Promise<RegisteredOwner> {
   const stamp = Date.now().toString(36);
   const username = `e2e${stamp}`;
   const email = `${username}@signup.test`;
@@ -57,17 +65,25 @@ export async function signUpFreshOwner(page: Page): Promise<FreshOwner> {
   expect(claimsBefore.sub).not.toBe('demo|analyst');
   expect(claimsBefore.org_id).toBeUndefined();
 
+  return { orgName, slug, email, token: jwtBefore };
+}
+
+/** Submits the create-org form and lands on /findings as owner. */
+export async function submitFreshOwnerOrg(page: Page, owner: RegisteredOwner): Promise<FreshOwner> {
+  const jwtBefore = owner.token;
+  const claimsBefore = decodeJwtPayload(jwtBefore);
+
   const created = page.waitForResponse(
     (res) => res.url().includes('/v1/orgs') && res.request().method() === 'POST',
   );
-  await page.getByLabel('Name').fill(orgName);
-  await page.getByLabel('Slug').fill(slug);
+  await page.getByLabel('Name').fill(owner.orgName);
+  await page.getByLabel('Slug').fill(owner.slug);
   await page.getByRole('button', { name: 'Create organization' }).click();
 
   const createRes = await created;
   expect(createRes.status()).toBe(201);
   const posted = createRes.request().postDataJSON() as Record<string, unknown>;
-  expect(posted).toEqual({ name: orgName, slug });
+  expect(posted).toEqual({ name: owner.orgName, slug: owner.slug });
   expect(posted).not.toHaveProperty('orgId');
   expect(posted).not.toHaveProperty('org_id');
   expect(posted).not.toHaveProperty('role');
@@ -76,7 +92,7 @@ export async function signUpFreshOwner(page: Page): Promise<FreshOwner> {
 
   const createdBody = (await createRes.json()) as { id?: string; plan?: string; slug?: string };
   expect(createdBody.plan).toBe('trial');
-  expect(createdBody.slug).toBe(slug);
+  expect(createdBody.slug).toBe(owner.slug);
   expect(createdBody.id).toBeTruthy();
   expect(createdBody.id).not.toBe(DEMO_ORG_ID);
 
@@ -100,5 +116,14 @@ export async function signUpFreshOwner(page: Page): Promise<FreshOwner> {
   expect(session.body.orgId).toBe(createdBody.id);
   expect(session.body.userId).not.toBe(claimsBefore.sub);
 
-  return { orgId: createdBody.id as string, orgName, slug };
+  return { orgId: createdBody.id as string, orgName: owner.orgName, slug: owner.slug };
+}
+
+/**
+ * #87 signup path: a new IdP user creates one org and lands as owner.
+ * Shared by the signup spec and the GitHub connect spec.
+ */
+export async function signUpFreshOwner(page: Page): Promise<FreshOwner> {
+  const owner = await registerFreshOwnerOnCreateOrg(page);
+  return submitFreshOwnerOrg(page, owner);
 }

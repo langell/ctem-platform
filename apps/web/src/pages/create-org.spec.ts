@@ -17,6 +17,10 @@ describe('create-org screen', () => {
     expect(page).toMatch(/name: name\.trim\(\)/);
     expect(page).toMatch(/slug: slug\.trim\(\)\.toLowerCase\(\)/);
     expect(page).toMatch(/navigate\('\/findings'/);
+    expect(page).toMatch(/err instanceof GatewayError && err\.status === 409/);
+    expect(page).toMatch(/gatewayFetch<Session>\('\/v1\/session'\)/);
+    expect(page).toMatch(/navigate\('\/findings', \{ replace: true \}\)/);
+    expect(page).toMatch(/disabled=\{busy\}/);
     expect(callback).toMatch(/isNoOrganizationError/);
     expect(callback).toMatch(/navigate\('\/create-org'/);
     expect(page).not.toMatch(/type=["']password["']/);

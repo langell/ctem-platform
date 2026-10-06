@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { gatewayFetch, GatewayError, isNoOrganizationError, tokenStore } from '../api/client';
 import type { CreatedOrg, Session } from '../api/types';
@@ -15,6 +15,7 @@ export function CreateOrgPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [ready, setReady] = useState(false);
+  const submitting = useRef(false);
 
   useEffect(() => {
     if (!token) return;
@@ -46,6 +47,8 @@ export function CreateOrgPage() {
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
+    if (submitting.current) return;
+    submitting.current = true;
     setError(null);
     setBusy(true);
     try {
@@ -55,8 +58,19 @@ export function CreateOrgPage() {
       });
       navigate('/findings', { replace: true });
     } catch (err) {
-      setError(err instanceof GatewayError ? err.message : 'Could not create the organization.');
+      if (err instanceof GatewayError && err.status === 409) {
+        try {
+          await gatewayFetch<Session>('/v1/session');
+          navigate('/findings', { replace: true });
+          return;
+        } catch {
+          setError(err.message);
+        }
+      } else {
+        setError(err instanceof GatewayError ? err.message : 'Could not create the organization.');
+      }
       setBusy(false);
+      submitting.current = false;
     }
   };
 

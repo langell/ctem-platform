@@ -64,6 +64,12 @@ model Membership {
   role       String
   /// Soft-disable: next JWT resolve 403s. User row is kept (other orgs may exist).
   disabledAt DateTime?
+  /// Signup membership. One active row per user is enforced by partial unique
+  /// index `memberships_userId_signup_active_key` in
+  /// `libs/db/prisma/migrations/20261006160000_membership_signup_unique`
+  /// (`WHERE "viaSignup" AND "disabledAt" IS NULL`). Invites leave this false.
+  /// Prisma cannot model partial indexes, so the index lives only in that migration.
+  viaSignup  Boolean   @default(false)
   createdAt  DateTime  @default(now())
 
   org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
