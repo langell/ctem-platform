@@ -4,24 +4,34 @@ import { CreateOrgResponse, ROLE_PERMISSIONS, type Principal, type Role } from '
 import { PrismaService, type PrismaClient } from '@ctem/db';
 import { rootLogger } from '@ctem/observability';
 import {
+  appClient,
   createOrg,
   createUserWithMembership,
   deleteOrgCascade,
   ownerClient,
   uniqueSlug,
+  withOrg,
 } from '@ctem/testing';
-import { mapCreateOrgUniqueViolation, OrgService } from './org.service';
+import {
+  mapCreateOrgUniqueViolation,
+  OrgService,
+  resolveCreateOrgUniqueViolation,
+} from './org.service';
 
 /**
  * Observed Prisma 6.19.3 P2002 `meta` for partial unique index
  * `memberships_userId_signup_active_key`. The index name is not in `meta`.
- * Postgres 16 reports `target: ['userId']` (`fields: (\`userId\`)`).
- * Postgres 17 (CI) reports `target: null` (`Unique constraint failed on the (not available)`).
+ * `platformOwner()` bypasses RLS and reports `target: ['userId']`.
+ * The same insert on `ctem_app` (row-level security applies) reports `target: null`.
  */
-const PRISMA_619_SIGNUP_INDEX_METAS: Array<{ modelName: string; target: string[] | null }> = [
-  { modelName: 'Membership', target: ['userId'] },
-  { modelName: 'Membership', target: null },
-];
+const OWNER_SIGNUP_INDEX_META = {
+  modelName: 'Membership',
+  target: ['userId'],
+} as const;
+const RLS_SIGNUP_INDEX_META = {
+  modelName: 'Membership',
+  target: null,
+} as const;
 
 const ALREADY_IN_ORG = 'User already belongs to an organization';
 const SLUG_TAKEN = 'Organization slug is already taken';
@@ -34,6 +44,10 @@ const PINO_LEVELS: Record<string, number> = {
   error: 50,
   fatal: 60,
 };
+
+function platformOwnerOf(service: OrgService): PrismaClient {
+  return (service as unknown as { platformOwner(): PrismaClient }).platformOwner();
+}
 
 function actor(orgId: string, userId: string, role: Role): Principal {
   return {
@@ -260,23 +274,18 @@ describe('org create race', () => {
     const user = await owner.user.create({
       data: { email, name: 'Backstop', idpSubject: `test|${email}` },
     });
-    const setup = new PrismaService();
-    const violator = new PrismaService();
+    const db = platformOwnerOf(serviceA);
     try {
-      await setup.withOrg(orgA.id, (tx) =>
-        tx.membership.create({
-          data: { orgId: orgA.id, userId: user.id, role: 'owner', viaSignup: true },
-        }),
-      );
+      await db.membership.create({
+        data: { orgId: orgA.id, userId: user.id, role: 'owner', viaSignup: true },
+      });
 
       const captured = captureLogs();
       let violation: unknown;
       try {
-        await violator.withOrg(orgB.id, (tx) =>
-          tx.membership.create({
-            data: { orgId: orgB.id, userId: user.id, role: 'developer', viaSignup: true },
-          }),
-        );
+        await db.membership.create({
+          data: { orgId: orgB.id, userId: user.id, role: 'developer', viaSignup: true },
+        });
       } catch (err) {
         violation = err;
       } finally {
@@ -285,38 +294,90 @@ describe('org create race', () => {
 
       expect(violation).toMatchObject({ code: 'P2002' });
       const meta = (violation as { meta?: unknown }).meta;
-      expect(
-        PRISMA_619_SIGNUP_INDEX_METAS,
-        `observed P2002 meta: ${JSON.stringify(meta)}`,
-      ).toContainEqual(meta);
-      expect(mapCreateOrgUniqueViolation(violation)?.message).toBe(ALREADY_IN_ORG);
+      expect(meta, `observed owner P2002 meta: ${JSON.stringify(meta)}`).toEqual(
+        OWNER_SIGNUP_INDEX_META,
+      );
+      const mapped = mapCreateOrgUniqueViolation(violation);
+      expect(mapped?.action).toBe('conflict');
+      if (mapped?.action === 'conflict') {
+        expect(mapped.exception.message).toBe(ALREADY_IN_ORG);
+      }
       expect(captured.text()).toMatch(/prisma:error/);
       expect(captured.text()).toMatch(NOISE);
 
-      const invited = await setup.withOrg(orgB.id, (tx) =>
-        tx.membership.create({
-          data: { orgId: orgB.id, userId: user.id, role: 'developer', viaSignup: false },
-        }),
-      );
+      const invited = await db.membership.create({
+        data: { orgId: orgB.id, userId: user.id, role: 'developer', viaSignup: false },
+      });
       expect(invited.viaSignup).toBe(false);
 
-      await owner.membership.update({
+      await db.membership.update({
         where: { orgId_userId: { orgId: orgA.id, userId: user.id } },
         data: { disabledAt: new Date() },
       });
-      const replacement = await setup.withOrg(orgC.id, (tx) =>
-        tx.membership.create({
-          data: { orgId: orgC.id, userId: user.id, role: 'owner', viaSignup: true },
-        }),
-      );
+      const replacement = await db.membership.create({
+        data: { orgId: orgC.id, userId: user.id, role: 'owner', viaSignup: true },
+      });
       expect(replacement.viaSignup).toBe(true);
       expect(replacement.orgId).toBe(orgC.id);
     } finally {
-      await setup.$disconnect();
-      await violator.$disconnect();
       await deleteOrgCascade(owner, orgA.id, [user.id]);
       await deleteOrgCascade(owner, orgB.id);
       await deleteOrgCascade(owner, orgC.id);
+    }
+  });
+
+  it('an RLS client signup violation re-checks when meta.target is unresolvable', async () => {
+    const orgA = await createOrg(owner);
+    const orgB = await createOrg(owner);
+    const email = `${uniqueSlug('rls-backstop')}@test.local`;
+    const user = await owner.user.create({
+      data: { email, name: 'RLS backstop', idpSubject: `test|${email}` },
+    });
+    const app = appClient();
+    try {
+      await platformOwnerOf(serviceA).membership.create({
+        data: { orgId: orgA.id, userId: user.id, role: 'owner', viaSignup: true },
+      });
+
+      let violation: unknown;
+      try {
+        await withOrg(app, orgB.id, (tx) =>
+          tx.membership.create({
+            data: { orgId: orgB.id, userId: user.id, role: 'developer', viaSignup: true },
+          }),
+        );
+      } catch (err) {
+        violation = err;
+      }
+
+      expect(violation).toMatchObject({ code: 'P2002' });
+      const meta = (violation as { meta?: unknown }).meta;
+      expect(meta, `observed ctem_app P2002 meta: ${JSON.stringify(meta)}`).toEqual(
+        RLS_SIGNUP_INDEX_META,
+      );
+      expect(mapCreateOrgUniqueViolation(violation)).toEqual({ action: 'recheck-active-signup' });
+
+      let reads = 0;
+      const resolved = await resolveCreateOrgUniqueViolation(violation, async () => {
+        reads += 1;
+        const row = await owner.membership.findFirst({
+          where: { userId: user.id, viaSignup: true, disabledAt: null },
+          select: { userId: true },
+        });
+        return row !== null;
+      });
+      expect(reads).toBe(1);
+      expect(resolved?.message).toBe(ALREADY_IN_ORG);
+      expect((await resolveCreateOrgUniqueViolation(violation, async () => false))?.message).toBe(
+        'Conflict',
+      );
+      expect((await resolveCreateOrgUniqueViolation(violation, async () => true))?.message).toBe(
+        ALREADY_IN_ORG,
+      );
+    } finally {
+      await app.$disconnect();
+      await deleteOrgCascade(owner, orgA.id, [user.id]);
+      await deleteOrgCascade(owner, orgB.id);
     }
   });
 
@@ -398,6 +459,62 @@ describe('org create race', () => {
     } finally {
       for (const orgId of orgIds) await deleteOrgCascade(owner, orgId);
       if (userIds.length) await owner.user.deleteMany({ where: { id: { in: userIds } } });
+    }
+  });
+
+  it('re-enabling an invite clears viaSignup so the replacement signup stays unique', async () => {
+    const subject = await freshSubject('reenable');
+    let keeperId: string | undefined;
+    try {
+      const orgA = await serviceA.createOrgForSubject(
+        subject.sub,
+        'Signup A',
+        uniqueSlug('reenable-a'),
+      );
+      const keeper = await createUserWithMembership(owner, orgA.id, 'owner');
+      keeperId = keeper.id;
+      await serviceA.disable(orgA.id, actor(orgA.id, keeper.id, 'owner'), subject.userId);
+      const orgB = await serviceA.createOrgForSubject(
+        subject.sub,
+        'Replacement B',
+        uniqueSlug('reenable-b'),
+      );
+
+      await serviceA.invite(orgA.id, actor(orgA.id, keeper.id, 'owner'), {
+        email: subject.email,
+        role: 'developer',
+      });
+
+      const captured = captureLogs();
+      let resolved: Awaited<ReturnType<OrgService['resolveJwt']>> | undefined;
+      let failure: unknown;
+      try {
+        resolved = await serviceA.resolveJwt({
+          sub: subject.sub,
+          orgId: orgA.id,
+          email: subject.email,
+        });
+      } catch (err) {
+        failure = err;
+      } finally {
+        captured.restore();
+      }
+
+      expect(failure).toBeUndefined();
+      expect(resolved).toMatchObject({ userId: subject.userId, orgId: orgA.id, role: 'developer' });
+      expect(captured.text()).not.toMatch(/prisma:error/);
+
+      const rowA = await owner.membership.findUnique({
+        where: { orgId_userId: { orgId: orgA.id, userId: subject.userId } },
+      });
+      const rowB = await owner.membership.findUnique({
+        where: { orgId_userId: { orgId: orgB.id, userId: subject.userId } },
+      });
+      expect(rowA).toMatchObject({ viaSignup: false, disabledAt: null, role: 'developer' });
+      expect(rowB).toMatchObject({ viaSignup: true, disabledAt: null, role: 'owner' });
+    } finally {
+      await deleteUserOrgs(subject.userId);
+      if (keeperId) await owner.user.deleteMany({ where: { id: keeperId } });
     }
   });
 });

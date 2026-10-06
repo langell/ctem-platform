@@ -155,11 +155,23 @@ export class OrgService implements OnModuleDestroy {
     } catch (err) {
       if (err instanceof ConflictException || err instanceof ForbiddenException) throw err;
       // Postgres aborts the transaction on a unique violation. Map it here,
-      // outside the interactive transaction — never retry inside it.
-      const conflict = mapCreateOrgUniqueViolation(err);
+      // outside the interactive transaction — never retry inside it. An
+      // unresolvable Membership target does one owner-client read below.
+      const conflict = await resolveCreateOrgUniqueViolation(err, () =>
+        this.hasActiveSignupMembership(user.id),
+      );
       if (conflict) throw conflict;
       throw err;
     }
+  }
+
+  /** One owner-client read. Call only after the create-org transaction has aborted. */
+  private async hasActiveSignupMembership(userId: string): Promise<boolean> {
+    const row = await this.platformOwner().membership.findFirst({
+      where: { userId, viaSignup: true, disabledAt: null },
+      select: { userId: true },
+    });
+    return row !== null;
   }
 
   private async readActiveMemberships(
@@ -384,7 +396,7 @@ export class OrgService implements OnModuleDestroy {
     if (existing) {
       return tx.membership.update({
         where: { orgId_userId: { orgId, userId: user.id } },
-        data: { role: role.data, disabledAt: null },
+        data: { role: role.data, disabledAt: null, viaSignup: false },
       });
     }
     return tx.membership.create({
@@ -461,35 +473,72 @@ function namesToken(names: string[], token: string): boolean {
   return names.some((name) => name === token || name.split(/[^A-Za-z0-9]+/).includes(token));
 }
 
-function namesSignupMembership(meta: UniqueViolationMeta | undefined, names: string[]): boolean {
+function isMembershipModel(meta: UniqueViolationMeta | undefined): boolean {
+  const model = typeof meta?.modelName === 'string' ? meta.modelName : '';
+  return model === 'Membership' || model === 'memberships';
+}
+
+function namesExplicitSignup(meta: UniqueViolationMeta | undefined, names: string[]): boolean {
   if (
     names.some((name) => name === SIGNUP_MEMBERSHIP_INDEX || name.includes(SIGNUP_MEMBERSHIP_INDEX))
   ) {
     return true;
   }
   if (names.includes('memberships.userId')) return true;
-  const model = typeof meta?.modelName === 'string' ? meta.modelName : '';
   const target = targetParts(meta?.target);
-  const membershipModel = model === 'Membership' || model === 'memberships';
-  if (!membershipModel) return false;
-  // Postgres 16: Prisma names the partial index as the column it covers.
-  if (target.length === 1 && target[0] === 'userId') return true;
-  // Postgres 17: Prisma 6.19 leaves target null ("not available") when the
-  // unique index is not in the schema. This partial index is the only such
-  // index on Membership.
-  return meta?.target == null;
+  return isMembershipModel(meta) && target.length === 1 && target[0] === 'userId';
 }
+
+/**
+ * `target` can be null when the violating insert ran under row-level security.
+ * That happens for declared indexes too (seen on
+ * `integrations_orgId_provider_displayName_key`). `platformOwner()` bypasses
+ * RLS, so a create-org insert usually reports a concrete target. A null or
+ * otherwise unresolvable Membership target is not assumed to be the signup
+ * index; the caller re-checks whether an active `viaSignup` row exists.
+ */
+function membershipTargetUnresolvable(meta: UniqueViolationMeta | undefined): boolean {
+  if (!isMembershipModel(meta)) return false;
+  const target = meta?.target;
+  if (target == null) return true;
+  return targetParts(target).length === 0;
+}
+
+export type CreateOrgUniqueMapping =
+  { action: 'conflict'; exception: ConflictException } | { action: 'recheck-active-signup' };
 
 /**
  * Create-org P2002 → 409. Exact targets only, never a 500:
  * slug → slug taken; the signup index (or `memberships.userId`) → already in an org;
+ * a Membership target that is null or unresolvable → `recheck-active-signup`;
  * any other unique target → generic Conflict.
  * Returns null when `err` is not a P2002.
  */
-export function mapCreateOrgUniqueViolation(err: unknown): ConflictException | null {
+export function mapCreateOrgUniqueViolation(err: unknown): CreateOrgUniqueMapping | null {
   if (!isUniqueViolation(err)) return null;
   const names = [...targetParts(err.meta?.target), ...targetParts(err.meta?.constraint)];
-  if (namesToken(names, 'slug')) return new ConflictException(SLUG_TAKEN);
-  if (namesSignupMembership(err.meta, names)) return new ConflictException(ALREADY_IN_ORG);
-  return new ConflictException('Conflict');
+  if (namesToken(names, 'slug')) {
+    return { action: 'conflict', exception: new ConflictException(SLUG_TAKEN) };
+  }
+  if (namesExplicitSignup(err.meta, names)) {
+    return { action: 'conflict', exception: new ConflictException(ALREADY_IN_ORG) };
+  }
+  if (membershipTargetUnresolvable(err.meta)) return { action: 'recheck-active-signup' };
+  return { action: 'conflict', exception: new ConflictException('Conflict') };
+}
+
+/**
+ * Finish a create-org P2002 outside the aborted transaction.
+ * `readActiveViaSignup` runs only for an unresolvable Membership target,
+ * and it must be a single owner-client read.
+ */
+export async function resolveCreateOrgUniqueViolation(
+  err: unknown,
+  readActiveViaSignup: () => Promise<boolean>,
+): Promise<ConflictException | null> {
+  const mapped = mapCreateOrgUniqueViolation(err);
+  if (!mapped) return null;
+  if (mapped.action === 'conflict') return mapped.exception;
+  const active = await readActiveViaSignup();
+  return new ConflictException(active ? ALREADY_IN_ORG : 'Conflict');
 }
