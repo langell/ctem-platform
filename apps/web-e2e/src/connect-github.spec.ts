@@ -55,7 +55,7 @@ test.describe('connect github', () => {
 
     await page.getByRole('link', { name: 'Assets' }).click();
     await expect(page.getByRole('heading', { name: 'Assets' })).toBeVisible();
-    await expect(page.getByText('payments-api')).toBeVisible();
+    await expect(page.getByText('payments-api', { exact: true })).toBeVisible();
     await expect(page.getByText('github:acme/payments-api')).toBeVisible();
     await expect(page.getByText('web', { exact: true })).toBeVisible();
     expect(await page.content()).not.toContain(TOKEN);
