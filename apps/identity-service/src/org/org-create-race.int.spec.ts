@@ -14,14 +14,14 @@ import { mapCreateOrgUniqueViolation, OrgService } from './org.service';
 
 /**
  * Observed Prisma 6.19.3 P2002 `meta` for partial unique index
- * `memberships_userId_signup_active_key`. The engine does not put the index
- * name in `meta`; `modelName` + `target: ['userId']` is `memberships.userId`.
- * Message text is `Unique constraint failed on the fields: (\`userId\`)`.
+ * `memberships_userId_signup_active_key`. The index name is not in `meta`.
+ * Postgres 16 reports `target: ['userId']` (`fields: (\`userId\`)`).
+ * Postgres 17 (CI) reports `target: null` (`Unique constraint failed on the (not available)`).
  */
-const PRISMA_619_SIGNUP_INDEX_META = {
-  modelName: 'Membership',
-  target: ['userId'],
-} as const;
+const PRISMA_619_SIGNUP_INDEX_METAS: Array<{ modelName: string; target: string[] | null }> = [
+  { modelName: 'Membership', target: ['userId'] },
+  { modelName: 'Membership', target: null },
+];
 
 const ALREADY_IN_ORG = 'User already belongs to an organization';
 const SLUG_TAKEN = 'Organization slug is already taken';
@@ -285,9 +285,10 @@ describe('org create race', () => {
 
       expect(violation).toMatchObject({ code: 'P2002' });
       const meta = (violation as { meta?: unknown }).meta;
-      expect(meta, `observed P2002 meta: ${JSON.stringify(meta)}`).toEqual(
-        PRISMA_619_SIGNUP_INDEX_META,
-      );
+      expect(
+        PRISMA_619_SIGNUP_INDEX_METAS,
+        `observed P2002 meta: ${JSON.stringify(meta)}`,
+      ).toContainEqual(meta);
       expect(mapCreateOrgUniqueViolation(violation)?.message).toBe(ALREADY_IN_ORG);
       expect(captured.text()).toMatch(/prisma:error/);
       expect(captured.text()).toMatch(NOISE);

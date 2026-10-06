@@ -471,7 +471,13 @@ function namesSignupMembership(meta: UniqueViolationMeta | undefined, names: str
   const model = typeof meta?.modelName === 'string' ? meta.modelName : '';
   const target = targetParts(meta?.target);
   const membershipModel = model === 'Membership' || model === 'memberships';
-  return membershipModel && target.length === 1 && target[0] === 'userId';
+  if (!membershipModel) return false;
+  // Postgres 16: Prisma names the partial index as the column it covers.
+  if (target.length === 1 && target[0] === 'userId') return true;
+  // Postgres 17: Prisma 6.19 leaves target null ("not available") when the
+  // unique index is not in the schema. This partial index is the only such
+  // index on Membership.
+  return meta?.target == null;
 }
 
 /**

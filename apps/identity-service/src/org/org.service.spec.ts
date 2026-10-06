@@ -47,6 +47,10 @@ describe('mapCreateOrgUniqueViolation', () => {
       mapCreateOrgUniqueViolation(p2002({ target: 'memberships.userId' })),
       ALREADY_IN_ORG,
     );
+    expectConflict(
+      mapCreateOrgUniqueViolation(p2002({ modelName: 'Membership', target: null })),
+      ALREADY_IN_ORG,
+    );
   });
 
   it('maps any other P2002 to a generic Conflict and never the membership message', () => {
@@ -59,6 +63,14 @@ describe('mapCreateOrgUniqueViolation', () => {
       'Conflict',
     );
     expectConflict(mapCreateOrgUniqueViolation(p2002({})), 'Conflict');
+    expectConflict(
+      mapCreateOrgUniqueViolation(p2002({ modelName: 'Organization', target: null })),
+      'Conflict',
+    );
+    expectConflict(
+      mapCreateOrgUniqueViolation(p2002({ modelName: 'User', target: null })),
+      'Conflict',
+    );
     expect(mapCreateOrgUniqueViolation({ code: 'P2003', meta: { target: ['userId'] } })).toBeNull();
   });
 });
