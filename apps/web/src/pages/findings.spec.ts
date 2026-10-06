@@ -76,7 +76,8 @@ describe('findings list human path', () => {
     expect(findings).not.toMatch(/Paste a JWT/);
     expect(login).not.toMatch(/Paste a JWT/);
     expect(layout).not.toMatch(/<select/);
-    expect(app.match(/path="/g)?.length).toBe(11);
+    expect(app).toMatch(/path="\/integrations"/);
+    expect(app.match(/path="/g)?.length).toBe(12);
   });
 });
 

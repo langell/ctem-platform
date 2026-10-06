@@ -72,6 +72,12 @@ The app connects as `ctem_app` (non-superuser, no `BYPASSRLS`). Migrations run a
 
 Vulnerability intelligence (`vulnerabilities`) is deliberately **not** tenant-scoped — it is a mirror of public data, readable by all, writable only by the feed ingester.
 
+## Integrations
+
+An owner or admin connects GitHub from `/integrations` by pasting `owner`, `ownerType`, and a token (`POST /v1/integrations/github`). The platform `CTEM_GITHUB_API_URL` is the only base URL. The process does not read `GITHUB_API_URL`, because GitHub Actions sets that name to `https://api.github.com` and a workflow step cannot override it. When `NODE_ENV=production` the process refuses to boot unless `CTEM_GITHUB_API_URL` is exactly `https://api.github.com`. Outside production the config schema may allow another http(s) origin so QA can point discovery at the local stub (`docker compose --profile e2e up -d github-stub` or `pnpm nx run @ctem/github-stub:serve`, then `CTEM_GITHUB_API_URL=http://127.0.0.1:4019`).
+
+The token is stored in `integration_secrets` (RLS, cascade delete with the integration) as AES-256-GCM ciphertext. The key is platform env `CREDENTIAL_ENCRYPTION_KEY` (32 bytes, base64), required in production, and it is not on the connector `env:` allowlist. Additional authenticated data is `orgId:integrationId`. `credentialRef` for these rows is `secret:<integrationId>`. The discovery scheduler decrypts inside `withOrg` and hands the plaintext to the connector for that run only. A missing row, a cross-org read, or a failed authentication is a sync error: discovery does not continue and stale assets are not archived. API responses include `hasCredential` and omit the token, `credentialRef`, and ciphertext.
+
 ## Auth
 
 1. Humans authenticate with the IdP and present a bearer JWT. Machine callers present a `ctem_pat_…` token.

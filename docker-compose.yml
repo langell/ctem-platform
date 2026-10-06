@@ -71,6 +71,25 @@ services:
       # confidential ctem-api (demo-token) + public ctem-web (PKCE browser login).
       - ./deploy/keycloak/ctem-realm.json:/opt/keycloak/data/import/ctem-realm.json:ro
 
+  # Local GitHub API stand-in. Not started with the default stack.
+  #   docker compose --profile e2e up -d github-stub
+  # Then set CTEM_GITHUB_API_URL=http://127.0.0.1:4019 for host services when
+  # NODE_ENV is not production. Do not set GITHUB_API_URL: GitHub Actions owns
+  # that name. Production compose pins CTEM_GITHUB_API_URL to
+  # https://api.github.com and does not use this service.
+  github-stub:
+    profiles: ['e2e']
+    image: node:22-alpine
+    working_dir: /stub
+    volumes:
+      - ./apps/github-stub:/stub:ro
+    command: ['node', 'server.mjs']
+    ports: ['4019:4019']
+    environment:
+      PORT: '4019'
+      # Fixed dev key (32 bytes, base64). Host nx dev reads the same value from .env.
+      CREDENTIAL_ENCRYPTION_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+
 volumes:
   pgdata:
   redisdata:

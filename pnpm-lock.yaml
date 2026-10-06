@@ -36,6 +36,9 @@ importers:
       eslint:
         specifier: ^9.18.0
         version: 9.39.5(jiti@2.7.0)
+      globals:
+        specifier: 14.0.0
+        version: 14.0.0
       nx:
         specifier: ^21.0.0
         version: 21.6.11
@@ -229,6 +232,8 @@ importers:
       zod:
         specifier: ^3.24.1
         version: 3.25.76
+
+  apps/github-stub: {}
 
   apps/identity-service:
     dependencies:

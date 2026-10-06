@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { gatewayFetch, GatewayError } from '../api/client';
 import type { Asset, Page } from '../api/types';
 import { exposureBadgeClass, humanize, severityBadgeClass } from '../ui/display';
@@ -62,7 +63,10 @@ export function AssetsPage() {
             <tr>
               <td colSpan={6}>
                 <div className="empty-title">No assets in this organization</div>
-                <p className="muted empty-copy">Discovery connectors fill this list.</p>
+                <p className="muted empty-copy">
+                  Discovery connectors fill this list.{' '}
+                  <Link to="/integrations">Connect GitHub</Link>
+                </p>
               </td>
             </tr>
           ) : null}

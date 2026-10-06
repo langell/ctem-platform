@@ -10,6 +10,7 @@ describe('existing routes only', () => {
     expect(app).toMatch(/path="\/login\/callback"/);
     expect(app).toMatch(/path="\/create-org"/);
     expect(app).toMatch(/path="\/assets"/);
+    expect(app).toMatch(/path="\/integrations"/);
     expect(app).toMatch(/path="\/findings"/);
     expect(app).toMatch(/path="\/findings\/:id"/);
     expect(app).toMatch(/path="\/scans"/);
@@ -21,7 +22,7 @@ describe('existing routes only', () => {
     expect(app).not.toMatch(/dashboard/i);
     expect(app).not.toMatch(/history/i);
     expect(app).not.toMatch(/filter/i);
-    expect(app.match(/path="/g)?.length).toBe(11);
+    expect(app.match(/path="/g)?.length).toBe(12);
   });
 
   it('keeps login outside Layout so the login route has no dock', () => {

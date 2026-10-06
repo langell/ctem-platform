@@ -1,4 +1,5 @@
 import js from '@eslint/js';
+import globals from 'globals';
 import tseslint from '@typescript-eslint/eslint-plugin';
 import tsparser from '@typescript-eslint/parser';
 
@@ -44,5 +45,15 @@ export default [
     // Build tooling and seeds run in Node and print to stdout on purpose.
     files: ['tools/**/*.mjs', '*.config.ts', 'libs/db/prisma/seed.ts'],
     rules: { 'no-undef': 'off', 'no-console': 'off' },
+  },
+  {
+    // The GitHub stub is plain Node. Scope the globals here so the rest of the
+    // repo does not treat `process` / `Buffer` / `URL` as defined.
+    files: ['apps/github-stub/**'],
+    languageOptions: {
+      ecmaVersion: 2023,
+      sourceType: 'module',
+      globals: globals.node,
+    },
   },
 ];

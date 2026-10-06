@@ -31,7 +31,7 @@ DECLARE
     'assets', 'asset_edges', 'integrations', 'scans', 'scan_jobs', 'scan_kicks',
     'findings', 'finding_events', 'sbom_components', 'policies',
     'risk_exceptions', 'audit_logs', 'api_tokens', 'memberships',
-    'membership_invites', 'notification_delivery_claims'
+    'membership_invites', 'notification_delivery_claims', 'integration_secrets'
   ];
 BEGIN
   FOREACH t IN ARRAY tenant_tables LOOP

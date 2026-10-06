@@ -13,6 +13,48 @@ fi
 
 cp -n .env.example .env || true
 
+STUB_URL="http://127.0.0.1:4019"
+ENV_BACKUP="$(mktemp)"
+cp .env "$ENV_BACKUP"
+restore_env() {
+  if [[ -f "${ENV_BACKUP:-}" ]]; then
+    mv "$ENV_BACKUP" .env
+  fi
+}
+trap restore_env EXIT
+
+if ! curl -sf -m 2 "${STUB_URL}/health" >/dev/null 2>&1; then
+  echo "==> GitHub stub (local CTEM_GITHUB_API_URL target)"
+  node apps/github-stub/server.mjs > /tmp/ctem-github-stub.log 2>&1 &
+  echo $! > /tmp/ctem-github-stub.pid
+  stub_ok=0
+  for _ in $(seq 1 50); do
+    if curl -sf -m 2 "${STUB_URL}/health" >/dev/null 2>&1; then
+      stub_ok=1
+      break
+    fi
+    sleep 0.2
+  done
+  if [[ "$stub_ok" != "1" ]]; then
+    echo "GitHub stub did not become ready at ${STUB_URL}" >&2
+    cat /tmp/ctem-github-stub.log >&2 || true
+    exit 1
+  fi
+fi
+
+if grep -q '^CTEM_GITHUB_API_URL=' .env; then
+  tmp_env="$(mktemp)"
+  sed "s|^CTEM_GITHUB_API_URL=.*|CTEM_GITHUB_API_URL=${STUB_URL}|" .env > "$tmp_env"
+  mv "$tmp_env" .env
+else
+  printf '\nCTEM_GITHUB_API_URL=%s\n' "$STUB_URL" >> .env
+fi
+export CTEM_GITHUB_API_URL="$STUB_URL"
+export NX_LOAD_DOT_ENV_FILES=true
+if ! grep -q '^CREDENTIAL_ENCRYPTION_KEY=.\+' .env; then
+  printf '\nCREDENTIAL_ENCRYPTION_KEY=%s\n' 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=' >> .env
+fi
+
 echo "==> infra (Postgres, Redis, NATS, MinIO, Keycloak)"
 docker compose up -d
 
@@ -55,7 +97,7 @@ gateway_up() {
 }
 
 if ! gateway_up; then
-  echo "==> start control plane + scanners"
+  echo "==> start control plane + scanners (CTEM_GITHUB_API_URL=${STUB_URL})"
   pnpm nx run-many -t dev --parallel=16 --exclude=@ctem/web --exclude=@ctem/web-e2e \
     > /tmp/ctem-ui-stack.log 2>&1 &
   echo $! > /tmp/ctem-ui-stack.pid
@@ -76,6 +118,21 @@ if ! gateway_up; then
     tail -150 /tmp/ctem-ui-stack.log >&2 || true
     exit 1
   fi
+  origin_ok=0
+  for _ in $(seq 1 20); do
+    if grep -q '"githubApiOrigin":"http://127.0.0.1:4019"' /tmp/ctem-ui-stack.log; then
+      origin_ok=1
+      break
+    fi
+    sleep 0.25
+  done
+  if [[ "$origin_ok" != "1" ]]; then
+    echo "asset-service did not boot against the GitHub stub (refusing to call api.github.com)" >&2
+    grep githubApiOrigin /tmp/ctem-ui-stack.log >&2 || true
+    exit 1
+  fi
+else
+  echo "gateway already up; this Playwright run expects asset-service CTEM_GITHUB_API_URL=${STUB_URL}" >&2
 fi
 
 if ! curl -sf -m 2 "http://localhost:3000/" >/dev/null; then

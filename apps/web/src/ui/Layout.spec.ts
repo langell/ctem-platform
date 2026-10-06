@@ -21,9 +21,13 @@ describe('session chrome', () => {
     expect(layout).toMatch(/nav-group-label">\s*Ops/);
     expect(layout).toMatch(/nav-group-admin/);
     expect(layout).toMatch(/nav-group-label">\s*Admin/);
-    expect(layout).toMatch(
-      /<NavLink to="\/assets">Assets<\/NavLink>\s*<NavLink to="\/findings">Findings<\/NavLink>\s*<NavLink to="\/scans">Scan<\/NavLink>/,
-    );
+    expect(layout).toMatch(/<NavLink to="\/assets">Assets<\/NavLink>/);
+    expect(layout).toMatch(/canManageIntegrations/);
+    expect(layout).toMatch(/<NavLink to="\/integrations">Integrations<\/NavLink>/);
+    expect(layout.indexOf('to="/assets"')).toBeLessThan(layout.indexOf('to="/integrations"'));
+    expect(layout.indexOf('to="/integrations"')).toBeLessThan(layout.indexOf('to="/findings"'));
+    expect(layout).toMatch(/<NavLink to="\/findings">Findings<\/NavLink>/);
+    expect(layout).toMatch(/<NavLink to="\/scans">Scan<\/NavLink>/);
     expect(layout).toMatch(
       /<NavLink to="\/policies">Policies<\/NavLink>\s*<NavLink to="\/members">Members<\/NavLink>/,
     );

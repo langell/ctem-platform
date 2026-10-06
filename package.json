@@ -30,6 +30,7 @@
     "check:brochure": "node tools/check-brochure.mjs"
   },
   "devDependencies": {
+    "@ctem/testing": "workspace:*",
     "@eslint/js": "^9.18.0",
     "@nx/eslint": "^21.0.0",
     "@nx/js": "^21.0.0",
@@ -37,13 +38,13 @@
     "@typescript-eslint/eslint-plugin": "^8.20.0",
     "@typescript-eslint/parser": "^8.20.0",
     "eslint": "^9.18.0",
+    "globals": "14.0.0",
     "nx": "^21.0.0",
     "prettier": "^3.4.0",
     "prisma": "^6.3.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
-    "vitest": "^3.0.0",
-    "@ctem/testing": "workspace:*"
+    "vitest": "^3.0.0"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

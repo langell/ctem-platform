@@ -7,6 +7,11 @@ export interface DiscoveryContext {
   config: Record<string, unknown>;
   credentialRef: string | null;
   since: Date | null;
+  /**
+   * Plaintext for this run only, set by the scheduler for secret: refs.
+   * Connectors must not log it. Absent for env: refs.
+   */
+  resolvedCredential?: string;
 }
 
 /**

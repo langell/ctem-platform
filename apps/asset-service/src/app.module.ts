@@ -8,6 +8,8 @@ import { CoordinationModule } from '@ctem/coordination';
 import { DbModule } from '@ctem/db';
 import { HealthController } from '@ctem/service-kit';
 import { AssetsController } from './assets/assets.controller';
+import { IntegrationsController } from './integrations/integrations.controller';
+import { IntegrationsService } from './integrations/integrations.service';
 import { AssetsService } from './assets/assets.service';
 import { AssetGraphService } from './assets/asset-graph.service';
 import { ConnectorRegistry } from './connectors/connector.registry';
@@ -36,9 +38,10 @@ import { KubernetesConnector } from './connectors/kubernetes.connector';
     CoordinationModule,
     DbModule,
   ],
-  controllers: [HealthController, AssetsController],
+  controllers: [HealthController, AssetsController, IntegrationsController],
   providers: [
     AssetsService,
+    IntegrationsService,
     AssetGraphService,
     ConnectorRegistry,
     DiscoverySchedulerService,

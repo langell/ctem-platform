@@ -9,6 +9,7 @@ import { HealthController } from '@ctem/service-kit';
 import { GatewayAuthGuard } from './auth/gateway-auth.guard';
 import { ServiceProxy } from './proxy/service-proxy';
 import { AssetsProxyController } from './routes/assets.controller';
+import { IntegrationsProxyController } from './routes/integrations.controller';
 import { ScansProxyController } from './routes/scans.controller';
 import { MetersProxyController } from './routes/meters.controller';
 import { FindingsProxyController } from './routes/findings.controller';
@@ -29,6 +30,7 @@ import { RateLimitMiddleware } from './rate-limit.middleware';
     HealthController,
     SessionController,
     AssetsProxyController,
+    IntegrationsProxyController,
     ScansProxyController,
     MetersProxyController,
     FindingsProxyController,
