@@ -13,10 +13,10 @@ export class GithubApiUrlError extends Error {
 }
 
 export function githubApiUrl(pathAndQuery: string, env: Env = loadEnv()): string {
-  const base = new URL(env.GITHUB_API_URL);
+  const base = new URL(env.CTEM_GITHUB_API_URL);
   const dest = new URL(pathAndQuery, base);
   if (dest.origin !== base.origin) {
-    throw new GithubApiUrlError('Refusing GitHub API host outside the platform GITHUB_API_URL');
+    throw new GithubApiUrlError('Refusing GitHub API host outside the platform GitHub API origin');
   }
   if (dest.username || dest.password) {
     throw new GithubApiUrlError('Refusing GitHub API URL that embeds userinfo');

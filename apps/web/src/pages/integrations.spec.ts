@@ -13,6 +13,8 @@ describe('connect github screen', () => {
     expect(page).toMatch(/integration:manage/);
     expect(page).toMatch(/\/v1\/integrations\/github/);
     expect(page).not.toMatch(/credentialRef/);
-    expect(page).not.toMatch(/GITHUB_API_URL/);
+    // The screen must not name the platform key. GITHUB_API_URL is the Actions
+    // variable this app does not read; CTEM_GITHUB_API_URL is the platform key.
+    expect(page).not.toMatch(/CTEM_GITHUB_API_URL/);
   });
 });

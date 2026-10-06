@@ -6,7 +6,7 @@ import { AppModule } from './app.module';
 const env = loadEnv();
 rootLogger
   .child({ service: 'asset-service' })
-  .info({ githubApiOrigin: new URL(env.GITHUB_API_URL).origin }, 'github api origin');
+  .info({ githubApiOrigin: new URL(env.CTEM_GITHUB_API_URL).origin }, 'github api origin');
 
 void bootstrapService(AppModule, {
   serviceName: 'asset-service',

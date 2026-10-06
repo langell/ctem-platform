@@ -182,7 +182,7 @@ describe('GitHub connect logs and delete', () => {
 
   it('never logs the token on a rejected connect, a successful connect, or discovery', async () => {
     process.env.CREDENTIAL_ENCRYPTION_KEY = KEY;
-    process.env.GITHUB_API_URL = 'https://api.github.com';
+    process.env.CTEM_GITHUB_API_URL = 'https://api.github.com';
     process.env.NODE_ENV = 'test';
     resetEnvCache();
     resetInventoryEgressPolicy();

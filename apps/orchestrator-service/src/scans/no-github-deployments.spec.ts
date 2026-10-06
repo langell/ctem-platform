@@ -58,7 +58,7 @@ afterEach(() => {
   delete process.env.GITHUB_TOKEN;
   delete process.env.GITHUB_CHECKS_TOKEN;
   delete process.env.CTEM_PUBLIC_URL;
-  delete process.env.GITHUB_API_URL;
+  delete process.env.CTEM_GITHUB_API_URL;
 });
 
 describe('GitHub Deployment statuses allowlist — only api.github.com', () => {
@@ -93,8 +93,8 @@ describe('GitHub Deployment statuses allowlist — only api.github.com', () => {
     );
   });
 
-  it('does not follow GITHUB_API_URL or tenant baseUrl off api.github.com', () => {
-    process.env.GITHUB_API_URL = 'https://github.example.com/api/v3';
+  it('does not follow CTEM_GITHUB_API_URL or tenant baseUrl off api.github.com', () => {
+    process.env.CTEM_GITHUB_API_URL = 'https://github.example.com/api/v3';
     expect(deploymentStatusesUrl('acme', 'api', DEPLOYMENT_ID)).toBe(
       'https://api.github.com/repos/acme/api/deployments/4242/statuses',
     );
@@ -279,7 +279,7 @@ describe('concludeDeploy remains source of truth for GET and Deployment status m
     expect(egress).toMatch(/deployments\/\$\{/);
     expect(egress).toMatch(/api\.github\.com/);
     expect(publisher).toMatch(/deploymentStatusesUrl/);
-    expect(publisher).not.toMatch(/check-runs|github\.example\.com|GITHUB_API_URL/);
+    expect(publisher).not.toMatch(/check-runs|github\.example\.com|CTEM_GITHUB_API_URL/);
     expect(egress).not.toMatch(/github\.example\.com/);
     expect(checksPublisher).not.toMatch(/deployments\//);
     expect(publisher).not.toMatch(/deployment-protection|required.reviewers|environment protection/i);
@@ -576,8 +576,8 @@ describe('GithubDeploymentsPublisher', () => {
 });
 
 describe('publishDeploymentStatus never leaves api.github.com', () => {
-  it('POSTs only to https://api.github.com even if GITHUB_API_URL is enterprise', async () => {
-    process.env.GITHUB_API_URL = 'https://github.example.com/api/v3';
+  it('POSTs only to https://api.github.com even if CTEM_GITHUB_API_URL is enterprise', async () => {
+    process.env.CTEM_GITHUB_API_URL = 'https://github.example.com/api/v3';
     const urls: string[] = [];
     vi.stubGlobal(
       'fetch',

@@ -143,7 +143,7 @@ export class VulnFeedService implements OnApplicationBootstrap, OnModuleDestroy 
     const advisories: GhsaAdvisory[] = [];
 
     for (let page = 1; page <= MAX_PAGES; page++) {
-      const url = new URL(`${env.GITHUB_API_URL}/advisories`);
+      const url = new URL(`${env.CTEM_GITHUB_API_URL}/advisories`);
       url.searchParams.set('ecosystem', ghsaEco);
       url.searchParams.set('affects', name);
       url.searchParams.set('type', 'reviewed');
@@ -212,7 +212,7 @@ export class VulnFeedService implements OnApplicationBootstrap, OnModuleDestroy 
     const since = new Date(Date.now() - NVD_RECENT_MS);
     let ingested = 0;
     for (let page = 1; page <= MAX_PAGES; page++) {
-      const url = new URL(`${env.GITHUB_API_URL}/advisories`);
+      const url = new URL(`${env.CTEM_GITHUB_API_URL}/advisories`);
       url.searchParams.set('type', 'reviewed');
       url.searchParams.set('sort', 'updated');
       url.searchParams.set('direction', 'desc');

@@ -12,7 +12,7 @@ afterEach(() => {
 
 describe('githubApiUrl', () => {
   it('accepts the stub origin only when the schema-validated URL is that origin', () => {
-    const env = loadEnv({ NODE_ENV: 'development', GITHUB_API_URL: STUB });
+    const env = loadEnv({ NODE_ENV: 'development', CTEM_GITHUB_API_URL: STUB });
     expect(githubApiUrl('/user', env)).toBe(`${STUB}/user`);
     expect(() => githubApiUrl('https://api.github.com/user', env)).toThrow(
       /Refusing GitHub API host/,
@@ -23,7 +23,7 @@ describe('githubApiUrl', () => {
   });
 
   it('refuses the stub host when the validated URL is api.github.com', () => {
-    const env = loadEnv({ NODE_ENV: 'development', GITHUB_API_URL: 'https://api.github.com' });
+    const env = loadEnv({ NODE_ENV: 'development', CTEM_GITHUB_API_URL: 'https://api.github.com' });
     expect(githubApiUrl('/orgs/acme', env)).toBe('https://api.github.com/orgs/acme');
     expect(() => githubApiUrl(`${STUB}/user`, env)).toThrow(/Refusing GitHub API host/);
   });

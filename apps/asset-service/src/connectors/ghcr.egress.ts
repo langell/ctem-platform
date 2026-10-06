@@ -4,9 +4,10 @@
  * layer/blob pull, which this slice does not do. Tenant config/body/query
  * cannot set a registry or API host.
  *
- * Platform `GITHUB_API_URL` already defaults to `https://api.github.com`.
+ * Platform `CTEM_GITHUB_API_URL` already defaults to `https://api.github.com`.
  * This module canonicalizes that same host; it does not accept a tenant
- * override and does not follow `GITHUB_API_URL` off api.github.com.
+ * override and does not follow `CTEM_GITHUB_API_URL` off api.github.com.
+ * It does not read GITHUB_API_URL: GitHub Actions sets that name.
  */
 
 export const GITHUB_API_HOST = 'api.github.com';

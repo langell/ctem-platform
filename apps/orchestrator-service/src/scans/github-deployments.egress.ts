@@ -1,7 +1,8 @@
 /**
  * GitHub Deployment status egress. Same allowlist as Checks: HTTPS
  * `api.github.com` only (no GitHub Enterprise, no tenant `baseUrl`, no follow
- * of platform `GITHUB_API_URL`). `repository` and `environment` are identifiers
+ * of platform `CTEM_GITHUB_API_URL`). This file does not read GITHUB_API_URL
+ * (GitHub Actions sets that name). `repository` and `environment` are identifiers
  * / status attributes — never endpoints.
  */
 

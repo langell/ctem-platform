@@ -10,7 +10,8 @@ const GitHubOwner = z
 
 /**
  * Tenant connect body. Org, provider, credentialRef, config, and base URL
- * are not accepted — the principal and the platform GITHUB_API_URL supply them.
+ * are not accepted — the principal and the platform CTEM_GITHUB_API_URL supply them.
+ * GITHUB_API_URL is not read: GitHub Actions sets that name.
  */
 export const ConnectGitHubRequest = z
   .object({

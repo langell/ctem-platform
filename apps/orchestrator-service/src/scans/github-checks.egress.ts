@@ -1,7 +1,8 @@
 /**
  * GitHub Checks egress allowlist. The publisher talks to `api.github.com` only
  * (HTTPS/443). No GitHub Enterprise host, no tenant `baseUrl`, and no follow of
- * platform `GITHUB_API_URL` off api.github.com (that env is for discovery stubs).
+ * platform `CTEM_GITHUB_API_URL` off api.github.com (that env is for discovery
+ * stubs). This file does not read GITHUB_API_URL: GitHub Actions sets that name.
  *
  * Tenant scan options cannot choose the API host. `repository` / `owner` /
  * `repo` are identifiers in the path, not endpoints.

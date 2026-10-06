@@ -35,6 +35,8 @@ format `.env.example` uses). Prod compose references it as
 `${CREDENTIAL_ENCRYPTION_KEY:?}`, so an empty value fails before the
 containers start.
 
+`CTEM_GITHUB_API_URL` is the platform GitHub API base. Do not set `GITHUB_API_URL`: GitHub Actions reserves that name and a workflow step cannot override it. Production compose sets `CTEM_GITHUB_API_URL` to exactly `https://api.github.com`. When `NODE_ENV=production`, services refuse to boot on any other value.
+
 Then open `https://$CTEM_DOMAIN`, log in as `analyst` with `DEMO_PASSWORD`.
 
 For curl: `OIDC_ISSUER=https://$AUTH_DOMAIN/realms/ctem OIDC_CLIENT_SECRET=$OIDC_API_CLIENT_SECRET DEMO_PASSWORD=... ./tools/demo-token.sh`.

@@ -53,7 +53,7 @@ afterEach(() => {
   delete process.env.GITHUB_TOKEN;
   delete process.env.GITHUB_CHECKS_TOKEN;
   delete process.env.CTEM_PUBLIC_URL;
-  delete process.env.GITHUB_API_URL;
+  delete process.env.CTEM_GITHUB_API_URL;
 });
 
 describe('GitHub Checks allowlist — only api.github.com', () => {
@@ -84,8 +84,8 @@ describe('GitHub Checks allowlist — only api.github.com', () => {
     expect(() => allowlistedGithubApiUrl('https://api.github.com:8443/repos/acme/api/check-runs')).toThrow(/port/);
   });
 
-  it('does not follow GITHUB_API_URL or tenant baseUrl off api.github.com', () => {
-    process.env.GITHUB_API_URL = 'https://github.example.com/api/v3';
+  it('does not follow CTEM_GITHUB_API_URL or tenant baseUrl off api.github.com', () => {
+    process.env.CTEM_GITHUB_API_URL = 'https://github.example.com/api/v3';
     expect(githubChecksApiUrl('/repos/acme/api/check-runs')).toBe(
       'https://api.github.com/repos/acme/api/check-runs',
     );
@@ -226,7 +226,7 @@ describe('concludeScan remains source of truth for GET and Checks mapping', () =
     expect(egress).toMatch(/check-runs/);
     expect(egress).toMatch(/api\.github\.com/);
     expect(publisher).toMatch(/checkRunsUrl|listCheckRunsUrl|checkRunUrl/);
-    expect(publisher).not.toMatch(/github\.example\.com|GITHUB_API_URL/);
+    expect(publisher).not.toMatch(/github\.example\.com|CTEM_GITHUB_API_URL/);
     expect(egress).not.toMatch(/github\.example\.com/);
   });
 });
@@ -438,8 +438,8 @@ describe('GithubChecksPublisher', () => {
 });
 
 describe('upsertCheckRun never leaves api.github.com', () => {
-  it('POSTs only to https://api.github.com even if GITHUB_API_URL is enterprise', async () => {
-    process.env.GITHUB_API_URL = 'https://github.example.com/api/v3';
+  it('POSTs only to https://api.github.com even if CTEM_GITHUB_API_URL is enterprise', async () => {
+    process.env.CTEM_GITHUB_API_URL = 'https://github.example.com/api/v3';
     const urls: string[] = [];
     vi.stubGlobal(
       'fetch',

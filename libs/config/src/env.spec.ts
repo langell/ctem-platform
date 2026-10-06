@@ -14,16 +14,18 @@ afterEach(() => {
   resetEnvCache();
 });
 
-describe('GITHUB_API_URL production gate', () => {
+describe('CTEM_GITHUB_API_URL production gate', () => {
   it('rejects the stub URL when NODE_ENV is production', () => {
     const parsed = EnvSchema.safeParse({
       NODE_ENV: 'production',
-      GITHUB_API_URL: STUB_URL,
+      CTEM_GITHUB_API_URL: STUB_URL,
       CREDENTIAL_ENCRYPTION_KEY: DEV_KEY,
     });
     expect(parsed.success).toBe(false);
     if (!parsed.success) {
-      const issue = parsed.error.issues.find((item) => item.path.join('.') === 'GITHUB_API_URL');
+      const issue = parsed.error.issues.find(
+        (item) => item.path.join('.') === 'CTEM_GITHUB_API_URL',
+      );
       expect(issue?.message).toContain(GITHUB_API_PRODUCTION_URL);
       expect(issue?.message).toContain('production');
     }
@@ -32,7 +34,7 @@ describe('GITHUB_API_URL production gate', () => {
   it('rejects a github-stub hostname when NODE_ENV is production', () => {
     const parsed = EnvSchema.safeParse({
       NODE_ENV: 'production',
-      GITHUB_API_URL: 'http://github-stub:4019',
+      CTEM_GITHUB_API_URL: 'http://github-stub:4019',
       CREDENTIAL_ENCRYPTION_KEY: DEV_KEY,
     });
     expect(parsed.success).toBe(false);
@@ -41,17 +43,18 @@ describe('GITHUB_API_URL production gate', () => {
   it('accepts exactly https://api.github.com in production when the key is set', () => {
     const parsed = EnvSchema.safeParse({
       NODE_ENV: 'production',
-      GITHUB_API_URL: GITHUB_API_PRODUCTION_URL,
+      CTEM_GITHUB_API_URL: GITHUB_API_PRODUCTION_URL,
       CREDENTIAL_ENCRYPTION_KEY: DEV_KEY,
     });
     expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.CTEM_GITHUB_API_URL).toBe(GITHUB_API_PRODUCTION_URL);
   });
 
   it('fails closed at boot when the production encryption key is missing', () => {
     expect(() =>
       loadEnv({
         NODE_ENV: 'production',
-        GITHUB_API_URL: GITHUB_API_PRODUCTION_URL,
+        CTEM_GITHUB_API_URL: GITHUB_API_PRODUCTION_URL,
       }),
     ).toThrow(/CREDENTIAL_ENCRYPTION_KEY/);
   });
@@ -59,50 +62,34 @@ describe('GITHUB_API_URL production gate', () => {
   it('allows the loopback stub when NODE_ENV is not production', () => {
     const parsed = EnvSchema.safeParse({
       NODE_ENV: 'development',
-      GITHUB_API_URL: STUB_URL,
+      CTEM_GITHUB_API_URL: STUB_URL,
     });
     expect(parsed.success).toBe(true);
-    if (parsed.success) expect(parsed.data.GITHUB_API_URL).toBe(STUB_URL);
+    if (parsed.success) expect(parsed.data.CTEM_GITHUB_API_URL).toBe(STUB_URL);
   });
 
   it('does not boot production config that points at the stub', () => {
     expect(() =>
       loadEnv({
         NODE_ENV: 'production',
-        GITHUB_API_URL: STUB_URL,
+        CTEM_GITHUB_API_URL: STUB_URL,
         CREDENTIAL_ENCRYPTION_KEY: DEV_KEY,
       }),
     ).toThrow(/api\.github\.com/);
   });
 
-  it('uses CTEM_GITHUB_API_URL outside production even when GITHUB_API_URL is the public API', () => {
+  it('ignores the Actions GitHub API variable and keeps the platform key', () => {
+    // GitHub Actions sets GITHUB_API_URL; that name is not in this schema.
+    const actionsName = 'GITHUB_' + 'API_URL';
     const parsed = EnvSchema.safeParse({
       NODE_ENV: 'development',
-      GITHUB_API_URL: GITHUB_API_PRODUCTION_URL,
-      CTEM_GITHUB_API_URL: STUB_URL,
-    });
-    expect(parsed.success).toBe(true);
-    if (parsed.success) expect(parsed.data.GITHUB_API_URL).toBe(STUB_URL);
-  });
-
-  it('ignores CTEM_GITHUB_API_URL in production', () => {
-    const parsed = EnvSchema.safeParse({
-      NODE_ENV: 'production',
-      GITHUB_API_URL: GITHUB_API_PRODUCTION_URL,
-      CTEM_GITHUB_API_URL: STUB_URL,
-      CREDENTIAL_ENCRYPTION_KEY: DEV_KEY,
-    });
-    expect(parsed.success).toBe(true);
-    if (parsed.success) expect(parsed.data.GITHUB_API_URL).toBe(GITHUB_API_PRODUCTION_URL);
-  });
-
-  it('does not let CTEM_GITHUB_API_URL satisfy the production URL gate', () => {
-    const parsed = EnvSchema.safeParse({
-      NODE_ENV: 'production',
-      GITHUB_API_URL: STUB_URL,
+      [actionsName]: STUB_URL,
       CTEM_GITHUB_API_URL: GITHUB_API_PRODUCTION_URL,
-      CREDENTIAL_ENCRYPTION_KEY: DEV_KEY,
     });
-    expect(parsed.success).toBe(false);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.CTEM_GITHUB_API_URL).toBe(GITHUB_API_PRODUCTION_URL);
+      expect(parsed.data).not.toHaveProperty(actionsName);
+    }
   });
 });

@@ -74,8 +74,9 @@ services:
   # Local GitHub API stand-in. Not started with the default stack.
   #   docker compose --profile e2e up -d github-stub
   # Then set CTEM_GITHUB_API_URL=http://127.0.0.1:4019 for host services when
-  # NODE_ENV is not production. Production ignores that variable. Production
-  # compose does not use this service.
+  # NODE_ENV is not production. Do not set GITHUB_API_URL: GitHub Actions owns
+  # that name. Production compose pins CTEM_GITHUB_API_URL to
+  # https://api.github.com and does not use this service.
   github-stub:
     profiles: ['e2e']
     image: node:22-alpine

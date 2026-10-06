@@ -190,7 +190,7 @@ export class IntegrationsService {
 
 function githubOrigin(): string {
   try {
-    return new URL(loadEnv().GITHUB_API_URL).origin;
+    return new URL(loadEnv().CTEM_GITHUB_API_URL).origin;
   } catch {
     return 'invalid';
   }
