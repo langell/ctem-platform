@@ -409,6 +409,13 @@ tbody tr.editing:hover {
   font-size: 12px;
 }
 
+.asset-id code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: inherit;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
 .error {
   color: var(--danger);
 }

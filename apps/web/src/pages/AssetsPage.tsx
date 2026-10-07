@@ -44,6 +44,9 @@ export function AssetsPage() {
                 <td>
                   <strong>{a.name}</strong>
                   <div className="muted small">{a.externalKey}</div>
+                  <div className="muted small asset-id">
+                    <code>{a.id}</code>
+                  </div>
                 </td>
                 <td>{humanize(a.kind)}</td>
                 <td>{humanize(a.source)}</td>

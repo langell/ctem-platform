@@ -44,6 +44,17 @@ describe('assets human path', () => {
     expect(assets).not.toMatch(/a\.exposure === 'internet_facing'/);
   });
 
+  it('shows each asset id under the name without dropping externalKey', () => {
+    const nameCell = assets.slice(
+      assets.indexOf('<strong>{a.name}</strong>'),
+      assets.indexOf('<td>{humanize(a.kind)}</td>'),
+    );
+    expect(nameCell).toContain('{a.externalKey}');
+    expect(nameCell).toMatch(/className="muted small asset-id"/);
+    expect(nameCell).toMatch(/<code>\{a\.id\}<\/code>/);
+    expect(assets).not.toMatch(/<th>\s*Id\s*<\/th>/i);
+  });
+
   it('keeps rows non-clickable with no asset detail route', () => {
     expect(assets).not.toMatch(/clickable/);
     expect(assets).not.toMatch(/onClick/);
