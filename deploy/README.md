@@ -38,7 +38,7 @@ containers start.
 
 `CTEM_GITHUB_API_URL` is the platform GitHub API base. Do not set `GITHUB_API_URL`: GitHub Actions reserves that name and a workflow step cannot override it. Production compose sets `CTEM_GITHUB_API_URL` to exactly `https://api.github.com`. When `NODE_ENV=production`, services refuse to boot on any other value.
 
-Invite mail uses generic SMTP (nodemailer). Production compose leaves `CTEM_MAIL_TRANSPORT` at `none` until credentials exist. The Postmark endpoint is `CTEM_SMTP_HOST=smtp.postmarkapp.com`, `CTEM_SMTP_PORT=587`, `CTEM_SMTP_SECURITY=starttls`. Allow egress to `smtp.postmarkapp.com:587`. On the Postmark server stream, turn click tracking and open tracking off so the invite link stays the original URL. `CTEM_MAIL_FROM` stays unset until the sender address is chosen. `CTEM_ORIGIN` is `https://$CTEM_DOMAIN` (no path). Production boot rejects `CTEM_SMTP_SECURITY=none`, an http origin, and a missing SMTP user or password when transport is `smtp`.
+Invite mail uses generic SMTP (nodemailer). Production compose leaves `CTEM_MAIL_TRANSPORT` at `none` until credentials exist. The Postmark endpoint is `CTEM_SMTP_HOST=smtp.postmarkapp.com`, `CTEM_SMTP_PORT=587`, `CTEM_SMTP_SECURITY=starttls`. Allow egress to `smtp.postmarkapp.com:587`. On the Postmark server stream, turn click tracking and open tracking off so the invite link stays the original URL. `CTEM_MAIL_FROM` is `CTEM <invites@ctemlabs.dev>`. `CTEM_ORIGIN` is `https://$CTEM_DOMAIN` (no path). Production boot rejects `CTEM_SMTP_SECURITY=none`, an http origin, and a missing SMTP user or password when transport is `smtp`.
 
 Then open `https://$CTEM_DOMAIN`, log in as `analyst` with `DEMO_PASSWORD`.
 

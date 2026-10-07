@@ -64,7 +64,8 @@ x-app-env: &app-env
   # Invite links. Same public origin realm-init already publishes. https, no path.
   CTEM_ORIGIN: https://${CTEM_DOMAIN:?}
   # Generic SMTP via nodemailer. Transport stays none until Postmark credentials
-  # and a sender address are set. Host smtp.postmarkapp.com, port 587, STARTTLS.
+  # are set. Host smtp.postmarkapp.com, port 587, STARTTLS.
+  # CTEM_MAIL_FROM is CTEM <invites@ctemlabs.dev>.
   # Turn click and open tracking off on that Postmark stream so the invite link
   # stays on CTEM_ORIGIN.
   CTEM_MAIL_TRANSPORT: ${CTEM_MAIL_TRANSPORT:-none}
