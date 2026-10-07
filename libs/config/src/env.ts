@@ -22,18 +22,10 @@ export function decodeCredentialEncryptionKey(value: string | undefined): Buffer
 }
 
 /**
- * Non-production CTEM_GITHUB_API_URL may be the public API or a local stub.
- * Production is an exact string match — the stub host is not special-cased here.
- * The platform does not read GITHUB_API_URL: GitHub Actions sets that name to
- * https://api.github.com and a workflow step cannot override it.
+ * Origin-only http(s) URL: no userinfo, path, query, or fragment.
+ * Shared by non-production CTEM_GITHUB_API_URL and by CTEM_ORIGIN.
  */
-export function githubApiUrlIssue(url: string, nodeEnv: string): string | null {
-  if (nodeEnv === 'production') {
-    if (url !== GITHUB_API_PRODUCTION_URL) {
-      return `must be exactly ${GITHUB_API_PRODUCTION_URL} when NODE_ENV=production`;
-    }
-    return null;
-  }
+export function originOnlyIssue(url: string): string | null {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -47,6 +39,35 @@ export function githubApiUrlIssue(url: string, nodeEnv: string): string | null {
   if (!parsed.hostname) return 'must include a host';
   if (parsed.pathname !== '/' && parsed.pathname !== '') return 'must not include a path';
   if (parsed.search || parsed.hash) return 'must not include a query or fragment';
+  return null;
+}
+
+/**
+ * Non-production CTEM_GITHUB_API_URL may be the public API or a local stub.
+ * Production is an exact string match — the stub host is not special-cased here.
+ * The platform does not read GITHUB_API_URL: GitHub Actions sets that name to
+ * https://api.github.com and a workflow step cannot override it.
+ */
+export function githubApiUrlIssue(url: string, nodeEnv: string): string | null {
+  if (nodeEnv === 'production') {
+    if (url !== GITHUB_API_PRODUCTION_URL) {
+      return `must be exactly ${GITHUB_API_PRODUCTION_URL} when NODE_ENV=production`;
+    }
+    return null;
+  }
+  return originOnlyIssue(url);
+}
+
+/**
+ * Public web origin for invite links. Same origin-only checks as
+ * githubApiUrlIssue, and https when NODE_ENV=production.
+ */
+export function ctemOriginIssue(url: string, nodeEnv: string): string | null {
+  const issue = originOnlyIssue(url);
+  if (issue) return issue;
+  if (nodeEnv === 'production' && new URL(url).protocol !== 'https:') {
+    return 'must use https when NODE_ENV=production';
+  }
   return null;
 }
 
@@ -123,6 +144,29 @@ export const EnvSchema = z
       .number()
       .int()
       .default(15 * 60 * 1000),
+
+    /**
+     * Public web origin for invite links (`${CTEM_ORIGIN}/invite#token=…`).
+     * Origin only. Production must be https.
+     */
+    CTEM_ORIGIN: z.string().default('http://localhost:3000'),
+    /**
+     * Invite mail. `none` sends nothing. `smtp` is a generic SMTP adapter
+     * (nodemailer). The schema does not special-case a provider host.
+     */
+    CTEM_MAIL_TRANSPORT: z.enum(['none', 'smtp']).default('none'),
+    CTEM_SMTP_HOST: z.string().default('localhost'),
+    CTEM_SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(1025),
+    /** Local Mailpit uses `none`. Production must be `starttls` or `tls`. */
+    CTEM_SMTP_SECURITY: z.enum(['none', 'starttls', 'tls']).default('none'),
+    CTEM_SMTP_USER: z.string().optional(),
+    /** Secret. Required in production when CTEM_MAIL_TRANSPORT=smtp. */
+    CTEM_SMTP_PASSWORD: z.string().optional(),
+    /**
+     * From address. The dev stub is local. Production does not assume a
+     * sender; set CTEM_MAIL_FROM when one is chosen.
+     */
+    CTEM_MAIL_FROM: z.string().default('CTEM <invites@localhost>'),
   })
   .superRefine((env, ctx) => {
     const urlIssue = githubApiUrlIssue(env.CTEM_GITHUB_API_URL, env.NODE_ENV);
@@ -146,6 +190,53 @@ export const EnvSchema = z
         path: ['CREDENTIAL_ENCRYPTION_KEY'],
         message: 'must be 32 bytes, base64',
       });
+    }
+    const originIssue = ctemOriginIssue(env.CTEM_ORIGIN, env.NODE_ENV);
+    if (originIssue) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['CTEM_ORIGIN'],
+        message: originIssue,
+      });
+    }
+    if (env.NODE_ENV === 'production' && env.CTEM_SMTP_SECURITY === 'none') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['CTEM_SMTP_SECURITY'],
+        message: 'must be starttls or tls when NODE_ENV=production',
+      });
+    }
+    if (env.CTEM_MAIL_TRANSPORT === 'smtp') {
+      if (!env.CTEM_SMTP_HOST.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['CTEM_SMTP_HOST'],
+          message: 'required when CTEM_MAIL_TRANSPORT=smtp',
+        });
+      }
+      if (!env.CTEM_MAIL_FROM.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['CTEM_MAIL_FROM'],
+          message: 'required when CTEM_MAIL_TRANSPORT=smtp',
+        });
+      }
+      if (env.NODE_ENV === 'production') {
+        if (!env.CTEM_SMTP_USER?.trim()) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['CTEM_SMTP_USER'],
+            message: 'required in production when CTEM_MAIL_TRANSPORT=smtp',
+          });
+        }
+        if (!env.CTEM_SMTP_PASSWORD?.trim()) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['CTEM_SMTP_PASSWORD'],
+            message: 'required in production when CTEM_MAIL_TRANSPORT=smtp',
+          });
+        }
+      }
     }
   });
 

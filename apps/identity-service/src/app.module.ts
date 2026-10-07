@@ -12,9 +12,10 @@ import { CreateOrgController } from './org/create-org.controller';
 import { OrgService } from './org/org.service';
 import { ApiTokenService } from './tokens/api-token.service';
 import { ApiTokenController } from './tokens/api-token.controller';
+import { MailModule } from './mail/mail.module';
 
 @Module({
-  imports: [CtemConfigModule, ObservabilityModule, AuthModule, EventsModule, DbModule],
+  imports: [CtemConfigModule, ObservabilityModule, AuthModule, EventsModule, DbModule, MailModule],
   controllers: [
     HealthController,
     OrgController,

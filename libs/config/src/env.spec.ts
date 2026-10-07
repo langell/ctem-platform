@@ -45,6 +45,8 @@ describe('CTEM_GITHUB_API_URL production gate', () => {
       NODE_ENV: 'production',
       CTEM_GITHUB_API_URL: GITHUB_API_PRODUCTION_URL,
       CREDENTIAL_ENCRYPTION_KEY: DEV_KEY,
+      CTEM_ORIGIN: 'https://ctem.example.com',
+      CTEM_SMTP_SECURITY: 'starttls',
     });
     expect(parsed.success).toBe(true);
     if (parsed.success) expect(parsed.data.CTEM_GITHUB_API_URL).toBe(GITHUB_API_PRODUCTION_URL);
@@ -91,5 +93,154 @@ describe('CTEM_GITHUB_API_URL production gate', () => {
       expect(parsed.data.CTEM_GITHUB_API_URL).toBe(GITHUB_API_PRODUCTION_URL);
       expect(parsed.data).not.toHaveProperty(actionsName);
     }
+  });
+});
+
+function issueMessage(
+  parsed: ReturnType<typeof EnvSchema.safeParse>,
+  path: string,
+): string | undefined {
+  if (parsed.success) return undefined;
+  return parsed.error.issues.find((item) => item.path.join('.') === path)?.message;
+}
+
+describe('invite mail env', () => {
+  const productionBase = {
+    NODE_ENV: 'production' as const,
+    CTEM_GITHUB_API_URL: GITHUB_API_PRODUCTION_URL,
+    CREDENTIAL_ENCRYPTION_KEY: DEV_KEY,
+    CTEM_ORIGIN: 'https://ctem.example.com',
+    CTEM_SMTP_SECURITY: 'starttls' as const,
+  };
+
+  it('defaults to a local origin, Mailpit SMTP settings, and a silent transport', () => {
+    const parsed = EnvSchema.safeParse({});
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    expect(parsed.data.CTEM_ORIGIN).toBe('http://localhost:3000');
+    expect(parsed.data.CTEM_MAIL_TRANSPORT).toBe('none');
+    expect(parsed.data.CTEM_SMTP_HOST).toBe('localhost');
+    expect(parsed.data.CTEM_SMTP_PORT).toBe(1025);
+    expect(parsed.data.CTEM_SMTP_SECURITY).toBe('none');
+    expect(parsed.data.CTEM_SMTP_USER).toBeUndefined();
+    expect(parsed.data.CTEM_SMTP_PASSWORD).toBeUndefined();
+    expect(parsed.data.CTEM_MAIL_FROM).toBe('CTEM <invites@localhost>');
+  });
+
+  it('coerces the SMTP port', () => {
+    const parsed = EnvSchema.safeParse({ CTEM_SMTP_PORT: '1025' });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.CTEM_SMTP_PORT).toBe(1025);
+  });
+
+  it('rejects an SMTP port outside 1-65535', () => {
+    expect(EnvSchema.safeParse({ CTEM_SMTP_PORT: '0' }).success).toBe(false);
+    expect(EnvSchema.safeParse({ CTEM_SMTP_PORT: '70000' }).success).toBe(false);
+  });
+
+  it('rejects a mail transport other than none or smtp', () => {
+    expect(EnvSchema.safeParse({ CTEM_MAIL_TRANSPORT: 'postmark' }).success).toBe(false);
+  });
+
+  it('allows http origin, security none, and no SMTP credentials outside production', () => {
+    const parsed = EnvSchema.safeParse({
+      NODE_ENV: 'development',
+      CTEM_ORIGIN: 'http://localhost:3000',
+      CTEM_MAIL_TRANSPORT: 'smtp',
+      CTEM_SMTP_SECURITY: 'none',
+      CTEM_MAIL_FROM: 'CTEM <invites@localhost>',
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it('rejects an origin with a path, query, fragment, or userinfo', () => {
+    for (const origin of [
+      'http://localhost:3000/app',
+      'http://localhost:3000?x=1',
+      'http://localhost:3000#token=secret',
+      'http://user:pass@localhost:3000',
+      'ftp://localhost:3000',
+      'not a url',
+    ]) {
+      const parsed = EnvSchema.safeParse({ CTEM_ORIGIN: origin });
+      expect(parsed.success, origin).toBe(false);
+      expect(issueMessage(parsed, 'CTEM_ORIGIN')).toBeTruthy();
+    }
+  });
+
+  it('rejects an http origin in production', () => {
+    const parsed = EnvSchema.safeParse({
+      ...productionBase,
+      CTEM_ORIGIN: 'http://ctem.example.com',
+    });
+    expect(parsed.success).toBe(false);
+    expect(issueMessage(parsed, 'CTEM_ORIGIN')).toContain('https');
+  });
+
+  it('rejects SMTP security none in production even when mail is disabled', () => {
+    const parsed = EnvSchema.safeParse({
+      ...productionBase,
+      CTEM_MAIL_TRANSPORT: 'none',
+      CTEM_SMTP_SECURITY: 'none',
+    });
+    expect(parsed.success).toBe(false);
+    expect(issueMessage(parsed, 'CTEM_SMTP_SECURITY')).toContain('starttls');
+  });
+
+  it('boots production with mail disabled and no provider credentials', () => {
+    const parsed = EnvSchema.safeParse({
+      ...productionBase,
+      CTEM_MAIL_TRANSPORT: 'none',
+      CTEM_SMTP_HOST: 'smtp.postmarkapp.com',
+      CTEM_SMTP_PORT: '587',
+    });
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    expect(parsed.data.CTEM_SMTP_USER).toBeUndefined();
+    expect(parsed.data.CTEM_SMTP_PASSWORD).toBeUndefined();
+  });
+
+  it('requires SMTP user and password in production when transport is smtp', () => {
+    const missing = EnvSchema.safeParse({
+      ...productionBase,
+      CTEM_MAIL_TRANSPORT: 'smtp',
+      CTEM_SMTP_HOST: 'smtp.postmarkapp.com',
+      CTEM_SMTP_PORT: 587,
+      CTEM_MAIL_FROM: 'CTEM <invites@localhost>',
+    });
+    expect(missing.success).toBe(false);
+    expect(issueMessage(missing, 'CTEM_SMTP_USER')).toContain('production');
+    expect(issueMessage(missing, 'CTEM_SMTP_PASSWORD')).toContain('production');
+
+    const ready = EnvSchema.safeParse({
+      ...productionBase,
+      CTEM_MAIL_TRANSPORT: 'smtp',
+      CTEM_SMTP_HOST: 'smtp.example.com',
+      CTEM_SMTP_PORT: 587,
+      CTEM_SMTP_USER: 'server-token',
+      CTEM_SMTP_PASSWORD: 'server-token',
+      CTEM_MAIL_FROM: 'CTEM <invites@localhost>',
+    });
+    expect(ready.success).toBe(true);
+  });
+
+  it('requires a from address and host when transport is smtp', () => {
+    const parsed = EnvSchema.safeParse({
+      NODE_ENV: 'development',
+      CTEM_MAIL_TRANSPORT: 'smtp',
+      CTEM_SMTP_HOST: '  ',
+      CTEM_MAIL_FROM: '',
+    });
+    expect(parsed.success).toBe(false);
+    expect(issueMessage(parsed, 'CTEM_SMTP_HOST')).toContain('smtp');
+    expect(issueMessage(parsed, 'CTEM_MAIL_FROM')).toContain('smtp');
+  });
+
+  it('accepts tls as a production SMTP security mode', () => {
+    const parsed = EnvSchema.safeParse({
+      ...productionBase,
+      CTEM_SMTP_SECURITY: 'tls',
+    });
+    expect(parsed.success).toBe(true);
   });
 });
