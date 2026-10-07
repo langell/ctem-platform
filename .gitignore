@@ -25,3 +25,8 @@ playwright/.cache/
 # Vercel local project link (created by the CLI)
 .vercel/
 .vercel
+
+# QA local scratch (evidence, tokens, temp scripts)
+.qa-tmp/
+# agent-dora HTML/metrics output
+agent-dora-report/
