@@ -3,9 +3,7 @@ name: CI
 on:
   pull_request:
   push:
-    # This branch is listed so the push runs CI without a pull request.
-    # pull_request already covers it once a PR exists.
-    branches: [main, cursor/e2e-github-stub-91cc]
+    branches: [main]
 
 concurrency:
   group: ci-${{ github.ref }}
