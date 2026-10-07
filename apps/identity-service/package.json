@@ -13,25 +13,27 @@
     "port": 3001
   },
   "dependencies": {
+    "@ctem/auth": "workspace:*",
+    "@ctem/config": "workspace:*",
+    "@ctem/contracts": "workspace:*",
+    "@ctem/db": "workspace:*",
+    "@ctem/events": "workspace:*",
+    "@ctem/observability": "workspace:*",
+    "@ctem/service-kit": "workspace:*",
     "@nestjs/common": "^11.0.0",
-    "@types/express": "^5.0.0",
-    "zod": "^3.24.1",
     "@nestjs/core": "^11.0.0",
     "@nestjs/platform-express": "^11.0.0",
     "@nestjs/swagger": "^11.0.0",
     "@nestjs/terminus": "^11.0.0",
+    "@prisma/client": "^6.3.0",
+    "@types/express": "^5.0.0",
+    "nodemailer": "^10.0.15",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
-    "@ctem/contracts": "workspace:*",
-    "@ctem/config": "workspace:*",
-    "@ctem/observability": "workspace:*",
-    "@ctem/auth": "workspace:*",
-    "@ctem/db": "workspace:*",
-    "@ctem/events": "workspace:*",
-    "@ctem/service-kit": "workspace:*",
-    "@prisma/client": "^6.3.0"
+    "zod": "^3.24.1"
   },
   "devDependencies": {
-    "@ctem/testing": "workspace:*"
+    "@ctem/testing": "workspace:*",
+    "@types/nodemailer": "^8.0.2"
   }
 }

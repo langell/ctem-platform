@@ -61,6 +61,19 @@ x-app-env: &app-env
   JIRA_API_TOKEN: ${JIRA_API_TOKEN:-}
   JIRA_PROJECT_KEY: ${JIRA_PROJECT_KEY:-}
   NVD_API_KEY: ${NVD_API_KEY:-}
+  # Invite links. Same public origin realm-init already publishes. https, no path.
+  CTEM_ORIGIN: https://${CTEM_DOMAIN:?}
+  # Generic SMTP via nodemailer. Transport stays none until Postmark credentials
+  # and a sender address are set. Host smtp.postmarkapp.com, port 587, STARTTLS.
+  # Turn click and open tracking off on that Postmark stream so the invite link
+  # stays on CTEM_ORIGIN.
+  CTEM_MAIL_TRANSPORT: ${CTEM_MAIL_TRANSPORT:-none}
+  CTEM_SMTP_HOST: ${CTEM_SMTP_HOST:-smtp.postmarkapp.com}
+  CTEM_SMTP_PORT: ${CTEM_SMTP_PORT:-587}
+  CTEM_SMTP_SECURITY: ${CTEM_SMTP_SECURITY:-starttls}
+  CTEM_SMTP_USER: ${CTEM_SMTP_USER:-}
+  CTEM_SMTP_PASSWORD: ${CTEM_SMTP_PASSWORD:-}
+  CTEM_MAIL_FROM: ${CTEM_MAIL_FROM:-}
   SCANNER_CONCURRENCY: ${SCANNER_CONCURRENCY:-4}
   SCANNER_JOB_TIMEOUT_MS: ${SCANNER_JOB_TIMEOUT_MS:-900000}
 

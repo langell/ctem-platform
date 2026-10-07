@@ -71,6 +71,14 @@ services:
       # confidential ctem-api (demo-token) + public ctem-web (PKCE browser login).
       - ./deploy/keycloak/ctem-realm.json:/opt/keycloak/data/import/ctem-realm.json:ro
 
+  # Local SMTP catcher for invite mail. UI: http://127.0.0.1:8025.
+  # Default profile so `docker compose up -d` starts it. Not in
+  # docker-compose.prod.yml. The required CI job starts named infra only
+  # and does not send real mail. Digest-pinned; no :latest.
+  mailpit:
+    image: axllent/mailpit:v1.31.4@sha256:b68349e3a014b90c5610bfb26b2ae36f3892d7b8cf25ee140c6c71c98d2fcf48
+    ports: ['127.0.0.1:1025:1025', '127.0.0.1:8025:8025']
+
   # Local GitHub API stand-in. Not started with the default stack.
   #   docker compose --profile e2e up -d github-stub
   # Then set CTEM_GITHUB_API_URL=http://127.0.0.1:4019 for host services when
