@@ -36,6 +36,19 @@ const repos = [
   },
 ];
 
+// E2E smoke inventories this public repo with no token (GET /users/langell/repos).
+const scanTarget = {
+  name: 'ctem-scan-target',
+  full_name: 'langell/ctem-scan-target',
+  private: false,
+  archived: false,
+  fork: false,
+  html_url: 'https://github.com/langell/ctem-scan-target',
+  default_branch: 'main',
+  language: 'JavaScript',
+  owner: { login: 'langell' },
+};
+
 const seen = [];
 
 function send(req, res, status, body) {
@@ -104,6 +117,10 @@ const server = createServer((req, res) => {
       return;
     }
     send(req, res, 200, repos);
+    return;
+  }
+  if (url.pathname === '/users/langell/repos') {
+    send(req, res, 200, [scanTarget]);
     return;
   }
   send(req, res, 404, { message: 'Not Found' });

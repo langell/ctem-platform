@@ -57,7 +57,7 @@ the required lint/unit/int/e2e job.
 machine-token issuance → gateway PAT auth → asset registration → cross-org
 isolation → permission denial → source SCA fail-closed (no cloneable repo) → SBOM ingest
 producing real findings for `express@4.17.1` → feed mirror population →
-threat-intel refresh (KEV/EPSS) enriching those findings → GitHub discovery of a live fixture → org-B isolation after discovery → findings listing.
+threat-intel refresh (KEV/EPSS) enriching those findings → GitHub discovery of the local stub fixture (`CTEM_GITHUB_API_URL`, port 4019 — not api.github.com) → org-B isolation after discovery → findings listing.
 The SBOM and intel steps query OSV/CISA/FIRST, so they need internet access;
 without it those steps fail with a message saying so. Policy editor steps cover
 ordered notify/ticket/fail-build/block-deploy create/update, refuse tenant webhook

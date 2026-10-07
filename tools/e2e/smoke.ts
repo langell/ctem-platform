@@ -332,11 +332,13 @@ async function main(): Promise<void> {
       return `mirror holds ${sync!.advisories} advisories for npm/express`;
     });
 
-    await step('GitHub discovery inventories the fixture repo (live GitHub)', async () => {
-      // ctem-scan-target is public, so this works tokenless via the public
-      // listing. With GITHUB_TOKEN set (asset-service reads it from ITS env,
-      // e.g. `export GITHUB_TOKEN=$(gh auth token)` before `make dev`), the
-      // authenticated private-repo path is exercised instead.
+    await step('GitHub discovery inventories the fixture repo (GitHub stub)', async () => {
+      // ctem-scan-target is public on the local stub, so this works tokenless
+      // via GET /users/langell/repos. Asset-service uses CTEM_GITHUB_API_URL
+      // (CI points that at http://127.0.0.1:4019). With GITHUB_TOKEN set
+      // (asset-service reads it from ITS env), the authenticated /user/repos
+      // path is exercised instead. Do not set GITHUB_TOKEN here — Actions owns
+      // that name, and CI leaves it unset so discovery stays on the public listing.
       await db.integration.create({
         data: {
           orgId: orgA.id,
@@ -349,7 +351,6 @@ async function main(): Promise<void> {
 
       const res = await api(GATEWAY, 'POST', '/v1/assets/discover', {
         token: patA,
-        // Live GitHub listing regularly exceeds the default 10s client budget.
         timeoutMs: 30_000,
       });
       expect(res.status < 300, `discover returned ${res.status}: ${JSON.stringify(res.json)}`);
@@ -365,7 +366,23 @@ async function main(): Promise<void> {
         items.some((a) => a.externalKey === 'github:langell/ctem-scan-target'),
         'ctem-scan-target missing from the inventory after discovery',
       );
-      return `github:langell/ctem-scan-target inventoried from live GitHub (${process.env.GITHUB_TOKEN ? 'authenticated' : 'public listing'})`;
+
+      const githubApi = process.env.CTEM_GITHUB_API_URL;
+      let via = githubApi ?? 'platform default';
+      if (githubApi) {
+        const origin = new URL(githubApi);
+        if (origin.port === '4019' || origin.hostname === 'github-stub') {
+          via = origin.origin;
+          const seen = await api(origin.origin, 'GET', '/__requests');
+          const recorded = (seen.json?.requests ?? []) as Array<{ path: string; status: number }>;
+          expect(
+            seen.status === 200 &&
+              recorded.some((r) => r.path === '/users/langell/repos' && r.status === 200),
+            `discovery did not hit the GitHub stub /users/langell/repos: ${JSON.stringify(seen.json)}`,
+          );
+        }
+      }
+      return `github:langell/ctem-scan-target inventoried from ${via} (${process.env.GITHUB_TOKEN ? 'authenticated' : 'public listing'})`;
     });
 
     await step('org B cannot see org A GitHub-discovered assets', async () => {

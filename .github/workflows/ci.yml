@@ -64,28 +64,90 @@ jobs:
       - name: Integration tests
         run: pnpm test:int
 
-      - name: Start services
+      # Same stub the UI smoke job starts. Discovery must not call api.github.com.
+      - name: Start GitHub stub
         run: |
+          node apps/github-stub/server.mjs > /tmp/github-stub.log 2>&1 &
+          for i in $(seq 1 50); do
+            if curl -sf -m 2 http://127.0.0.1:4019/health >/dev/null; then
+              echo "github stub ready"
+              exit 0
+            fi
+            sleep 0.2
+          done
+          echo "::error::GitHub stub did not become ready"
+          cat /tmp/github-stub.log
+          exit 1
+
+      - name: Point the stack at the GitHub stub
+        run: |
+          # e2e stack only. GITHUB_API_URL is reserved by GitHub Actions, so the
+          # stub is CTEM_GITHUB_API_URL. Production compose hardcodes that key
+          # to https://api.github.com.
+          if grep -q '^CTEM_GITHUB_API_URL=' .env; then
+            sed -i 's|^CTEM_GITHUB_API_URL=.*|CTEM_GITHUB_API_URL=http://127.0.0.1:4019|' .env
+          else
+            echo 'CTEM_GITHUB_API_URL=http://127.0.0.1:4019' >> .env
+          fi
+          grep '^CTEM_GITHUB_API_URL=' .env
+          grep '^NODE_ENV=' .env
+
+      - name: Start services
+        env:
+          # Actions cannot override GITHUB_API_URL. This name is the one
+          # asset-service reads. There is no EGRESS_GITHUB_API env var.
+          CTEM_GITHUB_API_URL: http://127.0.0.1:4019
+          NODE_ENV: development
+          NX_LOAD_DOT_ENV_FILES: 'true'
+        run: |
+          pnpm nx reset >/dev/null 2>&1 || true
           pnpm nx run-many -t dev --parallel=16 --exclude=@ctem/web > /tmp/stack.log 2>&1 &
-          for i in $(seq 1 60); do
+          healthy=0
+          for i in $(seq 1 90); do
             ok=1
             for port in 3000 3001 3002 3003 3004 3005 3006 3007; do
               curl -sf -m 2 "http://localhost:$port/health/live" >/dev/null 2>&1 || { ok=0; break; }
             done
-            if [ "$ok" = "1" ]; then echo "all services healthy"; exit 0; fi
+            if [ "$ok" = "1" ]; then echo "all services healthy"; healthy=1; break; fi
             sleep 2
           done
-          echo "::error::services failed to become healthy"
-          tail -150 /tmp/stack.log
-          exit 1
+          if [ "$healthy" != "1" ]; then
+            echo "::error::services failed to become healthy"
+            tail -150 /tmp/stack.log
+            exit 1
+          fi
+          origin_ok=0
+          for i in $(seq 1 20); do
+            if grep -q '"githubApiOrigin":"http://127.0.0.1:4019"' /tmp/stack.log; then
+              origin_ok=1
+              break
+            fi
+            sleep 0.25
+          done
+          if [ "$origin_ok" != "1" ]; then
+            echo "::error::asset-service did not boot against the GitHub stub (refusing to call api.github.com)"
+            grep githubApiOrigin /tmp/stack.log || true
+            tail -80 /tmp/stack.log
+            exit 1
+          fi
+          echo "asset-service github api origin is the stub"
 
       # Queries OSV, CISA KEV and FIRST EPSS live — runners have internet.
+      # GitHub discovery uses the stub started above, not api.github.com.
       - name: E2E smoke
-        run: pnpm e2e
+        run: |
+          pnpm e2e
+          echo "---- github stub ----"
+          cat /tmp/github-stub.log
+          grep -E '^GET /users/langell/repos 200$' /tmp/github-stub.log
 
       - name: Service logs on failure
         if: failure()
-        run: tail -300 /tmp/stack.log 2>/dev/null || true
+        run: |
+          echo "---- github stub ----"
+          cat /tmp/github-stub.log 2>/dev/null || true
+          echo "---- stack ----"
+          tail -300 /tmp/stack.log 2>/dev/null || true
 
   # Phase A: optional browser smoke. Not a merge gate — required checks stay
   # lint / unit / int / PAT e2e. Promote to required in a later phase.
