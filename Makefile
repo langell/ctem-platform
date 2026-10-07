@@ -1,4 +1,4 @@
-.PHONY: help setup infra infra-down build typecheck lint test test-int e2e test-ui db-migrate db-seed demo-token dev clean deploy-build deploy-up deploy-down deploy-migrate deploy-seed deploy-logs deploy-ps
+.PHONY: help setup infra infra-down build typecheck lint test test-int e2e test-ui db-migrate db-precheck-one-active db-seed demo-token dev clean deploy-build deploy-up deploy-down deploy-migrate deploy-seed deploy-logs deploy-ps
 
 COMPOSE_PROD = docker compose --env-file .env.prod -f docker-compose.prod.yml
 
@@ -47,6 +47,10 @@ db-migrate: ## Apply Prisma migrations, then the row-level security policies
 	pnpm db:migrate
 	docker compose exec -T postgres psql -U ctem -d ctem \
 	  -f /dev/stdin < libs/db/prisma/manual/000_rls.sql
+
+db-precheck-one-active: ## List users with more than one active membership (read-only)
+	docker compose exec -T postgres psql -U ctem -d ctem \
+	  -f /dev/stdin < tools/db/one-active-precheck.sql
 
 db-seed: ## Seed a demo org with assets, findings and policies
 	pnpm db:seed

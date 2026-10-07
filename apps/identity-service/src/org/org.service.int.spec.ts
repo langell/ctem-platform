@@ -105,7 +105,7 @@ describe('OrgService members + JWT resolve (integration)', () => {
     expect(membership).toBeNull();
   });
 
-  it('accepts a CTEM invite on first login (email match) and mints Membership', async () => {
+  it('accepts a verified email-match invite through resolveActiveMemberships', async () => {
     const ownerUser = await member('owner');
     const email = `${uniqueSlug('invited')}@test.local`;
     const invited = await service.invite(orgId, actor(orgId, ownerUser.id, 'owner'), {
@@ -116,13 +116,13 @@ describe('OrgService members + JWT resolve (integration)', () => {
     expect(invited.role).toBe('developer');
 
     const sub = `idp|${uniqueSlug('invited')}`;
-    const resolved = await service.resolveJwt({
+    const resolved = await service.resolveActiveMemberships({
       sub,
-      orgId,
       email,
       name: 'Invited Dev',
+      emailVerified: true,
     });
-    expect(resolved.role).toBe('developer');
+    expect(resolved.memberships).toEqual([{ orgId, role: 'developer' }]);
     expect(resolved.userId).not.toBe(sub);
     userIds.push(resolved.userId);
 
@@ -131,6 +131,11 @@ describe('OrgService members + JWT resolve (integration)', () => {
     });
     expect(membership?.role).toBe('developer');
     expect(membership?.disabledAt).toBeNull();
+    expect(membership?.viaSignup).toBe(false);
+    const inviteRow = await owner.membershipInvite.findFirst({
+      where: { orgId, email },
+    });
+    expect(inviteRow?.acceptedAt).not.toBeNull();
   });
 
   it('demo seed Membership lets the Keycloak analyst resolve after JWT roles are ignored', async () => {

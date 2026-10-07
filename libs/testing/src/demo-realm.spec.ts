@@ -1,9 +1,19 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { DEMO_IDP_SUBJECT, DEMO_ORG_ID, DEMO_USER_EMAIL } from './factories';
+import {
+  DEMO_DEVELOPER_EMAIL,
+  DEMO_DEVELOPER_IDP_SUBJECT,
+  DEMO_IDP_SUBJECT,
+  DEMO_USER_EMAIL,
+} from './factories';
 
-type RealmUser = { id?: string; email?: string; attributes?: Record<string, string[]> };
+type RealmUser = {
+  id?: string;
+  email?: string;
+  emailVerified?: boolean;
+  attributes?: Record<string, string[]>;
+};
 type ProtocolMapper = { name?: string; protocolMapper?: string; config?: Record<string, string> };
 type RealmClient = {
   clientId?: string;
@@ -22,8 +32,8 @@ function mapperClaims(client: RealmClient | undefined) {
 }
 
 /**
- * Compose Keycloak and `make db-seed` must agree: JWT sub = idpSubject,
- * org_id = the demo org primary key the gateway reads after verify.
+ * Compose Keycloak and `make db-seed` must agree: JWT sub = idpSubject.
+ * Org comes from the single active membership, not an org_id claim.
  */
 describe('compose Keycloak ctem realm', () => {
   const realm = JSON.parse(readFileSync(resolve('deploy/keycloak/ctem-realm.json'), 'utf8')) as {
@@ -39,14 +49,20 @@ describe('compose Keycloak ctem realm', () => {
     expect(realm.realm).toBe('ctem');
     const user = realm.users.find((u) => u.email === DEMO_USER_EMAIL);
     expect(user?.id).toBe(DEMO_IDP_SUBJECT);
-    expect(user?.attributes?.org_id).toEqual([DEMO_ORG_ID]);
+    expect(user?.attributes?.org_id).toBeUndefined();
+    expect(user?.attributes).toBeUndefined();
+    const developer = realm.users.find((u) => u.email === DEMO_DEVELOPER_EMAIL);
+    expect(developer?.id).toBe(DEMO_DEVELOPER_IDP_SUBJECT);
+    expect(developer?.emailVerified).toBe(true);
+    expect(developer?.attributes).toBeUndefined();
     expect(DEMO_IDP_SUBJECT).toBe('demo|analyst');
+    expect(DEMO_DEVELOPER_IDP_SUBJECT).toBe('demo|developer');
     const seed = readFileSync(resolve('libs/testing/src/factories.ts'), 'utf8');
     expect(seed).toMatch(/idpSubject: DEMO_IDP_SUBJECT/);
     expect(seed).toMatch(/role: 'owner', disabledAt: null/);
   });
 
-  it('maps the demo user org_id attribute and does not hardcode org, role, or sub', () => {
+  it('maps email_verified and does not map org_id, role, or sub', () => {
     expect(realm.registrationAllowed).toBe(true);
     expect(realm.verifyEmail).not.toBe(true);
     expect(realm.identityProviders).toBeUndefined();
@@ -56,11 +72,12 @@ describe('compose Keycloak ctem realm', () => {
     expect(web).toBeDefined();
     for (const client of [api, web]) {
       const byName = mapperClaims(client);
-      expect(byName.org_id?.protocolMapper).toBe('oidc-usermodel-attribute-mapper');
-      expect(byName.org_id?.config?.['user.attribute']).toBe('org_id');
-      expect(byName.org_id?.config?.['claim.name']).toBe('org_id');
-      expect(byName.org_id?.config?.['access.token.claim']).toBe('true');
-      expect(byName.org_id?.config?.['claim.value']).toBeUndefined();
+      expect(byName.org_id).toBeUndefined();
+      expect(byName.email_verified?.protocolMapper).toBe('oidc-usermodel-property-mapper');
+      expect(byName.email_verified?.config?.['user.attribute']).toBe('emailVerified');
+      expect(byName.email_verified?.config?.['claim.name']).toBe('email_verified');
+      expect(byName.email_verified?.config?.['jsonType.label']).toBe('boolean');
+      expect(byName.email_verified?.config?.['access.token.claim']).toBe('true');
       expect(byName.roles).toBeUndefined();
       expect(byName.sub).toBeUndefined();
       expect(byName.email?.config?.['claim.name']).toBe('email');

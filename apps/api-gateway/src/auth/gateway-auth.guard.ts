@@ -40,13 +40,13 @@ interface GatewayRequest {
   verifiedSub?: string;
 }
 
-/** The one route a zero-membership human may call. Not a general optional-org flag. */
+/** The two routes a zero-membership human may call. Not a general optional-org flag. */
 function isCreateOrgRequest(req: GatewayRequest): boolean {
   if ((req.method ?? '').toUpperCase() !== 'POST') return false;
   return [req.path, req.originalUrl, req.url].some((value) => {
     if (!value) return false;
     const path = value.split('?')[0]?.replace(/\/+$/, '') || '/';
-    return path === '/v1/orgs';
+    return path === '/v1/orgs' || path === '/v1/invites/accept';
   });
 }
 
@@ -85,7 +85,7 @@ export class GatewayAuthGuard implements CanActivate {
     let principal: Principal;
 
     if (token.startsWith(PAT_PREFIX)) {
-      // A machine token has no human subject to own a new org.
+      // A machine token has no human subject to own a new org or accept an invite.
       if (createOrg) throw new UnauthorizedException('Invalid token');
       principal = await this.verifyPat(token);
     } else {
@@ -140,7 +140,12 @@ export class GatewayAuthGuard implements CanActivate {
       return this.principalFromMembership(membership.userId, claims.org_id, membership.role);
     }
 
-    const resolved = await this.resolveActiveMemberships(claims.sub, claims.email, claims.name);
+    const resolved = await this.resolveActiveMemberships(
+      claims.sub,
+      claims.email,
+      claims.name,
+      claims.email_verified === true,
+    );
     if (resolved.memberships.length > 1) {
       throw new ConflictException('multiple organizations');
     }
@@ -237,6 +242,7 @@ export class GatewayAuthGuard implements CanActivate {
     sub: string,
     email: string | undefined,
     name: string | undefined,
+    emailVerified: boolean,
   ): Promise<ResolveMembershipsResponse> {
     const emailParsed =
       typeof email === 'string'
@@ -251,6 +257,7 @@ export class GatewayAuthGuard implements CanActivate {
       sub,
       ...(emailParsed?.success ? { email: emailParsed.data } : {}),
       ...(nameParsed?.success ? { name: nameParsed.data } : {}),
+      emailVerified,
     };
 
     const env = loadEnv();

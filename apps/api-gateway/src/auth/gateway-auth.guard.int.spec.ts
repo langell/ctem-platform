@@ -10,11 +10,21 @@ import type { Principal } from '@ctem/contracts';
 import { ProblemDetailsFilter } from '@ctem/service-kit';
 import { TestIdp, applyTestEnv, stubUserIdFromSubject } from '@ctem/testing';
 import { GatewayAuthGuard } from './gateway-auth.guard';
+import { InvitesProxyController } from '../routes/invites.controller';
 import { OrgsProxyController } from '../routes/orgs.controller';
 
 const KNOWN_PAT = 'ctem_pat_known-integration-token';
 const PAT_NO_ORG = 'ctem_pat_missing-org-record';
 const PAT_DROP = 'ctem_pat_identity-unreachable';
+
+@Controller('v1/findings')
+class FindingsProbeController {
+  @Get()
+  @RequirePermissions('finding:read')
+  list() {
+    return { ok: true };
+  }
+}
 
 @Controller('probe')
 class ProbeController {
@@ -47,6 +57,9 @@ describe('GatewayAuthGuard (integration)', () => {
   const createdOrgId = 'cccccccc-3333-4333-8333-444455556666';
   const createdBySub = new Map<string, string>();
   let orgCreateCalls = 0;
+  const membershipRequests: Array<Record<string, unknown>> = [];
+  const resolveRequests: Array<Record<string, unknown>> = [];
+  const inviteAcceptRequests: Array<Record<string, unknown>> = [];
 
   beforeAll(async () => {
     idp = await TestIdp.start();
@@ -66,7 +79,12 @@ describe('GatewayAuthGuard (integration)', () => {
               slug?: string;
             };
           } catch {
-            return {} as { token?: string; sub?: string; orgId?: string };
+            return {} as {
+              token?: string;
+              sub?: string;
+              orgId?: string;
+              emailVerified?: unknown;
+            };
           }
         })();
         // Fail-closed: identity never answers for this PAT.
@@ -76,6 +94,7 @@ describe('GatewayAuthGuard (integration)', () => {
         }
         res.setHeader('content-type', 'application/json');
         if (req.url === '/internal/auth/memberships') {
+          membershipRequests.push({ ...json });
           const sub = json.sub ?? '';
           if (sub.includes('|drop')) {
             req.socket.destroy();
@@ -138,7 +157,13 @@ describe('GatewayAuthGuard (integration)', () => {
           );
           return;
         }
+        if (req.url === '/internal/invites/accept') {
+          inviteAcceptRequests.push({ ...json });
+          res.end(JSON.stringify({ orgId, role: 'developer' }));
+          return;
+        }
         if (req.url === '/internal/auth/resolve') {
+          resolveRequests.push({ ...json });
           const sub = json.sub ?? '';
           if (sub.includes('|nomember')) {
             res.statusCode = 403;
@@ -188,7 +213,7 @@ describe('GatewayAuthGuard (integration)', () => {
 
     const moduleRef = await Test.createTestingModule({
       imports: [AuthModule],
-      controllers: [ProbeController, OrgsProxyController],
+      controllers: [ProbeController, FindingsProbeController, OrgsProxyController, InvitesProxyController],
       providers: [
         {
           provide: APP_GUARD,
@@ -370,6 +395,97 @@ describe('GatewayAuthGuard (integration)', () => {
     expect(res.status).toBe(403);
     expect((await res.json()).title).toBe('No organization membership');
     expect(orgCreateCalls).toBe(before);
+  });
+
+  it('forwards emailVerified true only for boolean true', async () => {
+    const before = membershipRequests.length;
+    const yes = await idp.issueToken({
+      sub: 'idp|one-bool',
+      orgId: null,
+      email: 'bool@test.local',
+      emailVerified: true,
+    });
+    expect((await get('/probe/read', yes)).status).toBe(200);
+    const asString = await idp.issueToken({
+      sub: 'idp|one-string',
+      orgId: null,
+      email: 'string@test.local',
+      emailVerified: 'true',
+    });
+    expect((await get('/probe/read', asString)).status).toBe(200);
+    const absent = await idp.issueToken({
+      sub: 'idp|one-absent',
+      orgId: null,
+      email: 'absent@test.local',
+    });
+    expect((await get('/probe/read', absent)).status).toBe(200);
+    const added = membershipRequests.slice(before);
+    expect(added.map((body) => body.emailVerified)).toEqual([true, false, false]);
+
+    const resolveBefore = resolveRequests.length;
+    const withOrg = await idp.issueToken({
+      sub: 'idp|alice',
+      orgId,
+      email: 'alice@test.local',
+      emailVerified: true,
+    });
+    expect((await get('/probe/read', withOrg)).status).toBe(200);
+    const resolved = resolveRequests.slice(resolveBefore);
+    expect(resolved.length).toBeGreaterThan(0);
+    expect(resolved.at(-1)).not.toHaveProperty('emailVerified');
+  });
+
+  it('POST /v1/invites/accept reaches the controller for a zero-membership JWT', async () => {
+    const before = inviteAcceptRequests.length;
+    const jwt = await idp.issueToken({
+      sub: 'idp|invite-zero',
+      orgId: null,
+      email: 'invite-zero@test.local',
+    });
+    const token = `ctem_inv_${'a'.repeat(43)}`;
+    const res = await fetch(`${base}/v1/invites/accept`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${jwt}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ token }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ orgId, role: 'developer' });
+    expect(inviteAcceptRequests.slice(before)).toEqual([
+      expect.objectContaining({ sub: 'idp|invite-zero', token }),
+    ]);
+  });
+
+  it('rejects a PAT and a missing bearer on POST /v1/invites/accept', async () => {
+    const before = inviteAcceptRequests.length;
+    const body = JSON.stringify({ token: `ctem_inv_${'b'.repeat(43)}` });
+    const headers = { 'content-type': 'application/json' };
+    expect(
+      (
+        await fetch(`${base}/v1/invites/accept`, {
+          method: 'POST',
+          headers: { ...headers, authorization: `Bearer ${KNOWN_PAT}` },
+          body,
+        })
+      ).status,
+    ).toBe(401);
+    expect(
+      (await fetch(`${base}/v1/invites/accept`, { method: 'POST', headers, body })).status,
+    ).toBe(401);
+    expect(inviteAcceptRequests).toHaveLength(before);
+  });
+
+  it('a zero-membership JWT still gets 403 No organization on GET /v1/findings', async () => {
+    const jwt = await idp.issueToken({
+      orgId: null,
+      sub: 'idp|nofindings',
+      email: 'nofindings@test.local',
+    });
+    const res = await get('/v1/findings', jwt);
+    expect(res.status).toBe(403);
+    expect((await res.json()).title).toBe('No organization');
   });
 
   it('rejects a PAT and a missing bearer on POST /v1/orgs', async () => {

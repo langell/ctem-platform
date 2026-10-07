@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, HttpException } from '@nestjs/common';
 import { CreateOrgResponse, ROLE_PERMISSIONS, type Principal, type Role } from '@ctem/contracts';
 import { PrismaService, type PrismaClient } from '@ctem/db';
 import { rootLogger } from '@ctem/observability';
@@ -13,6 +13,7 @@ import {
   withOrg,
 } from '@ctem/testing';
 import {
+  classifyMembershipUniqueViolation,
   mapCreateOrgUniqueViolation,
   OrgService,
   resolveCreateOrgUniqueViolation,
@@ -20,15 +21,15 @@ import {
 
 /**
  * Observed Prisma 6.19.3 P2002 `meta` for partial unique index
- * `memberships_userId_signup_active_key`. The index name is not in `meta`.
+ * `memberships_userId_active_key`. The index name is not in `meta`.
  * `platformOwner()` bypasses RLS and reports `target: ['userId']`.
  * The same insert on `ctem_app` (row-level security applies) reports `target: null`.
  */
-const OWNER_SIGNUP_INDEX_META = {
+const OWNER_ACTIVE_INDEX_META = {
   modelName: 'Membership',
   target: ['userId'],
 } as const;
-const RLS_SIGNUP_INDEX_META = {
+const RLS_ACTIVE_INDEX_META = {
   modelName: 'Membership',
   target: null,
 } as const;
@@ -266,7 +267,7 @@ describe('org create race', () => {
     }
   });
 
-  it('backstop index rejects a second active signup membership without the lock', async () => {
+  it('backstop index rejects a second active membership without the lock', async () => {
     const orgA = await createOrg(owner);
     const orgB = await createOrg(owner);
     const orgC = await createOrg(owner);
@@ -295,8 +296,9 @@ describe('org create race', () => {
       expect(violation).toMatchObject({ code: 'P2002' });
       const meta = (violation as { meta?: unknown }).meta;
       expect(meta, `observed owner P2002 meta: ${JSON.stringify(meta)}`).toEqual(
-        OWNER_SIGNUP_INDEX_META,
+        OWNER_ACTIVE_INDEX_META,
       );
+      expect(classifyMembershipUniqueViolation(violation)).toBe('one-active');
       const mapped = mapCreateOrgUniqueViolation(violation);
       expect(mapped?.action).toBe('conflict');
       if (mapped?.action === 'conflict') {
@@ -305,10 +307,16 @@ describe('org create race', () => {
       expect(captured.text()).toMatch(/prisma:error/);
       expect(captured.text()).toMatch(NOISE);
 
-      const invited = await db.membership.create({
-        data: { orgId: orgB.id, userId: user.id, role: 'developer', viaSignup: false },
-      });
-      expect(invited.viaSignup).toBe(false);
+      let inviteShaped: unknown;
+      try {
+        await db.membership.create({
+          data: { orgId: orgB.id, userId: user.id, role: 'developer', viaSignup: false },
+        });
+      } catch (err) {
+        inviteShaped = err;
+      }
+      expect(inviteShaped).toMatchObject({ code: 'P2002' });
+      expect(classifyMembershipUniqueViolation(inviteShaped)).toBe('one-active');
 
       await db.membership.update({
         where: { orgId_userId: { orgId: orgA.id, userId: user.id } },
@@ -326,7 +334,7 @@ describe('org create race', () => {
     }
   });
 
-  it('an RLS client signup violation re-checks when meta.target is unresolvable', async () => {
+  it('an RLS client one-active violation re-checks when meta.target is unresolvable', async () => {
     const orgA = await createOrg(owner);
     const orgB = await createOrg(owner);
     const email = `${uniqueSlug('rls-backstop')}@test.local`;
@@ -343,7 +351,7 @@ describe('org create race', () => {
       try {
         await withOrg(app, orgB.id, (tx) =>
           tx.membership.create({
-            data: { orgId: orgB.id, userId: user.id, role: 'developer', viaSignup: true },
+            data: { orgId: orgB.id, userId: user.id, role: 'developer', viaSignup: false },
           }),
         );
       } catch (err) {
@@ -353,15 +361,16 @@ describe('org create race', () => {
       expect(violation).toMatchObject({ code: 'P2002' });
       const meta = (violation as { meta?: unknown }).meta;
       expect(meta, `observed ctem_app P2002 meta: ${JSON.stringify(meta)}`).toEqual(
-        RLS_SIGNUP_INDEX_META,
+        RLS_ACTIVE_INDEX_META,
       );
-      expect(mapCreateOrgUniqueViolation(violation)).toEqual({ action: 'recheck-active-signup' });
+      expect(classifyMembershipUniqueViolation(violation)).toBe('recheck');
+      expect(mapCreateOrgUniqueViolation(violation)).toEqual({ action: 'recheck' });
 
       let reads = 0;
       const resolved = await resolveCreateOrgUniqueViolation(violation, async () => {
         reads += 1;
         const row = await owner.membership.findFirst({
-          where: { userId: user.id, viaSignup: true, disabledAt: null },
+          where: { userId: user.id, disabledAt: null },
           select: { userId: true },
         });
         return row !== null;
@@ -415,7 +424,7 @@ describe('org create race', () => {
     }
   });
 
-  it('a self-signup owner can accept an invite into a second org', async () => {
+  it('a self-signup owner is refused an invite into a second org', async () => {
     const orgIds: string[] = [];
     const userIds: string[] = [];
     try {
@@ -433,28 +442,42 @@ describe('org create race', () => {
         orgIds.push(orgB.id);
         const inviter = await createUserWithMembership(owner, orgB.id, 'owner');
         userIds.push(inviter.id);
-        await serviceB.invite(orgB.id, actor(orgB.id, inviter.id, 'owner'), {
+        const invite = await serviceB.invite(orgB.id, actor(orgB.id, inviter.id, 'owner'), {
           email: subject.email,
           role,
         });
-
-        const resolved = await serviceB.resolveJwt({
-          sub: subject.sub,
-          orgId: orgB.id,
-          email: subject.email,
+        const before = await owner.membershipInvite.findFirst({
+          where: { orgId: orgB.id, email: subject.email },
         });
-        expect(resolved.role).toBe(role);
-        expect(resolved.userId).toBe(subject.userId);
 
+        let failure: unknown;
+        try {
+          await serviceB.acceptInviteByToken(subject.sub, invite.token);
+        } catch (err) {
+          failure = err;
+        }
+        expect(failure).toBeInstanceOf(HttpException);
+        const http = failure as HttpException;
+        expect(http.getStatus()).toBe(409);
+        expect((http.getResponse() as { type?: string }).type).toBe(
+          'urn:ctem:problem:invite-already-in-org',
+        );
+
+        const after = await owner.membershipInvite.findFirst({
+          where: { orgId: orgB.id, email: subject.email },
+        });
+        expect(after?.tokenHash).toBe(before?.tokenHash);
+        expect(after?.expiresAt).toEqual(before?.expiresAt);
+        expect(after?.acceptedAt).toBeNull();
         const active = await owner.membership.findMany({
           where: { userId: subject.userId, disabledAt: null },
-          orderBy: { createdAt: 'asc' },
         });
-        expect(active).toHaveLength(2);
-        const signup = active.find((row) => row.orgId === orgA.id);
-        const invited = active.find((row) => row.orgId === orgB.id);
-        expect(signup).toMatchObject({ role: 'owner', viaSignup: true });
-        expect(invited).toMatchObject({ role, viaSignup: false });
+        expect(active).toHaveLength(1);
+        expect(active[0]).toMatchObject({ orgId: orgA.id, role: 'owner', viaSignup: true });
+        const inB = await owner.membership.findUnique({
+          where: { orgId_userId: { orgId: orgB.id, userId: subject.userId } },
+        });
+        expect(inB).toBeNull();
       }
     } finally {
       for (const orgId of orgIds) await deleteOrgCascade(owner, orgId);
@@ -462,7 +485,7 @@ describe('org create race', () => {
     }
   });
 
-  it('re-enabling an invite clears viaSignup so the replacement signup stays unique', async () => {
+  it('re-enabling an invite is refused while another membership is active', async () => {
     const subject = await freshSubject('reenable');
     let keeperId: string | undefined;
     try {
@@ -480,29 +503,31 @@ describe('org create race', () => {
         uniqueSlug('reenable-b'),
       );
 
-      await serviceA.invite(orgA.id, actor(orgA.id, keeper.id, 'owner'), {
+      const invite = await serviceA.invite(orgA.id, actor(orgA.id, keeper.id, 'owner'), {
         email: subject.email,
         role: 'developer',
       });
+      const before = await owner.membershipInvite.findFirst({
+        where: { orgId: orgA.id, email: subject.email },
+      });
 
-      const captured = captureLogs();
-      let resolved: Awaited<ReturnType<OrgService['resolveJwt']>> | undefined;
       let failure: unknown;
       try {
-        resolved = await serviceA.resolveJwt({
-          sub: subject.sub,
-          orgId: orgA.id,
-          email: subject.email,
-        });
+        await serviceA.acceptInviteByToken(subject.sub, invite.token);
       } catch (err) {
         failure = err;
-      } finally {
-        captured.restore();
       }
+      expect(failure).toBeInstanceOf(HttpException);
+      expect((failure as HttpException).getStatus()).toBe(409);
+      expect(((failure as HttpException).getResponse() as { type?: string }).type).toBe(
+        'urn:ctem:problem:invite-already-in-org',
+      );
 
-      expect(failure).toBeUndefined();
-      expect(resolved).toMatchObject({ userId: subject.userId, orgId: orgA.id, role: 'developer' });
-      expect(captured.text()).not.toMatch(/prisma:error/);
+      const after = await owner.membershipInvite.findFirst({
+        where: { orgId: orgA.id, email: subject.email },
+      });
+      expect(after?.acceptedAt).toBeNull();
+      expect(after?.tokenHash).toBe(before?.tokenHash);
 
       const rowA = await owner.membership.findUnique({
         where: { orgId_userId: { orgId: orgA.id, userId: subject.userId } },
@@ -510,7 +535,7 @@ describe('org create race', () => {
       const rowB = await owner.membership.findUnique({
         where: { orgId_userId: { orgId: orgB.id, userId: subject.userId } },
       });
-      expect(rowA).toMatchObject({ viaSignup: false, disabledAt: null, role: 'developer' });
+      expect(rowA?.disabledAt).not.toBeNull();
       expect(rowB).toMatchObject({ viaSignup: true, disabledAt: null, role: 'owner' });
     } finally {
       await deleteUserOrgs(subject.userId);

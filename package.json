@@ -20,6 +20,7 @@
     "db:deploy": "prisma migrate deploy --schema libs/db/prisma/schema.prisma",
     "db:studio": "prisma studio --schema libs/db/prisma/schema.prisma",
     "db:seed": "tsx libs/db/prisma/seed.ts",
+    "kc:user": "tsx tools/keycloak/create-user.ts",
     "start:gateway": "node apps/api-gateway/dist/main.js",
     "build:web": "pnpm --filter @ctem/web build",
     "dev:web": "pnpm --filter @ctem/web dev",

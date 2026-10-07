@@ -2,11 +2,12 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  HttpException,
   Injectable,
   NotFoundException,
   type OnModuleDestroy,
 } from '@nestjs/common';
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { loadEnv } from '@ctem/config';
 import { PrismaClient, PrismaService, type PrismaTransaction } from '@ctem/db';
 import {
@@ -23,12 +24,21 @@ import {
 
 const INVITE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 const INVITE_PREFIX = 'ctem_inv_';
+/** `randomBytes(32).toString('base64url')` is 43 characters. */
+const INVITE_TOKEN = /^ctem_inv_[A-Za-z0-9_-]{43}$/;
 
 /**
  * Tenant identity: Membership is the AuthZ source of truth. Keycloak authenticates;
- * realm roles never mint a Membership. The only add path is a CTEM-side invite that
- * becomes a Membership on first login when `claims.email` matches a pending invite.
+ * realm roles never mint a Membership. An invite becomes a Membership through the
+ * token link, or through verified email-match when the user has no active membership.
  */
+
+/** One shared normalizer for invite create, user upsert, and both accept paths. */
+export function normalizeEmail(email: string | undefined | null): string | undefined {
+  if (typeof email !== 'string') return undefined;
+  const normalized = email.trim().toLowerCase();
+  return normalized.length > 0 ? normalized : undefined;
+}
 @Injectable()
 export class OrgService implements OnModuleDestroy {
   private ownerDb?: PrismaClient;
@@ -108,6 +118,8 @@ export class OrgService implements OnModuleDestroy {
   /**
    * JWT with no org_id. JIT-upserts the user, then returns only that user's
    * active membership org ids and roles. Disabled memberships do not count.
+   * Verified email-match may consume exactly one pending invite when there
+   * is no active membership. An unverified email never joins.
    */
   async resolveActiveMemberships(input: ResolveMembershipsRequest) {
     const user = await this.upsertUserFromClaims(this.prisma, input);
@@ -118,7 +130,82 @@ export class OrgService implements OnModuleDestroy {
       'resolve single membership when JWT has no org_id',
       async () => this.readActiveMemberships(this.platformOwner(), user.id),
     );
+    if (
+      memberships.length === 0 &&
+      input.emailVerified === true &&
+      normalizeEmail(input.email) === normalizeEmail(user.email)
+    ) {
+      const joined = await this.acceptSingleVerifiedInvite(user);
+      if (joined && joined.length > 0) {
+        return { userId: user.id, memberships: joined };
+      }
+    }
     return { userId: user.id, memberships };
+  }
+
+  /**
+   * Mesh accept. Possession of the invite token plus a canonical email match.
+   * Does not require email_verified. A refusal writes nothing.
+   */
+  async acceptInviteByToken(sub: string, token: string): Promise<{ orgId: string; role: Role }> {
+    if (!INVITE_TOKEN.test(token)) throw inviteInvalid();
+
+    const user = await this.prisma.user.findUnique({ where: { idpSubject: sub } });
+    if (!user || user.disabledAt) throw new ForbiddenException('No organization membership');
+
+    const tokenHash = this.hash(token);
+    const located = await this.platformOwner().membershipInvite.findUnique({
+      where: { tokenHash },
+    });
+    if (!timingSafeDigestEqual(located?.tokenHash, tokenHash) || !located) {
+      throw inviteInvalid();
+    }
+
+    try {
+      return await this.prisma.unsafeCrossTenant('invite accept has no tenant context yet', () =>
+        this.platformOwner().$transaction(async (tx) => {
+          await lockMembershipUser(tx, user.id);
+          const invite = await tx.membershipInvite.findUnique({ where: { id: located.id } });
+          if (!invite || invite.expiresAt.getTime() <= Date.now()) throw inviteInvalid();
+
+          const active = await this.readActiveMemberships(tx, user.id);
+          if (invite.acceptedAt) {
+            const here = active.find((membership) => membership.orgId === invite.orgId);
+            if (here) return { orgId: invite.orgId, role: here.role };
+            throw inviteInvalid();
+          }
+
+          if (normalizeEmail(user.email) !== normalizeEmail(invite.email)) {
+            throw inviteEmailMismatch();
+          }
+
+          if (active.some((membership) => membership.orgId !== invite.orgId)) {
+            throw inviteAlreadyInOrg();
+          }
+          const here = active.find((membership) => membership.orgId === invite.orgId);
+          if (here) {
+            await tx.membershipInvite.update({
+              where: { id: invite.id },
+              data: { acceptedAt: new Date() },
+            });
+            return { orgId: invite.orgId, role: here.role };
+          }
+
+          const role = await this.grantInviteMembership(tx, user.id, invite);
+          return { orgId: invite.orgId, role };
+        }),
+      );
+    } catch (err) {
+      if (err instanceof HttpException) throw err;
+      const conflict = await resolveMembershipUniqueViolation(
+        err,
+        () => this.hasActiveMembership(user.id),
+        () => inviteAlreadyInOrg(),
+        { mapSlug: false },
+      );
+      if (conflict) throw conflict;
+      throw err;
+    }
   }
 
   /**
@@ -135,10 +222,7 @@ export class OrgService implements OnModuleDestroy {
     try {
       return await this.prisma.unsafeCrossTenant('org bootstrap has no tenant context yet', () =>
         this.platformOwner().$transaction(async (tx) => {
-          await tx.$executeRawUnsafe(
-            `SELECT pg_advisory_xact_lock(hashtext('ctem-create-org:' || $1)::bigint)`,
-            user.id,
-          );
+          await lockMembershipUser(tx, user.id);
           const active = await this.readActiveMemberships(tx, user.id);
           if (active.length > 0) {
             throw new ConflictException('User already belongs to an organization');
@@ -158,17 +242,17 @@ export class OrgService implements OnModuleDestroy {
       // outside the interactive transaction — never retry inside it. An
       // unresolvable Membership target does one owner-client read below.
       const conflict = await resolveCreateOrgUniqueViolation(err, () =>
-        this.hasActiveSignupMembership(user.id),
+        this.hasActiveMembership(user.id),
       );
       if (conflict) throw conflict;
       throw err;
     }
   }
 
-  /** One owner-client read. Call only after the create-org transaction has aborted. */
-  private async hasActiveSignupMembership(userId: string): Promise<boolean> {
+  /** One owner-client read. Call only after the membership transaction has aborted. */
+  private async hasActiveMembership(userId: string): Promise<boolean> {
     const row = await this.platformOwner().membership.findFirst({
-      where: { userId, viaSignup: true, disabledAt: null },
+      where: { userId, disabledAt: null },
       select: { userId: true },
     });
     return row !== null;
@@ -237,7 +321,8 @@ export class OrgService implements OnModuleDestroy {
     if (input.role === 'owner' && actor.role !== 'owner') {
       throw new ForbiddenException('Only an owner can grant ownership');
     }
-    const email = input.email.trim().toLowerCase();
+    const email = normalizeEmail(input.email);
+    if (!email) throw new BadRequestException('Validation failed');
     const token = `${INVITE_PREFIX}${randomBytes(32).toString('base64url')}`;
     const expiresAt = new Date(Date.now() + INVITE_TTL_MS);
 
@@ -301,18 +386,16 @@ export class OrgService implements OnModuleDestroy {
   async resolveJwt(input: ResolveJwtRequest) {
     // Persist the User even when Membership is missing (403). Users are not
     // RLS-scoped; doing this inside withOrg would roll back the JIT upsert.
+    // A present org_id is a read-only consistency check. It does not accept invites.
     const user = await this.upsertUserFromClaims(this.prisma, input);
     if (user.disabledAt) {
       throw new ForbiddenException('No organization membership');
     }
 
     return this.prisma.withOrg(input.orgId, async (tx) => {
-      let membership = await tx.membership.findUnique({
+      const membership = await tx.membership.findUnique({
         where: { orgId_userId: { orgId: input.orgId, userId: user.id } },
       });
-      if (!membership || membership.disabledAt) {
-        membership = await this.acceptPendingInvite(tx, input.orgId, user, membership);
-      }
       if (!membership || membership.disabledAt) {
         throw new ForbiddenException('No organization membership');
       }
@@ -326,11 +409,104 @@ export class OrgService implements OnModuleDestroy {
     });
   }
 
+  /**
+   * Verified email, no active membership, exactly one pending org.
+   * Zero or several orgs leave every invite pending and return null.
+   * A lost race returns the membership that won and leaves the invite pending.
+   */
+  private async acceptSingleVerifiedInvite(user: {
+    id: string;
+    email: string;
+  }): Promise<Array<{ orgId: string; role: Role }> | null> {
+    try {
+      return await this.prisma.unsafeCrossTenant(
+        'verified email-match accept has no tenant context yet',
+        () =>
+          this.platformOwner().$transaction(async (tx) => {
+            await lockMembershipUser(tx, user.id);
+            const active = await this.readActiveMemberships(tx, user.id);
+            if (active.length > 0) return active;
+
+            const email = normalizeEmail(user.email);
+            if (!email) return null;
+            const pending = await tx.membershipInvite.findMany({
+              where: { email, acceptedAt: null, expiresAt: { gt: new Date() } },
+              orderBy: { createdAt: 'desc' },
+            });
+            const newestByOrg = new Map<string, (typeof pending)[number]>();
+            for (const invite of pending) {
+              if (!Role.safeParse(invite.role).success) continue;
+              if (!newestByOrg.has(invite.orgId)) newestByOrg.set(invite.orgId, invite);
+            }
+            if (newestByOrg.size !== 1) return null;
+            const invite = [...newestByOrg.values()][0]!;
+            const role = await this.grantInviteMembership(tx, user.id, invite);
+            return [{ orgId: invite.orgId, role }];
+          }),
+      );
+    } catch (err) {
+      if (!(err instanceof HttpException)) {
+        const kind = classifyMembershipUniqueViolation(err);
+        if (kind === 'one-active' || kind === 'recheck') {
+          const active = await this.readActiveMemberships(this.platformOwner(), user.id);
+          if (active.length > 0) return active;
+          const conflict = await resolveMembershipUniqueViolation(
+            err,
+            () => this.hasActiveMembership(user.id),
+            () => inviteAlreadyInOrg(),
+            { mapSlug: false },
+          );
+          if (conflict) throw conflict;
+        }
+        if (kind === 'conflict' || kind === 'slug') throw new ConflictException('Conflict');
+      }
+      throw err;
+    }
+  }
+
+  /** Insert or re-enable, then consume the invite. Caller holds the user lock. */
+  private async grantInviteMembership(
+    tx: PrismaTransaction,
+    userId: string,
+    invite: { id: string; orgId: string; role: string },
+  ): Promise<Role> {
+    const role = Role.safeParse(invite.role);
+    if (!role.success) throw inviteInvalid();
+    await tx.$executeRawUnsafe(`SELECT set_config('app.current_org_id', $1, true)`, invite.orgId);
+    const existing = await tx.membership.findUnique({
+      where: { orgId_userId: { orgId: invite.orgId, userId } },
+    });
+    if (existing && !existing.disabledAt) {
+      await tx.membershipInvite.update({
+        where: { id: invite.id },
+        data: { acceptedAt: new Date() },
+      });
+      const parsed = Role.safeParse(existing.role);
+      if (!parsed.success) throw inviteInvalid();
+      return parsed.data;
+    }
+    if (existing) {
+      await tx.membership.update({
+        where: { orgId_userId: { orgId: invite.orgId, userId } },
+        data: { role: role.data, disabledAt: null, viaSignup: false },
+      });
+    } else {
+      await tx.membership.create({
+        data: { orgId: invite.orgId, userId, role: role.data, viaSignup: false },
+      });
+    }
+    await tx.membershipInvite.update({
+      where: { id: invite.id },
+      data: { acceptedAt: new Date() },
+    });
+    return role.data;
+  }
+
   private async upsertUserFromClaims(
     db: { user: PrismaService['user'] },
     input: { sub: string; email?: string; name?: string },
   ) {
-    const email = input.email?.trim().toLowerCase();
+    const email = normalizeEmail(input.email);
     const name = input.name?.trim();
     const existing = await db.user.findUnique({ where: { idpSubject: input.sub } });
     if (existing) {
@@ -358,49 +534,6 @@ export class OrgService implements OnModuleDestroy {
         name: name && name.length > 0 ? name : email.split('@')[0]!,
         idpSubject: input.sub,
       },
-    });
-  }
-
-  private async acceptPendingInvite(
-    tx: PrismaTransaction,
-    orgId: string,
-    user: { id: string; email: string },
-    existing: {
-      orgId: string;
-      userId: string;
-      role: string;
-      disabledAt: Date | null;
-      createdAt: Date;
-      viaSignup: boolean;
-    } | null,
-  ) {
-    const invite = await tx.membershipInvite.findFirst({
-      where: {
-        orgId,
-        email: user.email.toLowerCase(),
-        acceptedAt: null,
-        expiresAt: { gt: new Date() },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-    if (!invite) return existing;
-
-    const role = Role.safeParse(invite.role);
-    if (!role.success) return existing;
-
-    await tx.membershipInvite.update({
-      where: { id: invite.id },
-      data: { acceptedAt: new Date() },
-    });
-
-    if (existing) {
-      return tx.membership.update({
-        where: { orgId_userId: { orgId, userId: user.id } },
-        data: { role: role.data, disabledAt: null, viaSignup: false },
-      });
-    }
-    return tx.membership.create({
-      data: { orgId, userId: user.id, role: role.data },
     });
   }
 
@@ -442,16 +575,75 @@ export class OrgService implements OnModuleDestroy {
   }
 }
 
-/** Partial unique index. Prisma cannot model it; it lives only in the signup migration. */
-export const SIGNUP_MEMBERSHIP_INDEX = 'memberships_userId_signup_active_key';
+/** Partial unique index. Prisma cannot model it; it lives only in the one-active migration. */
+export const ACTIVE_MEMBERSHIP_INDEX = 'memberships_userId_active_key';
 
 const SLUG_TAKEN = 'Organization slug is already taken';
 const ALREADY_IN_ORG = 'User already belongs to an organization';
+const INVITE_ALREADY_DETAIL =
+  'Ask an admin of your current organization to remove you, then open this invite again.';
+
+export const INVITE_ALREADY_IN_ORG_TYPE = 'urn:ctem:problem:invite-already-in-org';
+export const INVITE_EMAIL_MISMATCH_TYPE = 'urn:ctem:problem:invite-email-mismatch';
+export const INVITE_INVALID_TYPE = 'urn:ctem:problem:invite-invalid';
 
 interface UniqueViolationMeta {
   target?: unknown;
   modelName?: unknown;
   constraint?: unknown;
+}
+
+export type MembershipUniqueClass = 'slug' | 'one-active' | 'recheck' | 'conflict';
+
+export type CreateOrgUniqueMapping =
+  | { action: 'conflict'; exception: ConflictException }
+  | { action: 'recheck' };
+
+function inviteProblem(status: number, type: string, title: string, detail: string): HttpException {
+  return new HttpException({ type, title, detail, message: detail }, status);
+}
+
+export function inviteAlreadyInOrg(): HttpException {
+  return inviteProblem(
+    409,
+    INVITE_ALREADY_IN_ORG_TYPE,
+    'You already belong to an organization',
+    INVITE_ALREADY_DETAIL,
+  );
+}
+
+export function inviteEmailMismatch(): HttpException {
+  return inviteProblem(
+    403,
+    INVITE_EMAIL_MISMATCH_TYPE,
+    'This invite was sent to a different email address',
+    'This invite was sent to a different email address',
+  );
+}
+
+export function inviteInvalid(): HttpException {
+  return inviteProblem(
+    404,
+    INVITE_INVALID_TYPE,
+    'Invite invalid',
+    'This invite link is invalid or has expired.',
+  );
+}
+
+async function lockMembershipUser(tx: PrismaTransaction, userId: string): Promise<void> {
+  await tx.$executeRawUnsafe(
+    `SELECT pg_advisory_xact_lock(hashtext('ctem-create-org:' || $1)::bigint)`,
+    userId,
+  );
+}
+
+/** Compare hex digests in constant time. A missing stored hash still compares, then fails. */
+function timingSafeDigestEqual(stored: string | undefined, computed: string): boolean {
+  const left = Buffer.from(stored ?? '0'.repeat(computed.length), 'hex');
+  const right = Buffer.from(computed, 'hex');
+  if (left.length === 0 || left.length !== right.length) return false;
+  const equal = timingSafeEqual(left, right);
+  return stored !== undefined && equal;
 }
 
 function isUniqueViolation(err: unknown): err is { code: 'P2002'; meta?: UniqueViolationMeta } {
@@ -478,24 +670,11 @@ function isMembershipModel(meta: UniqueViolationMeta | undefined): boolean {
   return model === 'Membership' || model === 'memberships';
 }
 
-function namesExplicitSignup(meta: UniqueViolationMeta | undefined, names: string[]): boolean {
-  if (
-    names.some((name) => name === SIGNUP_MEMBERSHIP_INDEX || name.includes(SIGNUP_MEMBERSHIP_INDEX))
-  ) {
-    return true;
-  }
-  if (names.includes('memberships.userId')) return true;
-  const target = targetParts(meta?.target);
-  return isMembershipModel(meta) && target.length === 1 && target[0] === 'userId';
-}
-
 /**
  * `target` can be null when the violating insert ran under row-level security.
- * That happens for declared indexes too (seen on
- * `integrations_orgId_provider_displayName_key`). `platformOwner()` bypasses
- * RLS, so a create-org insert usually reports a concrete target. A null or
- * otherwise unresolvable Membership target is not assumed to be the signup
- * index; the caller re-checks whether an active `viaSignup` row exists.
+ * `platformOwner()` bypasses RLS and usually reports `['userId']`. A null,
+ * empty, or missing Membership target is not assumed to be the one-active
+ * index; the caller re-checks whether any active membership exists.
  */
 function membershipTargetUnresolvable(meta: UniqueViolationMeta | undefined): boolean {
   if (!isMembershipModel(meta)) return false;
@@ -504,41 +683,79 @@ function membershipTargetUnresolvable(meta: UniqueViolationMeta | undefined): bo
   return targetParts(target).length === 0;
 }
 
-export type CreateOrgUniqueMapping =
-  { action: 'conflict'; exception: ConflictException } | { action: 'recheck-active-signup' };
-
 /**
- * Create-org P2002 → 409. Exact targets only, never a 500:
- * slug → slug taken; the signup index (or `memberships.userId`) → already in an org;
- * a Membership target that is null or unresolvable → `recheck-active-signup`;
- * any other unique target → generic Conflict.
- * Returns null when `err` is not a P2002.
+ * Classify a P2002. The caller picks the 409 text.
+ * slug; Membership target exactly `['userId']` or a name containing
+ * `memberships_userId_active_key` → one-active; a null, empty, or missing
+ * Membership target → recheck; anything else, including the membership PK
+ * and a tokenHash collision → conflict. Returns null when `err` is not a P2002.
  */
-export function mapCreateOrgUniqueViolation(err: unknown): CreateOrgUniqueMapping | null {
+export function classifyMembershipUniqueViolation(err: unknown): MembershipUniqueClass | null {
   if (!isUniqueViolation(err)) return null;
   const names = [...targetParts(err.meta?.target), ...targetParts(err.meta?.constraint)];
-  if (namesToken(names, 'slug')) {
-    return { action: 'conflict', exception: new ConflictException(SLUG_TAKEN) };
+  if (namesToken(names, 'slug')) return 'slug';
+  if (names.some((name) => name.includes(ACTIVE_MEMBERSHIP_INDEX))) return 'one-active';
+  const target = targetParts(err.meta?.target);
+  if (isMembershipModel(err.meta) && target.length === 1 && target[0] === 'userId') {
+    return 'one-active';
   }
-  if (namesExplicitSignup(err.meta, names)) {
+  if (membershipTargetUnresolvable(err.meta)) return 'recheck';
+  return 'conflict';
+}
+
+/**
+ * Create-org view of {@link classifyMembershipUniqueViolation}.
+ * slug and one-active are conflicts; an unresolvable Membership target is `recheck`.
+ */
+export function mapCreateOrgUniqueViolation(err: unknown): CreateOrgUniqueMapping | null {
+  const kind = classifyMembershipUniqueViolation(err);
+  if (!kind) return null;
+  if (kind === 'slug') return { action: 'conflict', exception: new ConflictException(SLUG_TAKEN) };
+  if (kind === 'one-active') {
     return { action: 'conflict', exception: new ConflictException(ALREADY_IN_ORG) };
   }
-  if (membershipTargetUnresolvable(err.meta)) return { action: 'recheck-active-signup' };
+  if (kind === 'recheck') return { action: 'recheck' };
   return { action: 'conflict', exception: new ConflictException('Conflict') };
 }
 
 /**
+ * Finish a P2002 outside the aborted transaction.
+ * `readHasActiveMembership` runs only for `recheck`, and it must be one owner-client read.
+ * `mapSlug: false` turns a slug violation into a generic Conflict (accept paths).
+ */
+export async function resolveMembershipUniqueViolation(
+  err: unknown,
+  readHasActiveMembership: () => Promise<boolean>,
+  oneActiveException: () => HttpException,
+  options?: { mapSlug?: boolean },
+): Promise<HttpException | null> {
+  const kind = classifyMembershipUniqueViolation(err);
+  if (!kind) return null;
+  if (kind === 'slug') {
+    if (options?.mapSlug === false) return new ConflictException('Conflict');
+    return new ConflictException(SLUG_TAKEN);
+  }
+  if (kind === 'one-active') return oneActiveException();
+  if (kind === 'recheck') {
+    const active = await readHasActiveMembership();
+    return active ? oneActiveException() : new ConflictException('Conflict');
+  }
+  return new ConflictException('Conflict');
+}
+
+/**
  * Finish a create-org P2002 outside the aborted transaction.
- * `readActiveViaSignup` runs only for an unresolvable Membership target,
- * and it must be a single owner-client read.
+ * The recheck reads any active membership, not only `viaSignup` rows.
  */
 export async function resolveCreateOrgUniqueViolation(
   err: unknown,
-  readActiveViaSignup: () => Promise<boolean>,
+  readHasActiveMembership: () => Promise<boolean>,
 ): Promise<ConflictException | null> {
-  const mapped = mapCreateOrgUniqueViolation(err);
-  if (!mapped) return null;
-  if (mapped.action === 'conflict') return mapped.exception;
-  const active = await readActiveViaSignup();
-  return new ConflictException(active ? ALREADY_IN_ORG : 'Conflict');
+  const resolved = await resolveMembershipUniqueViolation(
+    err,
+    readHasActiveMembership,
+    () => new ConflictException(ALREADY_IN_ORG),
+  );
+  if (!resolved) return null;
+  return resolved instanceof ConflictException ? resolved : new ConflictException(ALREADY_IN_ORG);
 }

@@ -62,13 +62,15 @@ model Membership {
   orgId      String    @db.Uuid
   userId     String    @db.Uuid
   role       String
-  /// Soft-disable: next JWT resolve 403s. User row is kept (other orgs may exist).
+  /// Soft-disable. A disabled row is not an active membership. The user row is kept.
   disabledAt DateTime?
-  /// Signup membership. One active row per user is enforced by partial unique
-  /// index `memberships_userId_signup_active_key` in
-  /// `libs/db/prisma/migrations/20261006160000_membership_signup_unique`
-  /// (`WHERE "viaSignup" AND "disabledAt" IS NULL`). Invites leave this false.
-  /// Prisma cannot model partial indexes, so the index lives only in that migration.
+  /// Provenance only. True solely for the membership written by self-serve
+  /// create-org. Invites and re-enables leave this false. One active membership
+  /// per user (`disabledAt` IS NULL) is enforced by partial unique index
+  /// `memberships_userId_active_key` in
+  /// `libs/db/prisma/migrations/20261007124500_membership_one_active`
+  /// (`WHERE "disabledAt" IS NULL`). Prisma cannot model partial indexes, so
+  /// the index lives only in that migration.
   viaSignup  Boolean   @default(false)
   createdAt  DateTime  @default(now())
 
@@ -80,7 +82,8 @@ model Membership {
   @@map("memberships")
 }
 
-/// CTEM-side invite. Becomes a Membership on first login when claims.email matches.
+/// CTEM-side invite. Membership is created by token accept, or by verified
+/// email-match when the user has no active membership. Only `tokenHash` is stored.
 /// Keycloak Admin API is not used (no fail-closed allowlist in deploy).
 model MembershipInvite {
   id         String    @id @default(uuid()) @db.Uuid

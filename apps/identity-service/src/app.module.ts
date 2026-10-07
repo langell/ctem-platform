@@ -9,6 +9,7 @@ import { HealthController } from '@ctem/service-kit';
 import { OrgController } from './org/org.controller';
 import { AuthResolveController } from './org/auth-resolve.controller';
 import { CreateOrgController } from './org/create-org.controller';
+import { InviteAcceptController } from './org/invite-accept.controller';
 import { OrgService } from './org/org.service';
 import { ApiTokenService } from './tokens/api-token.service';
 import { ApiTokenController } from './tokens/api-token.controller';
@@ -20,6 +21,7 @@ import { ApiTokenController } from './tokens/api-token.controller';
     OrgController,
     AuthResolveController,
     CreateOrgController,
+    InviteAcceptController,
     ApiTokenController,
   ],
   providers: [OrgService, ApiTokenService, { provide: APP_GUARD, useClass: InternalAuthGuard }],

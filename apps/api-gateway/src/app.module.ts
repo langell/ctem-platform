@@ -14,6 +14,7 @@ import { ScansProxyController } from './routes/scans.controller';
 import { MetersProxyController } from './routes/meters.controller';
 import { FindingsProxyController } from './routes/findings.controller';
 import { OrgMembersProxyController } from './routes/org-members.controller';
+import { InvitesProxyController } from './routes/invites.controller';
 import { OrgsProxyController } from './routes/orgs.controller';
 import { PoliciesProxyController } from './routes/policies.controller';
 import { SessionController } from './routes/session.controller';
@@ -37,6 +38,7 @@ import { RateLimitMiddleware } from './rate-limit.middleware';
     PoliciesProxyController,
     OrgMembersProxyController,
     OrgsProxyController,
+    InvitesProxyController,
   ],
   providers: [
     ServiceProxy,

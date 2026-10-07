@@ -40,20 +40,18 @@
           }
         },
         {
-          "name": "org_id",
+          "name": "email_verified",
           "protocol": "openid-connect",
-          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "protocolMapper": "oidc-usermodel-property-mapper",
           "consentRequired": false,
           "config": {
-            "user.attribute": "org_id",
-            "claim.name": "org_id",
-            "jsonType.label": "String",
+            "user.attribute": "emailVerified",
+            "claim.name": "email_verified",
+            "jsonType.label": "boolean",
             "id.token.claim": "true",
             "access.token.claim": "true",
             "userinfo.token.claim": "false",
-            "introspection.token.claim": "true",
-            "multivalued": "false",
-            "aggregate.attrs": "false"
+            "introspection.token.claim": "true"
           }
         },
         {
@@ -125,20 +123,18 @@
           }
         },
         {
-          "name": "org_id",
+          "name": "email_verified",
           "protocol": "openid-connect",
-          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "protocolMapper": "oidc-usermodel-property-mapper",
           "consentRequired": false,
           "config": {
-            "user.attribute": "org_id",
-            "claim.name": "org_id",
-            "jsonType.label": "String",
+            "user.attribute": "emailVerified",
+            "claim.name": "email_verified",
+            "jsonType.label": "boolean",
             "id.token.claim": "true",
             "access.token.claim": "true",
             "userinfo.token.claim": "false",
-            "introspection.token.claim": "true",
-            "multivalued": "false",
-            "aggregate.attrs": "false"
+            "introspection.token.claim": "true"
           }
         },
         {
@@ -187,10 +183,23 @@
           "temporary": false
         }
       ],
-      "realmRoles": ["owner"],
-      "attributes": {
-        "org_id": ["c7e00000-0000-4000-8000-000000000001"]
-      }
+      "realmRoles": ["owner"]
+    },
+    {
+      "id": "demo|developer",
+      "username": "developer",
+      "email": "developer@demo.test",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Demo",
+      "lastName": "Developer",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "demo",
+          "temporary": false
+        }
+      ]
     }
   ]
 }
