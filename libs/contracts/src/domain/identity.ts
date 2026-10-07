@@ -148,6 +148,8 @@ export const ResolveMembershipsRequest = z
     sub: z.string().min(1),
     email: z.string().email().optional(),
     name: z.string().min(1).optional(),
+    /** True only when the IdP claim `email_verified` is boolean true. */
+    emailVerified: z.boolean().optional(),
   })
   .strict();
 export type ResolveMembershipsRequest = z.infer<typeof ResolveMembershipsRequest>;
@@ -169,6 +171,29 @@ export const ResolveJwtResponse = z.object({
   role: Role,
 });
 export type ResolveJwtResponse = z.infer<typeof ResolveJwtResponse>;
+
+/** Public invite accept. The token is the only client field; a bad token is not a 400. */
+export const AcceptInviteRequest = z
+  .object({
+    token: z.string(),
+  })
+  .strict();
+export type AcceptInviteRequest = z.infer<typeof AcceptInviteRequest>;
+
+/** Gateway → identity. `sub` is the verified JWT subject, never a client field. */
+export const InternalAcceptInviteRequest = z
+  .object({
+    sub: z.string().min(1),
+    token: z.string(),
+  })
+  .strict();
+export type InternalAcceptInviteRequest = z.infer<typeof InternalAcceptInviteRequest>;
+
+export const AcceptInviteResponse = z.object({
+  orgId: OrgId,
+  role: Role,
+});
+export type AcceptInviteResponse = z.infer<typeof AcceptInviteResponse>;
 
 /**
  * The request-scoped identity every service receives. For humans it is derived

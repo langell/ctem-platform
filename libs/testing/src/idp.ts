@@ -17,6 +17,8 @@ export interface TestTokenClaims {
   roles?: string[];
   email?: string;
   name?: string;
+  /** Boolean true is the only value email-match treats as verified. */
+  emailVerified?: boolean | string;
   audience?: string;
   /** Seconds until expiry; negative values produce an already-expired token. */
   expiresIn?: number;
@@ -66,6 +68,7 @@ export class TestIdp {
       roles = ['developer'],
       email,
       name,
+      emailVerified,
       audience = 'ctem-api',
       expiresIn = 300,
     } = claims;
@@ -74,6 +77,7 @@ export class TestIdp {
       roles,
       ...(email ? { email } : {}),
       ...(name ? { name } : {}),
+      ...(emailVerified !== undefined ? { email_verified: emailVerified } : {}),
     })
       .setProtectedHeader({ alg: 'RS256', kid: this.kid })
       .setSubject(sub)

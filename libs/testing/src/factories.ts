@@ -117,11 +117,9 @@ export async function deleteOrgCascade(
 }
 
 /**
- * Stable demo tenant. The demo user's Keycloak `org_id` attribute is mapped
- * onto the access token so browser OIDC and `make demo-token` issue this org
- * after JWKS verify, without a client-supplied org id. Users without the
- * attribute get no `org_id` claim.
- * Must stay in lockstep with deploy/keycloak/ctem-realm.json.
+ * Stable demo tenant. Membership is the AuthZ source of truth. The access
+ * token does not carry `org_id`; the gateway uses the subject's single active
+ * membership. Must stay in lockstep with deploy/keycloak/ctem-realm.json.
  */
 export const DEMO_ORG_ID = 'c7e00000-0000-4000-8000-000000000001';
 export const DEMO_ORG_SLUG = 'demo';
@@ -184,10 +182,11 @@ export async function seedDemoOrg(prisma: PrismaClient) {
   });
 
   // Membership is AuthZ for the demo analyst. JWT `roles` are ignored after
-  // verify; Keycloak `sub`/`org_id` must match this row or login 403s.
+  // verify; Keycloak `sub` must match this row or login 403s. viaSignup stays
+  // false so a demo user who is already active elsewhere fails the one-active index.
   await prisma.membership.upsert({
     where: { orgId_userId: { orgId: org.id, userId: user.id } },
-    update: { role: 'owner', disabledAt: null },
+    update: { role: 'owner', disabledAt: null, viaSignup: false },
     create: { orgId: org.id, userId: user.id, role: 'owner' },
   });
 
@@ -203,7 +202,7 @@ export async function seedDemoOrg(prisma: PrismaClient) {
   });
   await prisma.membership.upsert({
     where: { orgId_userId: { orgId: org.id, userId: developer.id } },
-    update: { role: 'developer', disabledAt: null },
+    update: { role: 'developer', disabledAt: null, viaSignup: false },
     create: { orgId: org.id, userId: developer.id, role: 'developer' },
   });
 

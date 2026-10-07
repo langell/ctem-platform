@@ -6,8 +6,10 @@ export interface VerifiedToken extends JWTPayload {
   sub: string;
   email?: string;
   name?: string;
-  /** Org selected for this session; a user may belong to several. */
+  /** Present on some tokens. A consistency check only; membership is the source of truth. */
   org_id?: string;
+  /** IdP boolean. The string `"true"` does not count. */
+  email_verified?: boolean;
   /** Present on some IdP tokens; ignored for AuthZ (Membership is source of truth). */
   roles?: string[];
 }

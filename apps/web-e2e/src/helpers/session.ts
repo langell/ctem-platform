@@ -4,7 +4,7 @@ import { expect, type Page } from '@playwright/test';
 export const TOKEN_STORAGE_KEY = 'ctem.gateway.token';
 const PAT_PREFIX = 'ctem_pat_';
 
-/** Demo analyst access token carries this org_id via the Keycloak user-attribute mapper. */
+/** Seeded demo org. The access token does not carry org_id; session org comes from membership. */
 export const DEMO_ORG_ID = 'c7e00000-0000-4000-8000-000000000001';
 
 export function isJwtAccessToken(token: string): boolean {
@@ -42,8 +42,9 @@ export async function readAllSessionStorage(page: Page): Promise<Record<string, 
 }
 
 /**
- * Fail-closed session bar: JWT stored, org from that JWT, no PAT anywhere
- * in sessionStorage. Empty/missing storage is a failure, not a skip.
+ * Fail-closed session bar: JWT stored, no org_id claim, GET /v1/session org
+ * is the seeded demo membership, no PAT anywhere in sessionStorage.
+ * Empty/missing storage is a failure, not a skip.
  */
 export async function expectJwtSession(page: Page): Promise<string> {
   const stored = await readAllSessionStorage(page);
@@ -68,11 +69,17 @@ export async function expectJwtSession(page: Page): Promise<string> {
   }
 
   const payload = decodeJwtPayload(token);
-  const orgId = payload.org_id;
-  if (typeof orgId !== 'string' || !orgId) {
-    throw new Error('JWT is missing org_id — org must come from the token, not the client');
-  }
-  expect(orgId, 'demo analyst JWT org_id must match the seeded Keycloak claim').toBe(DEMO_ORG_ID);
+  expect(payload.org_id, 'JWT must not carry org_id').toBeUndefined();
+
+  const session = await page.evaluate(async (accessToken) => {
+    const res = await fetch('/v1/session', {
+      headers: { authorization: `Bearer ${accessToken}`, accept: 'application/json' },
+    });
+    const body = (await res.json()) as { orgId?: string };
+    return { status: res.status, orgId: body.orgId };
+  }, token);
+  expect(session.status, 'GET /v1/session').toBe(200);
+  expect(session.orgId, 'session org is the seeded demo membership').toBe(DEMO_ORG_ID);
   return token;
 }
 
